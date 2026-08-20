@@ -60,12 +60,19 @@ cargo check           # from src-tauri/ — compile the Rust side
 index.html            Sets data-theme before first paint
 src/
   main.tsx            React entry
-  App.tsx             Phase 1 shell — replaced by the editor in Phase 2
+  App.tsx             Top bar and the writing surface
   components/
+  editor/
+    Editor.tsx        TipTap instance and the drag handle
+    extensions.ts     The block vocabulary
+    initialContent.ts Seed document — Phase 2 has no persistence
+    icons.tsx         Inline SVGs, all currentColor
+    slash/            The / menu: matching, items, and the popover
   theme/theme.ts      Theme preference, persistence, and OS following
   styles/
     tokens.css        Every colour in the app. The source of truth.
     index.css         Fonts, Tailwind, token bridging, base styles
+    editor.css        Prose and editor chrome, plain CSS against the tokens
 src-tauri/
   src/main.rs         Tauri builder and commands
   tauri.conf.json     Window, CSP, bundle config
@@ -107,7 +114,7 @@ an earlier one is open.
 - [x] **Phase 0 — toolchain.** Rust, Node, Tauri prerequisites. Git repo.
 - [x] **Phase 1 — scaffold.** Tauri v2 + React + TS + Vite + Tailwind. A window
       opens, Source Sans 3 loads, both themes are defined and switchable.
-- [ ] **Phase 2 — block editor.** TipTap, core blocks, slash commands, drag
+- [x] **Phase 2 — block editor.** TipTap, core blocks, slash commands, drag
       handles, visual identity applied. In-memory only.
 - [ ] **Phase 3 — storage in Rust.** Vault selection, markdown + frontmatter
       read/write, autosave, file watching.
