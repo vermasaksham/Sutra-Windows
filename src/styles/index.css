@@ -8,6 +8,7 @@
 
 @import "tailwindcss";
 @import "./tokens.css";
+@import "./editor.css";
 
 /*
  * Bridge the raw tokens into Tailwind's theme so utilities exist for them.

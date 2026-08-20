@@ -1,0 +1,345 @@
+/*
+ * Editor surface.
+ *
+ * Written as plain CSS against the tokens rather than Tailwind utilities: the
+ * editor renders nodes ProseMirror creates, so there is no JSX to hang classes
+ * on. Same rule applies — every colour is a variable.
+ */
+
+.sutra-prose {
+  outline: none;
+  /* Room to click below the last block without hunting for it. */
+  padding-block-end: 30vh;
+}
+
+/* --- Vertical rhythm ---------------------------------------------------- */
+
+.sutra-prose > * + * {
+  margin-block-start: 0.5rem;
+}
+
+.sutra-prose p {
+  line-height: var(--leading-body);
+}
+
+.sutra-prose h1,
+.sutra-prose h2,
+.sutra-prose h3 {
+  font-weight: 600;
+  line-height: 1.25;
+  letter-spacing: -0.011em;
+  color: var(--text-primary);
+}
+
+.sutra-prose h1 {
+  font-size: 1.875rem;
+}
+.sutra-prose h2 {
+  font-size: 1.5rem;
+}
+.sutra-prose h3 {
+  font-size: 1.25rem;
+}
+
+/* Headings need air above them, but not when they open the document. */
+.sutra-prose > h1 + *,
+.sutra-prose > h2 + *,
+.sutra-prose > h3 + * {
+  margin-block-start: 0.375rem;
+}
+.sutra-prose > * + h1 {
+  margin-block-start: 2rem;
+}
+.sutra-prose > * + h2 {
+  margin-block-start: 1.75rem;
+}
+.sutra-prose > * + h3 {
+  margin-block-start: 1.5rem;
+}
+
+/* --- Placeholder -------------------------------------------------------- */
+
+.sutra-prose .is-empty::before {
+  content: attr(data-placeholder);
+  color: var(--text-muted);
+  float: left;
+  height: 0;
+  pointer-events: none;
+}
+
+/* --- Inline ------------------------------------------------------------- */
+
+.sutra-prose .sutra-link {
+  color: var(--accent);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+
+.sutra-prose code {
+  font-family: var(--font-mono);
+  font-size: 0.875em;
+  background-color: var(--highlight-bg);
+  color: var(--highlight);
+  padding: 0.1em 0.35em;
+  border-radius: 4px;
+}
+
+.sutra-prose mark {
+  background-color: var(--highlight-bg);
+  color: var(--highlight);
+  border-radius: 2px;
+  padding: 0 0.15em;
+}
+
+/* --- Lists -------------------------------------------------------------- */
+
+.sutra-prose ul,
+.sutra-prose ol {
+  padding-inline-start: 1.5rem;
+}
+
+.sutra-prose ul {
+  list-style: disc;
+}
+.sutra-prose ol {
+  list-style: decimal;
+}
+.sutra-prose ul ul {
+  list-style: circle;
+}
+
+.sutra-prose li::marker {
+  color: var(--text-muted);
+}
+
+.sutra-prose li > p {
+  margin: 0;
+}
+
+.sutra-prose li + li {
+  margin-block-start: 0.125rem;
+}
+
+/* Checkboxes. The list itself carries no marker — the input is the marker. */
+.sutra-prose ul[data-type="taskList"] {
+  list-style: none;
+  padding-inline-start: 0;
+}
+
+.sutra-prose ul[data-type="taskList"] li {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.6rem;
+}
+
+.sutra-prose ul[data-type="taskList"] li > label {
+  /* Nudge the box onto the text baseline rather than the line box top. */
+  margin-block-start: 0.28em;
+  flex-shrink: 0;
+  display: flex;
+}
+
+.sutra-prose ul[data-type="taskList"] li > div {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.sutra-prose input[type="checkbox"] {
+  appearance: none;
+  width: 1rem;
+  height: 1rem;
+  border: 1.5px solid var(--border);
+  border-radius: 4px;
+  background-color: var(--surface);
+  cursor: pointer;
+  display: grid;
+  place-content: center;
+  transition:
+    background-color var(--duration-fast) var(--ease-out),
+    border-color var(--duration-fast) var(--ease-out);
+}
+
+.sutra-prose input[type="checkbox"]:hover {
+  border-color: var(--accent);
+}
+
+.sutra-prose input[type="checkbox"]:checked {
+  background-color: var(--accent);
+  border-color: var(--accent);
+}
+
+.sutra-prose input[type="checkbox"]:checked::after {
+  content: "";
+  width: 0.55rem;
+  height: 0.32rem;
+  border-inline-start: 2px solid var(--surface);
+  border-block-end: 2px solid var(--surface);
+  transform: translateY(-1px) rotate(-45deg);
+}
+
+/* A ticked item recedes; it is done. */
+.sutra-prose li[data-checked="true"] > div {
+  color: var(--text-muted);
+  text-decoration: line-through;
+}
+
+/* --- Blocks ------------------------------------------------------------- */
+
+.sutra-prose blockquote {
+  border-inline-start: 3px solid var(--border);
+  padding-inline-start: 1rem;
+  color: var(--text-secondary);
+  font-style: italic;
+}
+
+.sutra-prose pre {
+  font-family: var(--font-mono);
+  font-size: 0.875rem;
+  line-height: 1.6;
+  background-color: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.875rem 1rem;
+  overflow-x: auto;
+}
+
+/* Inside a code block the inline-code chip styling must not apply. */
+.sutra-prose pre code {
+  background: none;
+  color: var(--text-primary);
+  padding: 0;
+  font-size: inherit;
+}
+
+.sutra-prose hr {
+  border: none;
+  border-block-start: 1px solid var(--border);
+  margin-block: 1.5rem;
+}
+
+/* Selected divider — it has no text, so it needs its own selected state. */
+.sutra-prose hr.ProseMirror-selectednode {
+  border-block-start-color: var(--accent);
+}
+
+.sutra-image {
+  max-width: 100%;
+  height: auto;
+  border-radius: 8px;
+  display: block;
+}
+
+.sutra-image.ProseMirror-selectednode {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* --- Tables ------------------------------------------------------------- */
+
+.sutra-prose table {
+  border-collapse: collapse;
+  table-layout: fixed;
+  width: 100%;
+  margin-block: 1rem;
+  overflow: hidden;
+}
+
+.sutra-prose th,
+.sutra-prose td {
+  border: 1px solid var(--border);
+  padding: 0.4rem 0.6rem;
+  vertical-align: top;
+  position: relative;
+  min-width: 3rem;
+}
+
+.sutra-prose th {
+  background-color: var(--surface);
+  font-weight: 600;
+  text-align: start;
+}
+
+.sutra-prose td > p,
+.sutra-prose th > p {
+  margin: 0;
+}
+
+.sutra-prose .selectedCell::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background-color: var(--accent-bg);
+  opacity: 0.6;
+  pointer-events: none;
+}
+
+.sutra-prose .column-resize-handle {
+  position: absolute;
+  inset-block: 0;
+  inset-inline-end: -2px;
+  width: 3px;
+  background-color: var(--accent);
+  cursor: col-resize;
+}
+
+/* --- Selection ---------------------------------------------------------- */
+
+.sutra-prose ::selection {
+  background-color: var(--accent-bg);
+}
+
+.sutra-prose .ProseMirror-gapcursor::after {
+  border-block-start-color: var(--text-primary);
+}
+
+/* --- Drag handle -------------------------------------------------------- */
+
+/*
+ * Revealed on approach, not always present. The handle is portalled to the
+ * body by the extension and positioned next to whichever block the pointer is
+ * over; it fades rather than pops.
+ */
+.sutra-drag-handle {
+  display: grid;
+  -webkit-user-select: none;
+  user-select: none;
+  place-items: center;
+  width: 1.5rem;
+  height: 1.5rem;
+  margin-inline-end: 0.25rem;
+  border-radius: 6px;
+  color: var(--text-muted);
+  background-color: transparent;
+  cursor: grab;
+  transition: background-color var(--duration-fast) var(--ease-out);
+}
+
+/*
+ * The extension reveals and hides its wrapper by setting `visibility` inline,
+ * which cannot be transitioned. We take the reveal over: force the wrapper
+ * permanently visible, then drive opacity ourselves so the handle fades in
+ * and out instead of blinking. `!important` is deliberate — it is the only
+ * way to outrank the library's inline style. `pointer-events` keeps the
+ * faded-out handle inert.
+ */
+.sutra-drag-handle-wrapper {
+  visibility: visible !important;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--duration-fast) var(--ease-out);
+}
+
+.sutra-drag-handle-wrapper:not([style*="visibility: hidden"]) {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.sutra-drag-handle:hover {
+  background-color: var(--accent-bg);
+  color: var(--accent);
+}
+
+.sutra-drag-handle:active {
+  cursor: grabbing;
+}

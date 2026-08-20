@@ -1,0 +1,184 @@
+import { useEffect, useImperativeHandle, useRef, useState } from "react";
+import type { Ref } from "react";
+import type { SlashItem } from "./items";
+
+export type SlashMenuHandle = {
+  /** Returns true when the menu consumed the key, so the editor ignores it. */
+  onKeyDown: (event: KeyboardEvent) => boolean;
+};
+
+type Props = {
+  items: SlashItem[];
+  onSelect: (item: SlashItem, value?: string) => void;
+  onDismiss: () => void;
+  ref?: Ref<SlashMenuHandle>;
+};
+
+export default function SlashMenu({ items, onSelect, onDismiss, ref }: Props) {
+  const [selected, setSelected] = useState(0);
+  // When an item needs a value first (currently only Image), the menu swaps to
+  // a single input rather than opening a second floating surface.
+  const [prompting, setPrompting] = useState<SlashItem | null>(null);
+  const [value, setValue] = useState("");
+  const listRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  // The item list is re-filtered on every keystroke; keep the highlight in range.
+  useEffect(() => setSelected(0), [items]);
+
+  useEffect(() => {
+    if (prompting) inputRef.current?.focus();
+  }, [prompting]);
+
+  // Keep the highlighted row visible without scrolling the page behind it.
+  useEffect(() => {
+    listRef.current
+      ?.querySelector<HTMLElement>('[data-selected="true"]')
+      ?.scrollIntoView({ block: "nearest" });
+  }, [selected]);
+
+  function choose(item: SlashItem) {
+    if (item.prompt) {
+      setPrompting(item);
+      setValue("");
+      return;
+    }
+    onSelect(item);
+  }
+
+  useImperativeHandle(ref, () => ({
+    onKeyDown(event) {
+      // While prompting, the input owns the keyboard apart from Escape.
+      if (prompting) {
+        if (event.key === "Escape") {
+          setPrompting(null);
+          return true;
+        }
+        return false;
+      }
+
+      if (event.key === "ArrowDown") {
+        setSelected((i) => (i + 1) % Math.max(items.length, 1));
+        return true;
+      }
+      if (event.key === "ArrowUp") {
+        setSelected((i) => (i - 1 + items.length) % Math.max(items.length, 1));
+        return true;
+      }
+      if (event.key === "Enter") {
+        const item = items[selected];
+        if (item) choose(item);
+        return true;
+      }
+      if (event.key === "Escape") {
+        onDismiss();
+        return true;
+      }
+      return false;
+    },
+  }));
+
+  if (prompting) {
+    return (
+      <div className="w-80 rounded-xl border border-border bg-surface p-3 shadow-lg shadow-black/5">
+        <label
+          htmlFor="sutra-slash-prompt"
+          className="mb-1.5 block text-xs font-semibold text-ink-soft"
+        >
+          {prompting.prompt?.label}
+        </label>
+        <input
+          id="sutra-slash-prompt"
+          ref={inputRef}
+          value={value}
+          placeholder={prompting.prompt?.placeholder}
+          onChange={(e) => setValue(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              onSelect(prompting, value);
+            }
+            if (e.key === "Escape") {
+              e.preventDefault();
+              setPrompting(null);
+            }
+          }}
+          className="w-full rounded-md border border-border bg-canvas px-2.5 py-1.5 text-sm text-ink placeholder:text-ink-muted"
+        />
+      </div>
+    );
+  }
+
+  if (items.length === 0) {
+    return (
+      <div className="w-72 rounded-xl border border-border bg-surface px-3 py-2.5 text-sm text-ink-muted shadow-lg shadow-black/5">
+        No blocks match
+      </div>
+    );
+  }
+
+  let lastGroup: string | null = null;
+
+  return (
+    <div
+      ref={listRef}
+      role="listbox"
+      aria-label="Insert block"
+      className="max-h-80 w-72 overflow-y-auto rounded-xl border border-border bg-surface p-1 shadow-lg shadow-black/5"
+    >
+      {items.map((item, index) => {
+        const isSelected = index === selected;
+        const showGroup = item.group !== lastGroup;
+        lastGroup = item.group;
+        const Icon = item.icon;
+
+        return (
+          <div key={item.id}>
+            {showGroup && (
+              <div className="px-2 pt-2 pb-1 text-[11px] font-semibold tracking-wide text-ink-muted uppercase">
+                {item.group}
+              </div>
+            )}
+            <button
+              type="button"
+              role="option"
+              aria-selected={isSelected}
+              data-selected={isSelected}
+              // Mouse hover moves the highlight so keyboard and pointer agree.
+              onMouseEnter={() => setSelected(index)}
+              // The editor still holds focus; taking it here would close the menu.
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => choose(item)}
+              className={[
+                "flex w-full items-center gap-2.5 rounded-lg px-2 py-1.5 text-left transition-colors duration-150 ease-out",
+                isSelected ? "bg-accent-bg" : "bg-transparent",
+              ].join(" ")}
+            >
+              <span
+                className={[
+                  "grid size-8 shrink-0 place-items-center rounded-md border border-border",
+                  isSelected ? "text-accent" : "text-ink-soft",
+                ].join(" ")}
+              >
+                <Icon className="size-4" />
+              </span>
+              <span className="min-w-0">
+                <span
+                  className={[
+                    "block truncate text-sm leading-tight",
+                    isSelected ? "text-accent" : "text-ink",
+                  ].join(" ")}
+                >
+                  {item.title}
+                </span>
+                <span className="block truncate text-xs leading-tight text-ink-muted">
+                  {item.hint}
+                </span>
+              </span>
+            </button>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
