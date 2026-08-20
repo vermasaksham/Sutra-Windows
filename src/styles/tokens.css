@@ -1,0 +1,81 @@
+/*
+ * Design tokens — the single source of truth for every colour in Sutra.
+ *
+ * Rule (from the spec, non-negotiable): no component ever hardcodes a colour.
+ * Components reference these variables, directly or through the Tailwind
+ * aliases declared in index.css.
+ *
+ * Theming is one attribute: <html data-theme="light|dark">. `:root` carries
+ * the light palette, and the dark block overrides the same names. Because the
+ * names are identical, nothing downstream needs to know which theme is active.
+ *
+ * The neutrals are warm, not grey. That is deliberate — keep it.
+ */
+
+:root {
+  /* Surfaces */
+  --canvas: #faf8f5;
+  --surface: #ffffff;
+  --border: #e7e1d7;
+
+  /* Text */
+  --text-primary: #211f1b;
+  --text-secondary: #6e6960;
+  --text-muted: #8a8478;
+
+  /* Indigo — links and interactive accents */
+  --accent: #4a45a8;
+  --accent-bg: #edecf7;
+
+  /* Saffron — highlights and tags only. Nothing else. */
+  --highlight: #a6660f;
+  --highlight-bg: #faf0e2;
+
+  /* Tells the OS to draw scrollbars and form controls to match. */
+  color-scheme: light;
+}
+
+[data-theme="dark"] {
+  --canvas: #1a1815;
+  --surface: #232019;
+  --border: #332f29;
+
+  /* Off-white, never pure white. */
+  --text-primary: #ede9e2;
+  --text-secondary: #9a9488;
+  --text-muted: #857f74;
+
+  --accent: #a9a4e8;
+  --accent-bg: #2a2748;
+
+  --highlight: #e0b463;
+  --highlight-bg: #3a2c16;
+
+  color-scheme: dark;
+}
+
+:root {
+  /* Typography — Notion/Apple Notes density. */
+  --font-body: "Source Sans 3", ui-sans-serif, system-ui, -apple-system,
+    "Segoe UI", sans-serif;
+  --font-mono: ui-monospace, "Cascadia Mono", "Consolas", monospace;
+
+  --text-size-body: 1rem; /* 16px */
+  --leading-body: 1.65;
+
+  /* Layout */
+  --content-width: 700px;
+
+  /* Motion — snappy, never floaty. */
+  --ease-out: cubic-bezier(0.2, 0, 0, 1);
+  --duration-fast: 150ms;
+  --duration-normal: 200ms;
+}
+
+/* Respect the OS setting for people who ask for less movement. */
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --duration-fast: 0ms;
+    --duration-normal: 0ms;
+  }
+}
