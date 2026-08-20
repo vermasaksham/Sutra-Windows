@@ -1,0 +1,21 @@
+[package]
+name = "sutra"
+version = "0.1.0"
+description = "Local-first, block-based notes for materials-chemistry research"
+edition = "2024"
+rust-version = "1.85"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+
+[profile.release]
+# Smaller, faster binaries for shipping. `panic = "abort"` drops the unwinding
+# machinery: if the app panics it dies rather than trying to recover.
+codegen-units = 1
+lto = true
+opt-level = "s"
+panic = "abort"
+strip = true

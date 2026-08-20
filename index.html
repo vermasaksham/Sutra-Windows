@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Sutra</title>
+    <script>
+      // Runs before first paint so the window never flashes light-on-dark.
+      // Mirrors resolveTheme() in src/theme/theme.ts — keep the two in step.
+      (function () {
+        try {
+          var stored = localStorage.getItem("sutra.theme");
+          var pref = stored === "light" || stored === "dark" || stored === "system" ? stored : "system";
+          var resolved =
+            pref === "system"
+              ? window.matchMedia("(prefers-color-scheme: dark)").matches
+                ? "dark"
+                : "light"
+              : pref;
+          document.documentElement.dataset.theme = resolved;
+        } catch (_) {
+          document.documentElement.dataset.theme = "light";
+        }
+      })();
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
