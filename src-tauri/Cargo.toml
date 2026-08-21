@@ -9,7 +9,15 @@ rust-version = "1.85"
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
+notify-debouncer-full = "0.5"
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.151"
+serde_yaml_ng = "0.10"
 tauri = { version = "2", features = [] }
+tauri-plugin-dialog = "2"
+thiserror = "2"
+time = { version = "0.3.45", features = ["formatting", "parsing", "serde-well-known", "macros"] }
+ulid = "3"
 
 [profile.release]
 # Smaller, faster binaries for shipping. `panic = "abort"` drops the unwinding

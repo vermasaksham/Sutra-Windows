@@ -1,0 +1,522 @@
+//! The vault: a directory of markdown files, and the operations on it.
+
+use crate::error::{Result, SutraError};
+use crate::frontmatter::{self, Frontmatter};
+use crate::note;
+use serde::Serialize;
+use std::fs;
+use std::path::{Path, PathBuf};
+use time::OffsetDateTime;
+use ulid::Ulid;
+
+/// Sidecar directories. Notes themselves stay flat in the root — hierarchy is
+/// frontmatter, never folders — but deleted notes and attachments need
+/// somewhere to live that is not the note namespace.
+const ATTACHMENTS: &str = "attachments";
+const TRASH: &str = "trash";
+
+/// A note's metadata without its body. This is what the sidebar needs, and
+/// loading bodies for a whole vault to draw a tree would be wasteful.
+#[derive(Debug, Clone, Serialize)]
+pub struct NoteSummary {
+    pub id: String,
+    pub title: String,
+    pub parent: Option<String>,
+    pub position: i64,
+    pub tags: Vec<String>,
+    pub icon: Option<String>,
+    #[serde(with = "time::serde::rfc3339")]
+    pub updated: OffsetDateTime,
+}
+
+/// A note with its body, ready for the editor.
+///
+/// Note what is *not* here: no path. The frontend addresses notes by id and
+/// never learns where the vault sits on disk.
+#[derive(Debug, Clone, Serialize)]
+pub struct NoteDoc {
+    #[serde(flatten)]
+    pub summary: NoteSummary,
+    pub body: String,
+    /// Set when the file on disk had no frontmatter and we adopted it. The UI
+    /// can mention that the note has been taken over on first save.
+    pub adopted: bool,
+}
+
+pub struct Vault {
+    root: PathBuf,
+}
+
+impl Vault {
+    /// Open a directory as a vault, creating the sidecar folders if needed.
+    ///
+    /// Takes `PathBuf` by value rather than `&Path` because the Vault stores it
+    /// — asking for ownership up front is honest about that, and saves the
+    /// caller from a clone they would otherwise have to make anyway.
+    pub fn open(root: PathBuf) -> Result<Self> {
+        if !root.is_dir() {
+            return Err(SutraError::NotADirectory(root.display().to_string()));
+        }
+        fs::create_dir_all(root.join(ATTACHMENTS))?;
+        fs::create_dir_all(root.join(TRASH))?;
+        Ok(Self { root })
+    }
+
+    /// Only the tests need this. Production code reaches the root through the
+    /// methods above, which is the point — nothing outside should be building
+    /// paths by hand.
+    #[cfg(test)]
+    pub fn root(&self) -> &Path {
+        &self.root
+    }
+
+    /// The name shown in the UI. The full path stays on this side of the
+    /// boundary.
+    pub fn display_name(&self) -> String {
+        self.root
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_else(|| self.root.display().to_string())
+    }
+
+    /// Every note in the vault.
+    ///
+    /// This is a linear scan, and it re-reads every file. That is fine for now
+    /// and deliberately not optimised: Phase 4 puts a SQLite index in front of
+    /// it, and the index has to be rebuildable from exactly this scan.
+    ///
+    /// Unreadable or malformed files are skipped rather than failing the whole
+    /// listing — one corrupt note must not make the vault unopenable.
+    pub fn list_notes(&self) -> Result<Vec<NoteSummary>> {
+        let mut notes = Vec::new();
+
+        for entry in fs::read_dir(&self.root)? {
+            let entry = entry?;
+            if !entry.file_type()?.is_file() {
+                continue;
+            }
+            let name = entry.file_name();
+            let Some(name) = name.to_str() else { continue };
+            let Some(id) = note::id_from_file_name(name) else {
+                continue;
+            };
+            let Ok(contents) = fs::read_to_string(entry.path()) else {
+                continue;
+            };
+            let Ok((parsed, _)) = frontmatter::split(&contents) else {
+                continue;
+            };
+            let fm = parsed.unwrap_or_else(|| Self::synthesise(id, name));
+            notes.push(summary_of(&fm));
+        }
+
+        // Siblings sort by position, then title, so the order is stable even
+        // when positions collide.
+        notes.sort_by(|a, b| {
+            a.position
+                .cmp(&b.position)
+                .then_with(|| a.title.to_lowercase().cmp(&b.title.to_lowercase()))
+        });
+        Ok(notes)
+    }
+
+    /// Read one note.
+    pub fn read_note(&self, id: &str) -> Result<NoteDoc> {
+        let path = self.path_for(id)?;
+        let contents = fs::read_to_string(&path)?;
+        let (parsed, body) = frontmatter::split(&contents)?;
+        let adopted = parsed.is_none();
+        let name = path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or_default();
+        let fm = parsed.unwrap_or_else(|| Self::synthesise(id, name));
+        Ok(NoteDoc {
+            summary: summary_of(&fm),
+            body: body.to_string(),
+            adopted,
+        })
+    }
+
+    /// Create an empty note and return it.
+    pub fn create_note(&self, title: &str, parent: Option<String>) -> Result<NoteDoc> {
+        let id = Ulid::generate().to_string();
+        let position = self.next_position(parent.as_deref())?;
+        let fm = Frontmatter::new(id.clone(), title.to_string(), parent, position);
+        let path = self.root.join(note::file_name(title, &id));
+        note::write_atomic(&path, &frontmatter::join(&fm, "")?)?;
+        Ok(NoteDoc {
+            summary: summary_of(&fm),
+            body: String::new(),
+            adopted: false,
+        })
+    }
+
+    /// Save a note's title and body.
+    ///
+    /// `created` is preserved from whatever is on disk; `updated` is stamped
+    /// now. If the title changed the file is renamed, because the slug is part
+    /// of the filename — the ULID does not move, so no link can break.
+    pub fn save_note(&self, id: &str, title: &str, body: &str) -> Result<NoteSummary> {
+        let path = self.path_for(id)?;
+        let existing = fs::read_to_string(&path)?;
+        let (parsed, _) = frontmatter::split(&existing)?;
+
+        let mut fm = parsed.unwrap_or_else(|| {
+            let name = path
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or_default();
+            Self::synthesise(id, name)
+        });
+        let renamed = fm.title != title;
+        fm.title = title.to_string();
+        fm.updated = OffsetDateTime::now_utc();
+
+        let target = if renamed {
+            self.root.join(note::file_name(title, id))
+        } else {
+            path.clone()
+        };
+
+        note::write_atomic(&target, &frontmatter::join(&fm, body)?)?;
+
+        // Written first, removed second. The reverse order would leave a window
+        // with no file at all, and a crash in that window would lose the note.
+        if renamed && target != path {
+            fs::remove_file(&path)?;
+        }
+
+        Ok(summary_of(&fm))
+    }
+
+    /// Move a note to `trash/` rather than unlinking it.
+    ///
+    /// A rename, so it is atomic and instant regardless of file size, and the
+    /// note is recoverable by dragging it back out in Explorer.
+    pub fn delete_note(&self, id: &str) -> Result<()> {
+        let path = self.path_for(id)?;
+        let name = path
+            .file_name()
+            .map(|n| n.to_os_string())
+            .unwrap_or_default();
+        let mut target = self.root.join(TRASH).join(&name);
+
+        // Deleting, restoring, and deleting again must not silently overwrite
+        // the first copy.
+        if target.exists() {
+            target = self.root.join(TRASH).join(format!(
+                "{}.{}",
+                Ulid::generate(),
+                name.to_string_lossy()
+            ));
+        }
+        fs::create_dir_all(self.root.join(TRASH))?;
+        fs::rename(&path, &target)?;
+        Ok(())
+    }
+
+    /// Copy a file into `attachments/` under a ULID-prefixed name, returning
+    /// the vault-relative path a note should reference.
+    pub fn import_attachment(&self, source: &Path) -> Result<String> {
+        let original = source
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_else(|| "file".to_string());
+
+        // Slug the original name so an attachment can never introduce a
+        // separator or a character the filesystem rejects.
+        let (stem, extension) = match original.rsplit_once('.') {
+            Some((s, e)) => (s, format!(".{}", note::slugify(e))),
+            None => (original.as_str(), String::new()),
+        };
+        let name = format!("{}_{}{}", Ulid::generate(), note::slugify(stem), extension);
+
+        let directory = self.root.join(ATTACHMENTS);
+        fs::create_dir_all(&directory)?;
+        fs::copy(source, directory.join(&name))?;
+
+        // Forward slashes: this string goes into markdown, where the separator
+        // is `/` on every platform including Windows.
+        Ok(format!("{ATTACHMENTS}/{name}"))
+    }
+
+    /// Locate a note's file by scanning for the id suffix.
+    fn path_for(&self, id: &str) -> Result<PathBuf> {
+        for entry in fs::read_dir(&self.root)? {
+            let entry = entry?;
+            let name = entry.file_name();
+            let Some(name) = name.to_str() else { continue };
+            if note::id_from_file_name(name) == Some(id) {
+                return Ok(entry.path());
+            }
+        }
+        Err(SutraError::NoteNotFound(id.to_string()))
+    }
+
+    /// One past the highest position among a parent's children.
+    fn next_position(&self, parent: Option<&str>) -> Result<i64> {
+        let highest = self
+            .list_notes()?
+            .iter()
+            .filter(|n| n.parent.as_deref() == parent)
+            .map(|n| n.position)
+            .max();
+        Ok(highest.map_or(0, |p| p + 1))
+    }
+
+    /// Metadata for a file that has none — someone dropped a plain `.md` into
+    /// the vault, or hand-deleted the frontmatter. We adopt it rather than
+    /// refusing it: the title comes from the filename, the timestamps from now.
+    fn synthesise(id: &str, file_name: &str) -> Frontmatter {
+        let title = file_name
+            .strip_suffix(".md")
+            .and_then(|stem| stem.rsplit_once('_').map(|(t, _)| t))
+            .filter(|t| !t.is_empty())
+            .unwrap_or("Untitled")
+            .replace('-', " ");
+        Frontmatter::new(id.to_string(), title, None, 0)
+    }
+}
+
+fn summary_of(fm: &Frontmatter) -> NoteSummary {
+    NoteSummary {
+        id: fm.id.clone(),
+        title: fm.title.clone(),
+        parent: fm.parent.clone(),
+        position: fm.position,
+        tags: fm.tags.clone(),
+        icon: fm.icon.clone(),
+        updated: fm.updated,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A throwaway vault in the OS temp directory, removed on drop so a failing
+    /// assertion cannot leave litter behind.
+    struct TempVault(Vault);
+
+    impl TempVault {
+        fn new() -> Self {
+            let root = std::env::temp_dir().join(format!("sutra-vault-{}", Ulid::generate()));
+            fs::create_dir_all(&root).unwrap();
+            Self(Vault::open(root).unwrap())
+        }
+    }
+
+    impl std::ops::Deref for TempVault {
+        type Target = Vault;
+        fn deref(&self) -> &Vault {
+            &self.0
+        }
+    }
+
+    impl Drop for TempVault {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(self.0.root());
+        }
+    }
+
+    #[test]
+    fn opening_creates_the_sidecar_directories() {
+        let vault = TempVault::new();
+        assert!(vault.root().join(ATTACHMENTS).is_dir());
+        assert!(vault.root().join(TRASH).is_dir());
+    }
+
+    #[test]
+    fn opening_a_file_is_rejected() {
+        let path = std::env::temp_dir().join(format!("sutra-{}.txt", Ulid::generate()));
+        fs::write(&path, "x").unwrap();
+        assert!(Vault::open(path.clone()).is_err());
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn create_read_and_save_round_trip() {
+        let vault = TempVault::new();
+        let created = vault.create_note("CVT runs", None).unwrap();
+
+        vault
+            .save_note(&created.summary.id, "CVT runs", "Ribbons along [001].")
+            .unwrap();
+
+        let read = vault.read_note(&created.summary.id).unwrap();
+        assert_eq!(read.summary.title, "CVT runs");
+        assert_eq!(read.body, "Ribbons along [001].\n");
+        assert!(!read.adopted);
+    }
+
+    #[test]
+    fn the_file_is_named_from_the_title_and_id() {
+        let vault = TempVault::new();
+        let note = vault.create_note("Sb2Se3 growth log", None).unwrap();
+        let expected = format!("Sb2Se3-growth-log_{}.md", note.summary.id);
+        assert!(vault.root().join(&expected).is_file(), "missing {expected}");
+    }
+
+    #[test]
+    fn renaming_moves_the_file_but_keeps_the_id() {
+        let vault = TempVault::new();
+        let note = vault.create_note("Old title", None).unwrap();
+        let id = note.summary.id.clone();
+        let old = vault.root().join(format!("Old-title_{id}.md"));
+        assert!(old.is_file());
+
+        vault.save_note(&id, "New title", "body").unwrap();
+
+        assert!(!old.exists(), "old filename should be gone");
+        assert!(vault.root().join(format!("New-title_{id}.md")).is_file());
+        // The id is the identity; a rename must not disturb it.
+        assert_eq!(vault.read_note(&id).unwrap().summary.id, id);
+    }
+
+    #[test]
+    fn saving_preserves_created_and_advances_updated() {
+        let vault = TempVault::new();
+        let note = vault.create_note("T", None).unwrap();
+        let id = note.summary.id.clone();
+
+        let path = vault.path_for(&id).unwrap();
+        let before = frontmatter::split(&fs::read_to_string(&path).unwrap())
+            .unwrap()
+            .0
+            .unwrap();
+
+        std::thread::sleep(std::time::Duration::from_millis(10));
+        vault.save_note(&id, "T", "changed").unwrap();
+
+        let after = frontmatter::split(&fs::read_to_string(vault.path_for(&id).unwrap()).unwrap())
+            .unwrap()
+            .0
+            .unwrap();
+
+        assert_eq!(before.created, after.created, "created must not move");
+        assert!(after.updated > before.updated, "updated must advance");
+    }
+
+    #[test]
+    fn positions_increment_among_siblings() {
+        let vault = TempVault::new();
+        let a = vault.create_note("A", None).unwrap();
+        let b = vault.create_note("B", None).unwrap();
+        let child = vault.create_note("C", Some(a.summary.id.clone())).unwrap();
+
+        assert_eq!(a.summary.position, 0);
+        assert_eq!(b.summary.position, 1);
+        // A different parent means a separate sequence.
+        assert_eq!(child.summary.position, 0);
+    }
+
+    #[test]
+    fn listing_skips_files_that_are_not_notes() {
+        let vault = TempVault::new();
+        vault.create_note("Real", None).unwrap();
+        fs::write(vault.root().join("README.md"), "not a note").unwrap();
+        fs::write(vault.root().join("notes.txt"), "nor this").unwrap();
+
+        let notes = vault.list_notes().unwrap();
+        assert_eq!(notes.len(), 1);
+        assert_eq!(notes[0].title, "Real");
+    }
+
+    #[test]
+    fn a_corrupt_note_does_not_break_the_listing() {
+        let vault = TempVault::new();
+        vault.create_note("Good", None).unwrap();
+        // Opening fence with no closing fence: unparseable.
+        let broken = format!("broken_{}.md", Ulid::generate());
+        fs::write(vault.root().join(broken), "---\nid: x\nno closing fence\n").unwrap();
+
+        let notes = vault.list_notes().unwrap();
+        assert_eq!(notes.len(), 1, "the good note must still be listed");
+    }
+
+    #[test]
+    fn a_plain_markdown_file_is_adopted() {
+        let vault = TempVault::new();
+        let id = Ulid::generate().to_string();
+        fs::write(
+            vault.root().join(format!("Dropped-in_{id}.md")),
+            "Just prose, no frontmatter.\n",
+        )
+        .unwrap();
+
+        let note = vault.read_note(&id).unwrap();
+        assert!(note.adopted);
+        assert_eq!(note.summary.title, "Dropped in");
+        assert_eq!(note.body, "Just prose, no frontmatter.\n");
+    }
+
+    #[test]
+    fn delete_moves_to_trash_and_keeps_the_bytes() {
+        let vault = TempVault::new();
+        let note = vault.create_note("Doomed", None).unwrap();
+        let id = note.summary.id.clone();
+        vault
+            .save_note(&id, "Doomed", "irreplaceable data")
+            .unwrap();
+
+        vault.delete_note(&id).unwrap();
+
+        assert!(vault.path_for(&id).is_err(), "should be gone from the root");
+        let trashed =
+            fs::read_to_string(vault.root().join(TRASH).join(format!("Doomed_{id}.md"))).unwrap();
+        assert!(trashed.contains("irreplaceable data"));
+    }
+
+    #[test]
+    fn deleting_the_same_name_twice_does_not_overwrite_the_first() {
+        let vault = TempVault::new();
+        let first = vault.create_note("Same", None).unwrap();
+        vault
+            .save_note(&first.summary.id, "Same", "first copy")
+            .unwrap();
+        vault.delete_note(&first.summary.id).unwrap();
+
+        // Recreate a note that slugs to the same filename, then delete it too.
+        let path = vault.root().join(format!("Same_{}.md", first.summary.id));
+        fs::write(&path, "second copy").unwrap();
+        vault.delete_note(&first.summary.id).unwrap();
+
+        let trash: Vec<_> = fs::read_dir(vault.root().join(TRASH))
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .collect();
+        assert_eq!(trash.len(), 2, "both copies must survive in the trash");
+    }
+
+    #[test]
+    fn attachments_are_ulid_prefixed_and_relative() {
+        let vault = TempVault::new();
+        let source = std::env::temp_dir().join(format!("sutra-src-{}.png", Ulid::generate()));
+        fs::write(&source, b"\x89PNG fake").unwrap();
+
+        let reference = vault.import_attachment(&source).unwrap();
+
+        assert!(reference.starts_with("attachments/"), "got {reference}");
+        assert!(reference.ends_with(".png"), "extension lost: {reference}");
+        // Forward slashes, because this goes into markdown.
+        assert!(!reference.contains('\\'));
+        assert!(vault.root().join(&reference).is_file());
+        let _ = fs::remove_file(source);
+    }
+
+    #[test]
+    fn two_attachments_with_one_name_do_not_collide() {
+        let vault = TempVault::new();
+        let source = std::env::temp_dir().join(format!("sutra-src-{}.png", Ulid::generate()));
+        fs::write(&source, b"data").unwrap();
+
+        let first = vault.import_attachment(&source).unwrap();
+        let second = vault.import_attachment(&source).unwrap();
+
+        assert_ne!(first, second);
+        assert!(vault.root().join(&first).is_file());
+        assert!(vault.root().join(&second).is_file());
+        let _ = fs::remove_file(source);
+    }
+}
