@@ -30,10 +30,22 @@ renaming a note never breaks a link.
 | Index | SQLite |
 | Target | Windows 10+ primarily; macOS kept working where free |
 
-Rust owns the filesystem, markdown parsing and serialisation, the SQLite index,
-search, backlinks, file watching, and export. React owns everything visual,
-editor state, and navigation. They meet only at Tauri commands — no filesystem
-paths and no SQL cross that boundary.
+Rust owns the filesystem, frontmatter, the SQLite index, search, backlinks,
+file watching, and export. React owns everything visual, editor state,
+navigation, and the markdown ↔ editor conversion. They meet only at Tauri
+commands — no filesystem paths and no SQL cross that boundary.
+
+**On markdown.** The original plan put markdown parsing and serialisation in
+Rust. It lives in the frontend instead, via `@tiptap/markdown`: Rust reads and
+writes the file and splits off the frontmatter, but treats the body as opaque
+text. The deciding factor is Phase 5 — maths and chemistry have to round-trip
+losslessly, and this way a maths node declares its own `parseMarkdown` /
+`renderMarkdown` next to its schema, so `$$…$$` and `\ce{…}` are defined in
+exactly one place instead of twice with an agreed-upon intermediate format
+between them. Measured before adopting: all twelve supported block types
+round-trip stably, eleven of twelve byte-identically. Rust still reads raw
+markdown for the Phase 4 index — extracting search text and `[[id]]` links —
+but that is extraction, never re-serialisation.
 
 ## Getting started
 
@@ -60,10 +72,17 @@ cargo check           # from src-tauri/ — compile the Rust side
 index.html            Sets data-theme before first paint
 src/
   main.tsx            React entry
-  App.tsx             Top bar and the writing surface
+  App.tsx             Top bar, note list, and the writing surface
+  notes/
+    useNote.ts        Buffer, autosave, external-change handling
+    NoteList.tsx      Flat list — the nested tree is Phase 4
+    VaultPicker.tsx   Shown until a vault is chosen
+    ConflictPrompt.tsx
+  vault/api.ts        Typed wrappers over the Tauri commands
   components/
   editor/
     Editor.tsx        TipTap instance and the drag handle
+    markdown.ts       Markdown ↔ editor, and why it lives here
     extensions.ts     The block vocabulary
     initialContent.ts Seed document — Phase 2 has no persistence
     icons.tsx         Inline SVGs, all currentColor
@@ -74,7 +93,15 @@ src/
     index.css         Fonts, Tailwind, token bridging, base styles
     editor.css        Prose and editor chrome, plain CSS against the tokens
 src-tauri/
-  src/main.rs         Tauri builder and commands
+  src/
+    main.rs           Tauri builder and command registration
+    commands.rs       The entire surface the frontend can call
+    vault.rs          Vault operations: list, read, save, delete, attach
+    frontmatter.rs    The YAML block, parsing and serialising
+    note.rs           Filenames, slugging, atomic writes
+    watcher.rs        Debounced filesystem watching
+    state.rs          Open vault, and the remembered one
+    error.rs          One error type for the storage layer
   tauri.conf.json     Window, CSP, bundle config
   capabilities/       What the frontend is permitted to call
 ```
@@ -116,7 +143,7 @@ an earlier one is open.
       opens, Source Sans 3 loads, both themes are defined and switchable.
 - [x] **Phase 2 — block editor.** TipTap, core blocks, slash commands, drag
       handles, visual identity applied. In-memory only.
-- [ ] **Phase 3 — storage in Rust.** Vault selection, markdown + frontmatter
+- [x] **Phase 3 — storage in Rust.** Vault selection, markdown + frontmatter
       read/write, autosave, file watching.
 - [ ] **Phase 4 — navigation.** SQLite index, sidebar tree, search, wikilinks,
       backlinks, breadcrumbs.

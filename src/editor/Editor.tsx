@@ -2,16 +2,26 @@ import { EditorContent, useEditor } from "@tiptap/react";
 import { DragHandle } from "@tiptap/extension-drag-handle-react";
 import { extensions } from "./extensions";
 import { GripIcon } from "./icons";
-import { INITIAL_CONTENT } from "./initialContent";
+import { getMarkdown, setMarkdown } from "./markdown";
 
-export default function Editor() {
+type Props = {
+  /** The note body, as markdown. */
+  body: string;
+  /** Called with markdown on every edit. */
+  onChange: (markdown: string) => void;
+};
+
+export default function Editor({ body, onChange }: Props) {
   const editor = useEditor({
     extensions,
-    content: INITIAL_CONTENT,
+    // Content is loaded in onCreate instead of here: parsing markdown needs the
+    // Markdown extension's manager, which does not exist until the editor does.
+    content: "",
+    onCreate: ({ editor }) => setMarkdown(editor, body),
+    onUpdate: ({ editor }) => onChange(getMarkdown(editor)),
     editorProps: {
       attributes: {
         class: "sutra-prose selectable",
-        // Tells assistive tech this is a rich text region, not a plain textarea.
         role: "textbox",
         "aria-multiline": "true",
         "aria-label": "Note body",
@@ -37,11 +47,7 @@ export default function Editor() {
         Passing an options object instead silently resets edge detection to
         'none', and top-level blocks then stop being grabbable at all.
       */}
-      <DragHandle
-        editor={editor}
-        nested
-        className="sutra-drag-handle-wrapper"
-      >
+      <DragHandle editor={editor} nested className="sutra-drag-handle-wrapper">
         {/*
           A span, not a button. The extension puts `draggable` and the
           dragstart listener on the wrapper it owns; a nested button

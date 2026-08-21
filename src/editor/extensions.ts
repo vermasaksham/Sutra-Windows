@@ -3,6 +3,7 @@ import { TaskItem, TaskList } from "@tiptap/extension-list";
 import { TableKit } from "@tiptap/extension-table";
 import Image from "@tiptap/extension-image";
 import { Placeholder } from "@tiptap/extensions";
+import { Markdown } from "@tiptap/markdown";
 import { SlashCommand } from "./slash/SlashCommand";
 
 /**
@@ -53,6 +54,11 @@ export const extensions = [
       return "";
     },
   }),
+
+  // Markdown is the on-disk format, so the editor has to speak it directly.
+  // This registers the parse/render specs for every node above; see
+  // ./markdown.ts for why the conversion lives here and not in Rust.
+  Markdown,
 
   SlashCommand,
 ];

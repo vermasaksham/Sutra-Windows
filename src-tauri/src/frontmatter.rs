@@ -39,10 +39,22 @@ pub struct Frontmatter {
     pub cover: Option<String>,
 }
 
+/// The current time, truncated to whole seconds.
+///
+/// These files are read and edited by hand, and `2026-08-21T11:53:29Z` is
+/// something a person can parse at a glance where
+/// `2026-08-21T11:53:29.129750608Z` is not. It also keeps the diff on every
+/// save down to the characters that actually changed.
+pub fn now() -> OffsetDateTime {
+    OffsetDateTime::now_utc()
+        .replace_nanosecond(0)
+        .unwrap_or_else(|_| OffsetDateTime::now_utc())
+}
+
 impl Frontmatter {
     /// A brand new note's metadata.
     pub fn new(id: String, title: String, parent: Option<String>, position: i64) -> Self {
-        let now = OffsetDateTime::now_utc();
+        let now = now();
         Self {
             id,
             title,
@@ -133,6 +145,13 @@ mod tests {
             icon: None,
             cover: None,
         }
+    }
+
+    #[test]
+    fn timestamps_are_whole_seconds() {
+        // Sub-second precision is noise in a file a person reads and edits,
+        // and it makes every save a bigger diff than it needs to be.
+        assert_eq!(now().nanosecond(), 0);
     }
 
     #[test]

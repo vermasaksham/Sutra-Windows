@@ -93,3 +93,54 @@ The prefix guarantees uniqueness without a lookup, keeps insertion order
 sortable, and preserves enough of the original name to be recognisable. Notes
 reference attachments by relative path, so the vault stays portable — moving
 the folder does not break anything.
+
+## Who converts markdown
+
+Rust reads and writes the file and splits off the frontmatter. It does not
+interpret the body — to the storage layer the body is opaque text.
+
+Conversion between markdown and editor state happens in the frontend, through
+`@tiptap/markdown`. This is a deliberate departure from the original plan, which
+assigned markdown parsing and serialisation to Rust.
+
+The reason is Phase 5. Maths and chemical equations have to survive the round
+trip losslessly. With conversion in the editor, a maths node declares its own
+`parseMarkdown` and `renderMarkdown` alongside its schema, so the syntax for
+`$$…$$` and `\ce{…}` exists in exactly one place. Converting through Rust would
+require an intermediate representation that both sides agree on precisely, and
+every node type would need implementing twice — with the fidelity risk landing
+exactly where the requirement is strictest.
+
+Measured before adopting, across every block type currently supported:
+
+| | |
+| --- | --- |
+| Round-trip stable (a second save produces identical bytes) | 12 of 12 |
+| Byte-identical to the source on the first pass | 11 of 12 |
+
+The exception is tables, which normalise their column padding once and are
+stable afterwards. Files do not churn on repeated saves.
+
+Rust still reads raw markdown for the Phase 4 index — pulling out search text
+and `[[id]]` links — but that is extraction from text, not re-serialisation, and
+it carries no fidelity requirement.
+
+### Escaping in the serialised markdown
+
+The serialiser escapes characters that would otherwise be markdown syntax. This
+is lossless and stable — the text reads back exactly as typed, and a second save
+produces identical bytes — but the raw file is noisier than what was typed:
+
+| Typed | On disk | Reads back as |
+| --- | --- | --- |
+| `[001]` | `\[001\]` | `[001]` |
+| `a_b` | `a\_b` | `a_b` |
+| `<=>` | `&lt;=&gt;` | `<=>` |
+
+Worth knowing for a vault full of Miller indices. Nothing is lost, and nothing
+churns, but someone opening the file in another editor will see the backslashes.
+
+The `<=>` case looks alarming given mhchem uses it, but chemistry is unaffected:
+in Phase 5 `\ce{…}` lives inside a maths node that declares its own
+`renderMarkdown`, so its content never passes through the prose text escaper.
+That is the same property that made this architecture the right choice.

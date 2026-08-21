@@ -171,7 +171,7 @@ impl Vault {
         });
         let renamed = fm.title != title;
         fm.title = title.to_string();
-        fm.updated = OffsetDateTime::now_utc();
+        fm.updated = frontmatter::now();
 
         let target = if renamed {
             self.root.join(note::file_name(title, id))
@@ -386,7 +386,6 @@ mod tests {
             .0
             .unwrap();
 
-        std::thread::sleep(std::time::Duration::from_millis(10));
         vault.save_note(&id, "T", "changed").unwrap();
 
         let after = frontmatter::split(&fs::read_to_string(vault.path_for(&id).unwrap()).unwrap())
@@ -395,7 +394,13 @@ mod tests {
             .unwrap();
 
         assert_eq!(before.created, after.created, "created must not move");
-        assert!(after.updated > before.updated, "updated must advance");
+        // Not `>`: timestamps are truncated to whole seconds, so two saves
+        // inside the same second are legitimately equal.
+        assert!(
+            after.updated >= before.updated,
+            "updated must not go backwards"
+        );
+        assert_eq!(after.updated.nanosecond(), 0, "no sub-second noise on disk");
     }
 
     #[test]
