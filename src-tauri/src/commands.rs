@@ -8,6 +8,7 @@
 //!    for the file and its frontmatter, not for interpreting the prose.
 
 use crate::error::{Result, SutraError};
+use crate::index::{Backlink, SearchHit};
 use crate::state::AppState;
 use crate::vault::{NoteDoc, NoteSummary};
 use serde::Serialize;
@@ -45,9 +46,47 @@ pub fn current_vault(state: State<'_, AppState>) -> Option<VaultInfo> {
     state.vault_name().map(|name| VaultInfo { name })
 }
 
+/// Every note, for building the sidebar tree.
+///
+/// Served from the index rather than by scanning the directory: the sidebar is
+/// redrawn on every save, and re-reading every file each time would make the
+/// app slower the more notes it holds. `parent` and `position` come back
+/// unchanged, so the frontend assembles the tree without any SQL crossing the
+/// boundary.
 #[tauri::command]
 pub fn list_notes(state: State<'_, AppState>) -> Result<Vec<NoteSummary>> {
-    state.with_vault(|vault| vault.list_notes())
+    state.with_index(|index| index.all_notes())
+}
+
+/// Full-text search across the vault.
+#[tauri::command]
+pub fn search_notes(state: State<'_, AppState>, query: String) -> Result<Vec<SearchHit>> {
+    state.with_index(|index| index.search(&query, 30))
+}
+
+/// Notes that link to `id`, for the backlinks panel.
+#[tauri::command]
+pub fn backlinks(state: State<'_, AppState>, id: String) -> Result<Vec<Backlink>> {
+    state.with_index(|index| index.backlinks(&id))
+}
+
+/// Resolve ids to titles so `[[id]]` can render as the target's title.
+///
+/// Ids with no matching note are simply absent from the result, which is how
+/// the editor knows to render them as dangling.
+#[tauri::command]
+pub fn note_titles(state: State<'_, AppState>, ids: Vec<String>) -> Result<Vec<(String, String)>> {
+    state.with_index(|index| index.titles_for(&ids))
+}
+
+/// Throw the index away and rebuild it from the markdown files.
+///
+/// Exposed because it should always be safe to do. If search or the tree ever
+/// look wrong, this is the fix, and the fact that it cannot lose anything is
+/// the point of the whole storage design.
+#[tauri::command]
+pub fn reindex(state: State<'_, AppState>) -> Result<usize> {
+    state.with_both(|vault, index| index.rebuild(vault))
 }
 
 #[tauri::command]
@@ -61,7 +100,11 @@ pub fn create_note(
     title: String,
     parent: Option<String>,
 ) -> Result<NoteDoc> {
-    state.with_vault(|vault| vault.create_note(&title, parent.clone()))
+    state.with_both(|vault, index| {
+        let doc = vault.create_note(&title, parent.clone())?;
+        index.upsert(&doc.summary, &doc.body)?;
+        Ok(doc)
+    })
 }
 
 /// Save a note. Returns the updated metadata so the sidebar can refresh a
@@ -73,13 +116,24 @@ pub fn save_note(
     title: String,
     body: String,
 ) -> Result<NoteSummary> {
-    state.with_vault(|vault| vault.save_note(&id, &title, &body))
+    state.with_both(|vault, index| {
+        // File first, index second. If the write fails there is nothing to
+        // index, and if the index fails the note is still safely on disk and a
+        // rebuild will pick it up.
+        let summary = vault.save_note(&id, &title, &body)?;
+        index.upsert(&summary, &body)?;
+        Ok(summary)
+    })
 }
 
 /// Move a note to the trash folder. Nothing is unlinked.
 #[tauri::command]
 pub fn delete_note(state: State<'_, AppState>, id: String) -> Result<()> {
-    state.with_vault(|vault| vault.delete_note(&id))
+    state.with_both(|vault, index| {
+        vault.delete_note(&id)?;
+        index.remove(&id)?;
+        Ok(())
+    })
 }
 
 /// Copy a file into the vault's attachments folder.

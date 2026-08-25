@@ -6,6 +6,8 @@
 mod commands;
 mod error;
 mod frontmatter;
+mod index;
+mod links;
 mod note;
 mod state;
 mod vault;
@@ -48,6 +50,10 @@ fn main() {
             commands::pick_vault,
             commands::current_vault,
             commands::list_notes,
+            commands::search_notes,
+            commands::backlinks,
+            commands::note_titles,
+            commands::reindex,
             commands::read_note,
             commands::create_note,
             commands::save_note,

@@ -1,12 +1,15 @@
 //! Watching the vault for changes made outside the app.
 
+use crate::index::Index;
 use crate::note;
+use crate::vault::Vault;
 use notify_debouncer_full::notify::RecommendedWatcher;
 use notify_debouncer_full::notify::{RecursiveMode, Result as NotifyResult};
 use notify_debouncer_full::{DebounceEventResult, Debouncer, RecommendedCache, new_debouncer};
 use serde::Serialize;
 use std::collections::BTreeSet;
 use std::path::Path;
+use std::sync::Arc;
 use std::time::Duration;
 use tauri::{AppHandle, Emitter};
 
@@ -39,7 +42,12 @@ pub type VaultWatcher = Debouncer<RecommendedWatcher, RecommendedCache>;
 ///
 /// Non-recursive: notes are flat in the root, and we do not want every write
 /// into `attachments/` or `trash/` waking the UI.
-pub fn watch(app: AppHandle, root: &Path) -> NotifyResult<VaultWatcher> {
+pub fn watch(
+    app: AppHandle,
+    root: &Path,
+    vault: Arc<Vault>,
+    index: Arc<Index>,
+) -> NotifyResult<VaultWatcher> {
     let mut debouncer = new_debouncer(QUIET_PERIOD, None, move |result: DebounceEventResult| {
         let Ok(events) = result else { return };
 
@@ -65,6 +73,30 @@ pub fn watch(app: AppHandle, root: &Path) -> NotifyResult<VaultWatcher> {
         if changed.is_empty() {
             return;
         }
+
+        // Reindex before notifying. The frontend reacts to this event by
+        // reloading the note and refreshing the tree and backlinks, so if the
+        // index were updated afterwards the UI would render a view of the
+        // vault that is one edit out of date.
+        for id in &changed {
+            match vault.read_note(id) {
+                Ok(doc) => {
+                    if let Err(e) = index.upsert(&doc.summary, &doc.body) {
+                        eprintln!("sutra: could not index {id}: {e}");
+                    }
+                }
+                // Unreadable means deleted, moved to trash, or mid-write by
+                // another program. Dropping it from the index is right in
+                // every one of those cases; a later event re-adds it if it
+                // comes back.
+                Err(_) => {
+                    if let Err(e) = index.remove(id) {
+                        eprintln!("sutra: could not de-index {id}: {e}");
+                    }
+                }
+            }
+        }
+
         let payload = VaultChanged {
             changed: changed.into_iter().collect(),
         };

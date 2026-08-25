@@ -31,6 +31,12 @@ pub enum SutraError {
 
     #[error("YAML error: {0}")]
     Yaml(#[from] serde_yaml_ng::Error),
+
+    /// Index failures are recoverable by definition — the index is derived, so
+    /// the worst case is rebuilding it. Reported rather than swallowed so a
+    /// broken index does not quietly degrade search into "no results".
+    #[error("index error: {0}")]
+    Index(#[from] rusqlite::Error),
 }
 
 /// Tauri sends a command's `Err` to the frontend as JSON, so the error has to
