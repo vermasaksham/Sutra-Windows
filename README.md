@@ -75,7 +75,11 @@ src/
   App.tsx             Top bar, note list, and the writing surface
   notes/
     useNote.ts        Buffer, autosave, external-change handling
-    NoteList.tsx      Flat list — the nested tree is Phase 4
+    tree.ts           Flat list -> tree, tolerant of cycles and orphans
+    NoteTree.tsx      Nested, collapsible sidebar
+    Breadcrumbs.tsx   Root-to-note chain
+    SearchPanel.tsx   Full-text search overlay (Ctrl/Cmd K)
+    BacklinksPanel.tsx
     VaultPicker.tsx   Shown until a vault is chosen
     ConflictPrompt.tsx
   vault/api.ts        Typed wrappers over the Tauri commands
@@ -83,6 +87,7 @@ src/
   editor/
     Editor.tsx        TipTap instance and the drag handle
     markdown.ts       Markdown ↔ editor, and why it lives here
+    wikilink/         [[id]] node, its markdown spec, and [[ autocomplete
     extensions.ts     The block vocabulary
     initialContent.ts Seed document — Phase 2 has no persistence
     icons.tsx         Inline SVGs, all currentColor
@@ -97,6 +102,8 @@ src-tauri/
     main.rs           Tauri builder and command registration
     commands.rs       The entire surface the frontend can call
     vault.rs          Vault operations: list, read, save, delete, attach
+    index.rs          SQLite: tree, FTS5 search, backlinks. Disposable.
+    links.rs          Finding [[id]] references in markdown
     frontmatter.rs    The YAML block, parsing and serialising
     note.rs           Filenames, slugging, atomic writes
     watcher.rs        Debounced filesystem watching
@@ -145,7 +152,7 @@ an earlier one is open.
       handles, visual identity applied. In-memory only.
 - [x] **Phase 3 — storage in Rust.** Vault selection, markdown + frontmatter
       read/write, autosave, file watching.
-- [ ] **Phase 4 — navigation.** SQLite index, sidebar tree, search, wikilinks,
+- [x] **Phase 4 — navigation.** SQLite index, sidebar tree, search, wikilinks,
       backlinks, breadcrumbs.
 - [ ] **Phase 5 — maths and chemistry.** KaTeX + mhchem, lossless markdown
       round-trip.

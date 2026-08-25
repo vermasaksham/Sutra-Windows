@@ -5,6 +5,8 @@ import Image from "@tiptap/extension-image";
 import { Placeholder } from "@tiptap/extensions";
 import { Markdown } from "@tiptap/markdown";
 import { SlashCommand } from "./slash/SlashCommand";
+import { WikiLink } from "./wikilink/WikiLink";
+import { WikiLinkSuggestion } from "./wikilink/WikiLinkSuggestion";
 
 /**
  * The block vocabulary of a Sutra note.
@@ -61,4 +63,9 @@ export const extensions = [
   Markdown,
 
   SlashCommand,
+
+  // Links between notes. Stored as [[id]] and rendered as the target's current
+  // title, so renaming a note cannot break a link.
+  WikiLink,
+  WikiLinkSuggestion,
 ];

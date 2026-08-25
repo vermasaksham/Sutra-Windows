@@ -1,6 +1,7 @@
 import { Extension } from "@tiptap/core";
 import { ReactRenderer } from "@tiptap/react";
 import Suggestion from "@tiptap/suggestion";
+import { PluginKey } from "@tiptap/pm/state";
 import type { SuggestionProps } from "@tiptap/suggestion";
 import { computePosition, flip, offset, shift } from "@floating-ui/dom";
 import type { ComponentProps } from "react";
@@ -29,6 +30,10 @@ export const SlashCommand = Extension.create({
     return [
       Suggestion<SlashItem>({
         editor: this.editor,
+        // Every Suggestion instance defaults to the same ProseMirror plugin
+        // key, and ProseMirror rejects two plugins sharing one. With the
+        // wikilink autocomplete also using Suggestion, both need their own.
+        pluginKey: new PluginKey("sutraSlashCommand"),
         char: "/",
         items: ({ query }) => filterItems(query),
 

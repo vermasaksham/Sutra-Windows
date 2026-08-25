@@ -46,6 +46,18 @@ export const notesApi = {
   attach: () => invoke<string | null>("attach_file"),
 };
 
+export type SearchHit = { id: string; title: string; excerpt: string };
+export type Backlink = { id: string; title: string; excerpt: string };
+
+export const indexApi = {
+  search: (query: string) => invoke<SearchHit[]>("search_notes", { query }),
+  backlinks: (id: string) => invoke<Backlink[]>("backlinks", { id }),
+  /** Resolve ids to titles. Ids with no note are simply absent from the result. */
+  titles: (ids: string[]) => invoke<[string, string][]>("note_titles", { ids }),
+  /** Throw the index away and rebuild it from the markdown files. Always safe. */
+  reindex: () => invoke<number>("reindex"),
+};
+
 export type VaultChanged = { changed: string[] };
 
 /**

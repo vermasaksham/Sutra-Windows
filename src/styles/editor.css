@@ -343,3 +343,46 @@
 .sutra-drag-handle:active {
   cursor: grabbing;
 }
+
+/* --- Wikilinks ---------------------------------------------------------- */
+
+.sutra-wikilink-wrapper {
+  display: inline;
+}
+
+.sutra-wikilink {
+  color: var(--accent);
+  background-color: var(--accent-bg);
+  border-radius: 4px;
+  padding: 0.05em 0.3em;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background-color var(--duration-fast) var(--ease-out);
+}
+
+.sutra-wikilink:hover {
+  background-color: var(--accent);
+  color: var(--surface);
+}
+
+/* A link whose target no longer exists. The text is still in the file, so it
+   is shown rather than hidden — in saffron, which is the colour reserved for
+   things that want attention. */
+.sutra-wikilink.is-missing {
+  color: var(--highlight);
+  background-color: var(--highlight-bg);
+  cursor: default;
+  text-decoration: line-through;
+}
+
+.sutra-wikilink.is-missing:hover {
+  background-color: var(--highlight-bg);
+  color: var(--highlight);
+}
+
+/* Search excerpts: FTS5 marks the matched terms. */
+.sutra-excerpt mark {
+  background-color: var(--highlight-bg);
+  color: var(--highlight);
+  border-radius: 2px;
+}

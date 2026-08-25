@@ -1,11 +1,22 @@
 import { useCallback, useEffect, useState } from "react";
 import Editor from "./editor/Editor";
 import ThemeToggle from "./components/ThemeToggle";
+import { setNavigate, setTitles } from "./editor/wikilink/titleStore";
+import BacklinksPanel from "./notes/BacklinksPanel";
+import Breadcrumbs from "./notes/Breadcrumbs";
 import ConflictPrompt from "./notes/ConflictPrompt";
-import NoteList from "./notes/NoteList";
+import NoteTree from "./notes/NoteTree";
+import SearchPanel from "./notes/SearchPanel";
 import VaultPicker from "./notes/VaultPicker";
 import { useNote } from "./notes/useNote";
-import { notesApi, vaultApi, type NoteSummary, type VaultInfo } from "./vault/api";
+import {
+  indexApi,
+  notesApi,
+  vaultApi,
+  type Backlink,
+  type NoteSummary,
+  type VaultInfo,
+} from "./vault/api";
 
 const SAVE_LABEL = {
   saved: "Saved",
@@ -19,10 +30,16 @@ export default function App() {
   const [checked, setChecked] = useState(false);
   const [notes, setNotes] = useState<NoteSummary[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [backlinks, setBacklinks] = useState<Backlink[]>([]);
+  const [searching, setSearching] = useState(false);
 
   const refresh = useCallback(async () => {
     try {
-      setNotes(await notesApi.list());
+      const list = await notesApi.list();
+      setNotes(list);
+      // Feed the wikilink renderer, so [[id]] shows the current title. This is
+      // why a rename cannot break a link: nothing stores the title but here.
+      setTitles(list.map((n) => [n.id, n.title] as const));
     } catch {
       setNotes([]);
     }
@@ -30,8 +47,6 @@ export default function App() {
 
   const note = useNote(selectedId, refresh);
 
-  // The vault from last session is reopened in Rust before the window appears,
-  // so this only has to ask whether one is already open.
   useEffect(() => {
     vaultApi
       .current()
@@ -44,14 +59,47 @@ export default function App() {
     if (vault) void refresh();
   }, [vault, refresh]);
 
-  // Select the first note once a vault's contents arrive.
   useEffect(() => {
     if (!selectedId && notes.length > 0) setSelectedId(notes[0]!.id);
   }, [notes, selectedId]);
 
-  async function createNote() {
+  const select = useCallback(
+    async (id: string) => {
+      // Flush first, so switching away never drops the last few keystrokes.
+      await note.flush();
+      setSelectedId(id);
+      setSearching(false);
+    },
+    [note],
+  );
+
+  // Following a [[link]] is a navigation like any other.
+  useEffect(() => setNavigate((id) => void select(id)), [select]);
+
+  // Backlinks track the open note, and refresh when it is saved — editing a
+  // note can add or remove the links pointing out of it.
+  useEffect(() => {
+    if (!selectedId) return setBacklinks([]);
+    indexApi
+      .backlinks(selectedId)
+      .then(setBacklinks)
+      .catch(() => setBacklinks([]));
+  }, [selectedId, notes]);
+
+  useEffect(() => {
+    function onKey(event: KeyboardEvent) {
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k") {
+        event.preventDefault();
+        setSearching((open) => !open);
+      }
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
+  async function createNote(parent: string | null) {
     await note.flush();
-    const created = await notesApi.create("Untitled");
+    const created = await notesApi.create("Untitled", parent);
     await refresh();
     setSelectedId(created.id);
   }
@@ -60,13 +108,8 @@ export default function App() {
     await notesApi.remove(id);
     const remaining = await notesApi.list();
     setNotes(remaining);
+    setTitles(remaining.map((n) => [n.id, n.title] as const));
     if (id === selectedId) setSelectedId(remaining[0]?.id ?? null);
-  }
-
-  async function select(id: string) {
-    // Flush first, so switching away never drops the last few keystrokes.
-    await note.flush();
-    setSelectedId(id);
   }
 
   if (!checked) return null;
@@ -81,10 +124,14 @@ export default function App() {
           {vault.name}
         </span>
         <div className="flex items-center gap-3">
-          <span
-            className="text-xs text-ink-muted tabular-nums"
-            aria-live="polite"
+          <button
+            type="button"
+            onClick={() => setSearching(true)}
+            className="rounded-md border border-border px-2 py-0.5 text-xs text-ink-muted transition-colors duration-150 ease-out hover:text-ink"
           >
+            Search <span className="font-mono">Ctrl K</span>
+          </button>
+          <span className="text-xs text-ink-muted tabular-nums" aria-live="polite">
             {SAVE_LABEL[note.saveState]}
           </span>
           <ThemeToggle />
@@ -92,17 +139,22 @@ export default function App() {
       </header>
 
       <div className="flex min-h-0 flex-1">
-        <NoteList
+        <NoteTree
           notes={notes}
           selectedId={selectedId}
           onSelect={(id) => void select(id)}
-          onCreate={() => void createNote()}
+          onCreate={(parent) => void createNote(parent)}
           onDelete={(id) => void deleteNote(id)}
         />
 
         <main className="min-w-0 flex-1 overflow-y-auto">
           {note.doc ? (
             <div className="mx-auto max-w-content px-6 py-12">
+              <Breadcrumbs
+                notes={notes}
+                id={selectedId}
+                onSelect={(id) => void select(id)}
+              />
               <input
                 value={note.doc.title}
                 onChange={(e) => note.setTitle(e.target.value)}
@@ -112,33 +164,35 @@ export default function App() {
               />
               {note.doc.adopted && (
                 <p className="mb-4 rounded-lg bg-highlight-bg px-3 py-2 text-sm text-highlight">
-                  This file had no frontmatter. Sutra will add one when you
-                  save.
+                  This file had no frontmatter. Sutra will add one when you save.
                 </p>
               )}
-              {/*
-                Keyed on the note and its revision so the editor remounts on a
-                switch or an external reload. Remounting resets undo history,
-                which is correct: undo must not reach across notes, or back
-                past content that arrived from disk.
-              */}
               <Editor
                 key={`${note.doc.id}:${note.revision}`}
                 body={note.doc.body}
                 onChange={note.setBody}
               />
+              <BacklinksPanel
+                backlinks={backlinks}
+                onSelect={(id) => void select(id)}
+              />
             </div>
           ) : (
             <div className="grid h-full place-items-center px-6">
               <p className="text-ink-muted">
-                {notes.length === 0
-                  ? "Create a note to begin."
-                  : "Select a note."}
+                {notes.length === 0 ? "Create a note to begin." : "Select a note."}
               </p>
             </div>
           )}
         </main>
       </div>
+
+      {searching && (
+        <SearchPanel
+          onClose={() => setSearching(false)}
+          onSelect={(id) => void select(id)}
+        />
+      )}
 
       {note.conflict && (
         <ConflictPrompt
