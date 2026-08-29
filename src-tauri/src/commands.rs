@@ -70,15 +70,6 @@ pub fn backlinks(state: State<'_, AppState>, id: String) -> Result<Vec<Backlink>
     state.with_index(|index| index.backlinks(&id))
 }
 
-/// Resolve ids to titles so `[[id]]` can render as the target's title.
-///
-/// Ids with no matching note are simply absent from the result, which is how
-/// the editor knows to render them as dangling.
-#[tauri::command]
-pub fn note_titles(state: State<'_, AppState>, ids: Vec<String>) -> Result<Vec<(String, String)>> {
-    state.with_index(|index| index.titles_for(&ids))
-}
-
 /// Throw the index away and rebuild it from the markdown files.
 ///
 /// Exposed because it should always be safe to do. If search or the tree ever

@@ -52,9 +52,11 @@ export type Backlink = { id: string; title: string; excerpt: string };
 export const indexApi = {
   search: (query: string) => invoke<SearchHit[]>("search_notes", { query }),
   backlinks: (id: string) => invoke<Backlink[]>("backlinks", { id }),
-  /** Resolve ids to titles. Ids with no note are simply absent from the result. */
-  titles: (ids: string[]) => invoke<[string, string][]>("note_titles", { ids }),
-  /** Throw the index away and rebuild it from the markdown files. Always safe. */
+  /**
+   * Throw the index away and rebuild it from the markdown files. Always safe,
+   * by design. Not yet reachable from the UI — it belongs with the Phase 6
+   * error handling, as the answer to "search looks wrong".
+   */
   reindex: () => invoke<number>("reindex"),
 };
 

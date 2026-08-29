@@ -112,6 +112,26 @@ export function useNote(id: string | null, onSaved: () => void) {
     [schedule],
   );
 
+  /**
+   * Throw away a pending autosave without writing it.
+   *
+   * Needed when the open note is being deleted: the queued timer would
+   * otherwise fire against a note that is already in the trash, and the save
+   * fails because its file is no longer in the vault root. Harmless in the end
+   * — nothing is resurrected — but it is a wrong write attempt, and the error
+   * it produces is noise the user cannot act on.
+   */
+  const discard = useCallback(() => {
+    if (timer.current) {
+      clearTimeout(timer.current);
+      timer.current = null;
+    }
+    // Match the buffer to what is on disk so the unmount flush finds nothing
+    // left to do.
+    buffer.current = { ...written.current };
+    setSaveState("saved");
+  }, []);
+
   /** Flush a pending autosave immediately — on note switch or window close. */
   const flush = useCallback(async () => {
     if (timer.current) {
@@ -199,6 +219,7 @@ export function useNote(id: string | null, onSaved: () => void) {
     setBody,
     setTitle,
     flush,
+    discard,
     resolveConflict,
   };
 }

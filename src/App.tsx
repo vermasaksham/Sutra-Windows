@@ -105,6 +105,9 @@ export default function App() {
   }
 
   async function deleteNote(id: string) {
+    // Cancel any queued autosave for this note first. Deleting it while a save
+    // is still pending would write to a file that has just moved to the trash.
+    if (id === selectedId) note.discard();
     await notesApi.remove(id);
     const remaining = await notesApi.list();
     setNotes(remaining);

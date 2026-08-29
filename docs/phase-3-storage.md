@@ -154,3 +154,19 @@ the node owns its own `renderMarkdown` and the text never reaches the escaper.
 
 Ten round-trip cases, all lossless, including formulas full of `_`, `*` and
 `{}`; and `$5 and $7` in prose still produces no maths nodes at all.
+
+### Known serialiser normalisations
+
+Two inputs are rewritten once on first save and stable thereafter. Both render
+identically before and after, so nothing is lost, but the file on disk differs
+from what was typed:
+
+| Typed | On disk |
+| --- | --- |
+| `\$5` | `$5` — the escape is dropped, since the serialiser has no rule for `$` |
+| `$a$$b$` | `$a\n$$b$` — two adjacent inline formulas with no separator |
+
+The second is a genuine mis-parse rather than a normalisation: the block rule
+claims the middle `$$`. Tightening the pattern to catch it risks breaking
+ordinary display maths, and `$a$$b$` is not something anyone writes, so it is
+recorded rather than fixed.

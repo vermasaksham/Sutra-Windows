@@ -16,17 +16,6 @@ mod watcher;
 use state::AppState;
 use tauri::Manager;
 
-/// A Tauri command: a Rust function the frontend can call by name.
-///
-/// The `#[tauri::command]` macro generates the glue that receives the IPC
-/// message, runs this function, and serialises what it returns back to
-/// JavaScript. On the frontend it is reached with
-/// `invoke<string>("app_version")`.
-#[tauri::command]
-fn app_version() -> String {
-    env!("CARGO_PKG_VERSION").to_string()
-}
-
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
@@ -46,13 +35,11 @@ fn main() {
         // function. A command that is not listed here does not exist as far as
         // the frontend is concerned.
         .invoke_handler(tauri::generate_handler![
-            app_version,
             commands::pick_vault,
             commands::current_vault,
             commands::list_notes,
             commands::search_notes,
             commands::backlinks,
-            commands::note_titles,
             commands::reindex,
             commands::read_note,
             commands::create_note,

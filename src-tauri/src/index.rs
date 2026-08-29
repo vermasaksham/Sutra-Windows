@@ -8,7 +8,7 @@
 use crate::error::Result;
 use crate::links;
 use crate::vault::{NoteSummary, Vault};
-use rusqlite::{Connection, OptionalExtension, params};
+use rusqlite::{Connection, params};
 use serde::Serialize;
 use std::path::Path;
 use std::sync::Mutex;
@@ -213,25 +213,6 @@ impl Index {
             })
         })?;
         Ok(rows.filter_map(std::result::Result::ok).collect())
-    }
-
-    /// Titles for a set of ids, so the editor can render `[[id]]` as a title.
-    pub fn titles_for(&self, ids: &[String]) -> Result<Vec<(String, String)>> {
-        if ids.is_empty() {
-            return Ok(Vec::new());
-        }
-        let guard = self.conn.lock().unwrap_or_else(|e| e.into_inner());
-        let mut stmt = guard.prepare("SELECT id, title FROM notes WHERE id = ?1")?;
-        let mut out = Vec::new();
-        for id in ids {
-            let found: Option<(String, String)> = stmt
-                .query_row([id], |row| Ok((row.get(0)?, row.get(1)?)))
-                .optional()?;
-            if let Some(pair) = found {
-                out.push(pair);
-            }
-        }
-        Ok(out)
     }
 }
 
@@ -514,7 +495,14 @@ mod tests {
         f.index.remove(&target_id).unwrap();
 
         assert_eq!(f.index.backlinks(&target_id).unwrap().len(), 1);
-        assert!(f.index.titles_for(&[target_id]).unwrap().is_empty());
+        // The note itself is gone from the index even though links to it remain.
+        assert!(
+            f.index
+                .all_notes()
+                .unwrap()
+                .iter()
+                .all(|n| n.id != target_id)
+        );
     }
 
     #[test]
@@ -577,19 +565,5 @@ mod tests {
         let reopened = Index::open(&f.db).unwrap();
         assert!(reopened.all_notes().unwrap().is_empty());
         assert_eq!(reopened.rebuild(&f.vault).unwrap(), 1);
-    }
-
-    #[test]
-    fn titles_resolve_for_rendering_wikilinks() {
-        let f = Fixture::new();
-        let a = f.vault.create_note("Alpha", None).unwrap();
-        let b = f.vault.create_note("Beta", None).unwrap();
-        f.index.rebuild(&f.vault).unwrap();
-
-        let ids = vec![a.summary.id.clone(), b.summary.id.clone(), "MISSING".into()];
-        let titles = f.index.titles_for(&ids).unwrap();
-        assert_eq!(titles.len(), 2, "an unknown id resolves to nothing");
-        assert!(titles.iter().any(|(_, t)| t == "Alpha"));
-        assert!(titles.iter().any(|(_, t)| t == "Beta"));
     }
 }
