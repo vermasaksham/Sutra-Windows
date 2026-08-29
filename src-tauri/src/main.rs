@@ -9,6 +9,7 @@ mod frontmatter;
 mod index;
 mod links;
 mod note;
+mod protocol;
 mod state;
 mod vault;
 mod watcher;
@@ -19,6 +20,10 @@ use tauri::Manager;
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        // Serves vault attachments without ever handing a path to the webview.
+        // See protocol.rs for why this exists instead of Tauri's asset
+        // protocol.
+        .register_uri_scheme_protocol("sutra", protocol::serve)
         // `manage` hands a value to Tauri to own for the life of the app.
         // Commands then ask for it by type via `State<'_, AppState>` — there is
         // no global variable, and no way to get one of the wrong type.

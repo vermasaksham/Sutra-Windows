@@ -1,4 +1,5 @@
 import type { Editor, Range } from "@tiptap/core";
+import { notesApi } from "../../vault/api";
 import type { ComponentType, SVGProps } from "react";
 import {
   BulletListIcon,
@@ -26,12 +27,12 @@ export type SlashItem = {
   icon: ComponentType<SVGProps<SVGSVGElement>>;
   group: "Basic" | "Lists" | "Blocks";
   /**
-   * Items either run immediately, or ask for one piece of text first. Images
-   * are the only thing that needs asking in this phase — once Phase 3 owns the
-   * filesystem, this becomes a file picker and the prompt goes away.
+   * The result is ignored, so this is typed `unknown` rather than `void`: the
+   * chained editor commands return a boolean, and the image picker returns a
+   * promise because it waits on a native dialog. The menu closes as soon as
+   * the item runs, whichever it is.
    */
-  prompt?: { label: string; placeholder: string };
-  run: (editor: Editor, range: Range, value?: string) => void;
+  run: (editor: Editor, range: Range) => unknown;
 };
 
 export const SLASH_ITEMS: SlashItem[] = [
@@ -202,15 +203,19 @@ export const SLASH_ITEMS: SlashItem[] = [
   {
     id: "image",
     title: "Image",
-    hint: "Embed by URL",
+    hint: "Copy a file into the vault",
     keywords: ["picture", "photo", "figure"],
     icon: ImageIcon,
     group: "Blocks",
-    prompt: { label: "Image URL", placeholder: "https://… or data:image/…" },
-    run: (editor, range, value) => {
-      const src = value?.trim();
-      if (!src) return;
-      editor.chain().focus().deleteRange(range).setImage({ src }).run();
+    // Opens the native file picker on the Rust side, which copies the chosen
+    // file into the vault's attachments folder and returns the relative
+    // reference to store. No path reaches this side, and the vault stays
+    // self-contained rather than pointing at a file elsewhere on the disk that
+    // could later move.
+    run: async (editor, range) => {
+      const reference = await notesApi.attach();
+      if (!reference) return; // Cancelled.
+      editor.chain().focus().deleteRange(range).setImage({ src: reference }).run();
     },
   },
 ];

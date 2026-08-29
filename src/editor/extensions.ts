@@ -2,6 +2,8 @@ import StarterKit from "@tiptap/starter-kit";
 import { TaskItem, TaskList } from "@tiptap/extension-list";
 import { TableKit } from "@tiptap/extension-table";
 import Image from "@tiptap/extension-image";
+import { ReactNodeViewRenderer } from "@tiptap/react";
+import ImageView from "./image/ImageView";
 import { Placeholder } from "@tiptap/extensions";
 import { Markdown } from "@tiptap/markdown";
 import { SlashCommand } from "./slash/SlashCommand";
@@ -41,10 +43,16 @@ export const extensions = [
     table: { resizable: true, allowTableNodeSelection: true },
   }),
 
-  Image.configure({
+  // A node view, so the stored `src` stays a vault-relative reference while
+  // the displayed URL goes through the sutra:// scheme. Nothing about
+  // serialisation changes: what is on disk is what was written.
+  Image.extend({
+    addNodeView() {
+      return ReactNodeViewRenderer(ImageView);
+    },
+  }).configure({
     inline: false,
     allowBase64: true,
-    HTMLAttributes: { class: "sutra-image" },
   }),
 
   Placeholder.configure({

@@ -68,11 +68,13 @@ export const SlashCommand = Extension.create({
             if (container) container.style.display = "none";
           };
 
-          const select = (item: SlashItem, value?: string) => {
+          const select = (item: SlashItem) => {
             if (!latest) return;
             // `range` covers the slash and everything typed after it, so the
             // item's own command deletes the trigger text as it inserts.
-            item.run(latest.editor, latest.range, value);
+            // Some items are async (the image picker); nothing here waits on
+            // them, and the menu closes either way.
+            void item.run(latest.editor, latest.range);
           };
 
           const menuProps = (props: SuggestionProps<SlashItem>): MenuProps => ({

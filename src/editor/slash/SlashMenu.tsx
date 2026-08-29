@@ -9,26 +9,18 @@ export type SlashMenuHandle = {
 
 type Props = {
   items: SlashItem[];
-  onSelect: (item: SlashItem, value?: string) => void;
+  onSelect: (item: SlashItem) => void;
   onDismiss: () => void;
   ref?: Ref<SlashMenuHandle>;
 };
 
 export default function SlashMenu({ items, onSelect, onDismiss, ref }: Props) {
   const [selected, setSelected] = useState(0);
-  // When an item needs a value first (currently only Image), the menu swaps to
-  // a single input rather than opening a second floating surface.
-  const [prompting, setPrompting] = useState<SlashItem | null>(null);
-  const [value, setValue] = useState("");
   const listRef = useRef<HTMLDivElement>(null);
-  const inputRef = useRef<HTMLInputElement>(null);
 
   // The item list is re-filtered on every keystroke; keep the highlight in range.
   useEffect(() => setSelected(0), [items]);
 
-  useEffect(() => {
-    if (prompting) inputRef.current?.focus();
-  }, [prompting]);
 
   // Keep the highlighted row visible without scrolling the page behind it.
   useEffect(() => {
@@ -38,25 +30,11 @@ export default function SlashMenu({ items, onSelect, onDismiss, ref }: Props) {
   }, [selected]);
 
   function choose(item: SlashItem) {
-    if (item.prompt) {
-      setPrompting(item);
-      setValue("");
-      return;
-    }
     onSelect(item);
   }
 
   useImperativeHandle(ref, () => ({
     onKeyDown(event) {
-      // While prompting, the input owns the keyboard apart from Escape.
-      if (prompting) {
-        if (event.key === "Escape") {
-          setPrompting(null);
-          return true;
-        }
-        return false;
-      }
-
       if (event.key === "ArrowDown") {
         setSelected((i) => (i + 1) % Math.max(items.length, 1));
         return true;
@@ -77,37 +55,6 @@ export default function SlashMenu({ items, onSelect, onDismiss, ref }: Props) {
       return false;
     },
   }));
-
-  if (prompting) {
-    return (
-      <div className="w-80 rounded-xl border border-border bg-surface p-3 shadow-lg shadow-black/5">
-        <label
-          htmlFor="sutra-slash-prompt"
-          className="mb-1.5 block text-xs font-semibold text-ink-soft"
-        >
-          {prompting.prompt?.label}
-        </label>
-        <input
-          id="sutra-slash-prompt"
-          ref={inputRef}
-          value={value}
-          placeholder={prompting.prompt?.placeholder}
-          onChange={(e) => setValue(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") {
-              e.preventDefault();
-              onSelect(prompting, value);
-            }
-            if (e.key === "Escape") {
-              e.preventDefault();
-              setPrompting(null);
-            }
-          }}
-          className="w-full rounded-md border border-border bg-canvas px-2.5 py-1.5 text-sm text-ink placeholder:text-ink-muted"
-        />
-      </div>
-    );
-  }
 
   if (items.length === 0) {
     return (

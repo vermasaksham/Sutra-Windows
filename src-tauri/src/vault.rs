@@ -241,6 +241,41 @@ impl Vault {
         Ok(format!("{ATTACHMENTS}/{name}"))
     }
 
+    /// Read an attachment by its vault-relative reference.
+    ///
+    /// The reference is whatever a note's markdown contains, so it is
+    /// attacker-controlled in the sense that anything could be typed into a
+    /// note by hand or arrive in a synced file. Two rules keep it inside the
+    /// vault:
+    ///
+    /// 1. Every path component must be an ordinary name — no `..`, no root,
+    ///    no Windows prefix like `C:`. That alone stops traversal.
+    /// 2. The first component must be `attachments`, so a note cannot read
+    ///    another note, the trash, or the index by asking for it.
+    ///
+    /// Checking the components rather than canonicalising and comparing
+    /// prefixes is deliberate: canonicalisation follows symlinks, which on a
+    /// synced folder can point anywhere, and it only works for paths that
+    /// already exist.
+    pub fn read_attachment(&self, reference: &str) -> Result<Vec<u8>> {
+        let relative = Path::new(reference);
+
+        let mut components = relative.components();
+        let first = components.next();
+        let is_attachments = matches!(
+            first,
+            Some(std::path::Component::Normal(name)) if name == ATTACHMENTS
+        );
+        if !is_attachments {
+            return Err(SutraError::NoteNotFound(reference.to_string()));
+        }
+        if !components.all(|c| matches!(c, std::path::Component::Normal(_))) {
+            return Err(SutraError::NoteNotFound(reference.to_string()));
+        }
+
+        Ok(fs::read(self.root.join(relative))?)
+    }
+
     /// Locate a note's file by scanning for the id suffix.
     fn path_for(&self, id: &str) -> Result<PathBuf> {
         for entry in fs::read_dir(&self.root)? {
@@ -508,6 +543,47 @@ mod tests {
         assert!(!reference.contains('\\'));
         assert!(vault.root().join(&reference).is_file());
         let _ = fs::remove_file(source);
+    }
+
+    #[test]
+    fn an_attachment_reads_back_by_its_reference() {
+        let vault = TempVault::new();
+        let source = std::env::temp_dir().join(format!("sutra-src-{}.png", Ulid::generate()));
+        fs::write(&source, b"PNG BYTES").unwrap();
+        let reference = vault.import_attachment(&source).unwrap();
+
+        assert_eq!(vault.read_attachment(&reference).unwrap(), b"PNG BYTES");
+        let _ = fs::remove_file(source);
+    }
+
+    #[test]
+    fn attachment_reads_cannot_escape_the_attachments_folder() {
+        let vault = TempVault::new();
+        // A note is next to attachments/, and the trash holds deleted work.
+        // Neither may be reachable by asking the attachment reader for it.
+        let note = vault.create_note("Secret", None).unwrap();
+        let file_name = note::file_name("Secret", &note.summary.id);
+
+        for reference in [
+            &format!("attachments/../{file_name}"),
+            &format!("../{file_name}"),
+            &file_name,
+            "attachments/../trash/anything.md",
+            "attachments/../../etc/passwd",
+            "/etc/passwd",
+            "trash/anything.md",
+        ] {
+            assert!(
+                vault.read_attachment(reference).is_err(),
+                "should have refused {reference:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_missing_attachment_is_an_error_not_a_panic() {
+        let vault = TempVault::new();
+        assert!(vault.read_attachment("attachments/nothing.png").is_err());
     }
 
     #[test]

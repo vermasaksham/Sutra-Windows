@@ -484,3 +484,30 @@
   overflow-y: hidden;
   padding-block: 0.2em;
 }
+
+/* --- Images ------------------------------------------------------------- */
+
+.sutra-image-wrapper {
+  margin-block: 1rem;
+}
+
+.sutra-image.is-selected {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* A reference that will not load. The file may have been moved out of the
+   vault, and showing nothing at all would hide that from the author. */
+.sutra-image-missing {
+  border: 1px dashed var(--border);
+  border-radius: 8px;
+  padding: 0.75rem 1rem;
+  color: var(--text-muted);
+  font-size: 0.875rem;
+}
+
+.sutra-image-missing code {
+  background: none;
+  color: var(--highlight);
+  padding: 0;
+}

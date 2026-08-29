@@ -3063,6 +3063,7 @@ name = "sutra"
 version = "0.1.0"
 dependencies = [
  "notify-debouncer-full",
+ "percent-encoding",
  "rusqlite",
  "serde",
  "serde_json",
