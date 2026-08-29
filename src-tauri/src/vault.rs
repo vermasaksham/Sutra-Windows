@@ -25,6 +25,7 @@ pub struct NoteSummary {
     pub position: i64,
     pub tags: Vec<String>,
     pub icon: Option<String>,
+    pub cover: Option<String>,
     #[serde(with = "time::serde::rfc3339")]
     pub updated: OffsetDateTime,
 }
@@ -190,6 +191,47 @@ impl Vault {
         Ok(summary_of(&fm))
     }
 
+    /// Replace a note's page-level metadata.
+    ///
+    /// The caller sends the complete desired state rather than a patch. A patch
+    /// would need to distinguish "leave this alone" from "set this to null",
+    /// which over an IPC boundary means a nested Option and a lot of ceremony
+    /// for no benefit — the frontend always has the whole note loaded anyway.
+    ///
+    /// Icon, cover and tags are page-level, so they belong in frontmatter. The
+    /// body is untouched.
+    pub fn set_meta(
+        &self,
+        id: &str,
+        icon: Option<String>,
+        cover: Option<String>,
+        tags: Vec<String>,
+    ) -> Result<NoteSummary> {
+        let path = self.path_for(id)?;
+        let contents = fs::read_to_string(&path)?;
+        let (parsed, body) = frontmatter::split(&contents)?;
+        let mut fm = parsed.unwrap_or_else(|| {
+            let name = path
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or_default();
+            Self::synthesise(id, name)
+        });
+
+        // An empty string means "no icon", not an icon that renders as nothing.
+        fm.icon = icon.filter(|i| !i.trim().is_empty());
+        fm.cover = cover.filter(|c| !c.trim().is_empty());
+        // Tags are normalised here rather than in the UI so that a tag typed
+        // in one note matches the same tag typed in another, whatever case or
+        // stray whitespace it arrived with.
+        fm.tags = normalise_tags(tags);
+        fm.updated = frontmatter::now();
+
+        let body = body.to_string();
+        note::write_atomic(&path, &frontmatter::join(&fm, &body)?)?;
+        Ok(summary_of(&fm))
+    }
+
     /// Move a note to `trash/` rather than unlinking it.
     ///
     /// A rename, so it is atomic and instant regardless of file size, and the
@@ -314,6 +356,22 @@ impl Vault {
     }
 }
 
+/// Trim, lowercase, drop empties, and de-duplicate while keeping order.
+///
+/// Lowercasing is the part that matters: "CVT" and "cvt" are one tag, and a
+/// vault where they are two is a vault where filtering silently misses notes.
+fn normalise_tags(tags: Vec<String>) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for tag in tags {
+        let tag = tag.trim().to_lowercase();
+        if tag.is_empty() || out.contains(&tag) {
+            continue;
+        }
+        out.push(tag);
+    }
+    out
+}
+
 fn summary_of(fm: &Frontmatter) -> NoteSummary {
     NoteSummary {
         id: fm.id.clone(),
@@ -322,6 +380,7 @@ fn summary_of(fm: &Frontmatter) -> NoteSummary {
         position: fm.position,
         tags: fm.tags.clone(),
         icon: fm.icon.clone(),
+        cover: fm.cover.clone(),
         updated: fm.updated,
     }
 }
@@ -489,6 +548,69 @@ mod tests {
         assert!(note.adopted);
         assert_eq!(note.summary.title, "Dropped in");
         assert_eq!(note.body, "Just prose, no frontmatter.\n");
+    }
+
+    #[test]
+    fn set_meta_writes_frontmatter_and_leaves_the_body_alone() {
+        let vault = TempVault::new();
+        let note = vault.create_note("Runs", None).unwrap();
+        let id = note.summary.id.clone();
+        vault
+            .save_note(&id, "Runs", "Body that must survive.")
+            .unwrap();
+
+        let updated = vault
+            .set_meta(
+                &id,
+                Some("\u{1f9ea}".into()),
+                Some("attachments/01H_cover.png".into()),
+                vec!["Sb2Se3".into(), "CVT".into()],
+            )
+            .unwrap();
+
+        assert_eq!(updated.icon.as_deref(), Some("\u{1f9ea}"));
+        assert_eq!(updated.tags, vec!["sb2se3", "cvt"]);
+        assert_eq!(
+            vault.read_note(&id).unwrap().body,
+            "Body that must survive.\n"
+        );
+    }
+
+    #[test]
+    fn tags_are_normalised_so_one_tag_is_one_tag() {
+        let vault = TempVault::new();
+        let note = vault.create_note("T", None).unwrap();
+        let updated = vault
+            .set_meta(
+                &note.summary.id,
+                None,
+                None,
+                vec![
+                    "  CVT  ".into(),
+                    "cvt".into(),
+                    "".into(),
+                    "   ".into(),
+                    "Sb2Se3".into(),
+                ],
+            )
+            .unwrap();
+        assert_eq!(updated.tags, vec!["cvt", "sb2se3"]);
+    }
+
+    #[test]
+    fn clearing_an_icon_removes_it() {
+        let vault = TempVault::new();
+        let note = vault.create_note("T", None).unwrap();
+        let id = note.summary.id.clone();
+        vault
+            .set_meta(&id, Some("\u{1f9ea}".into()), None, vec![])
+            .unwrap();
+        // An empty string is how the UI says "none"; it must not become an
+        // icon that renders as nothing.
+        let cleared = vault
+            .set_meta(&id, Some("  ".into()), None, vec![])
+            .unwrap();
+        assert_eq!(cleared.icon, None);
     }
 
     #[test]

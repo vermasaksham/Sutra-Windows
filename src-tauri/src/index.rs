@@ -16,7 +16,7 @@ use std::sync::Mutex;
 /// Bumped whenever the schema changes. On mismatch the index is dropped and
 /// rebuilt rather than migrated — migrations are for data you cannot recreate,
 /// and this is not that.
-const SCHEMA_VERSION: i32 = 1;
+const SCHEMA_VERSION: i32 = 2;
 
 const SCHEMA: &str = r#"
 CREATE TABLE notes (
@@ -26,6 +26,7 @@ CREATE TABLE notes (
     position  INTEGER NOT NULL,
     tags      TEXT NOT NULL,
     icon      TEXT,
+    cover     TEXT,
     updated   TEXT NOT NULL
 );
 CREATE INDEX notes_by_parent ON notes(parent, position);
@@ -36,6 +37,11 @@ CREATE VIRTUAL TABLE notes_fts USING fts5(
     id UNINDEXED,
     title,
     body,
+    -- Tags are indexed too, so clicking one finds the notes carrying it.
+    -- Search then matches a tag and a prose mention of the same word alike,
+    -- which for a research vault is closer to what was meant than an exact
+    -- tag filter would be.
+    tags,
     tokenize = "unicode61 remove_diacritics 2"
 );
 
@@ -156,7 +162,7 @@ impl Index {
     pub fn all_notes(&self) -> Result<Vec<NoteSummary>> {
         let guard = self.conn.lock().unwrap_or_else(|e| e.into_inner());
         let mut stmt = guard.prepare(
-            "SELECT id, title, parent, position, tags, icon, updated
+            "SELECT id, title, parent, position, tags, icon, cover, updated
              FROM notes
              ORDER BY position, title COLLATE NOCASE",
         )?;
@@ -231,8 +237,8 @@ fn create_schema(conn: &Connection) -> Result<()> {
 fn insert_note(tx: &rusqlite::Transaction<'_>, note: &NoteSummary, body: &str) -> Result<()> {
     let tags = serde_json::to_string(&note.tags).unwrap_or_else(|_| "[]".into());
     tx.execute(
-        "INSERT INTO notes (id, title, parent, position, tags, icon, updated)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+        "INSERT INTO notes (id, title, parent, position, tags, icon, cover, updated)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
         params![
             note.id,
             note.title,
@@ -240,14 +246,15 @@ fn insert_note(tx: &rusqlite::Transaction<'_>, note: &NoteSummary, body: &str) -
             note.position,
             tags,
             note.icon,
+            note.cover,
             note.updated
                 .format(&time::format_description::well_known::Rfc3339)
                 .unwrap_or_default(),
         ],
     )?;
     tx.execute(
-        "INSERT INTO notes_fts (id, title, body) VALUES (?1, ?2, ?3)",
-        params![note.id, note.title, body],
+        "INSERT INTO notes_fts (id, title, body, tags) VALUES (?1, ?2, ?3, ?4)",
+        params![note.id, note.title, body, note.tags.join(" ")],
     )?;
     for target in links::extract(body) {
         // A note linking to itself is not a backlink worth showing.
@@ -271,7 +278,7 @@ fn remove_note(tx: &rusqlite::Transaction<'_>, id: &str) -> Result<()> {
 
 fn row_to_summary(row: &rusqlite::Row<'_>) -> rusqlite::Result<NoteSummary> {
     let tags: String = row.get(4)?;
-    let updated: String = row.get(6)?;
+    let updated: String = row.get(7)?;
     Ok(NoteSummary {
         id: row.get(0)?,
         title: row.get(1)?,
@@ -279,6 +286,7 @@ fn row_to_summary(row: &rusqlite::Row<'_>) -> rusqlite::Result<NoteSummary> {
         position: row.get(3)?,
         tags: serde_json::from_str(&tags).unwrap_or_default(),
         icon: row.get(5)?,
+        cover: row.get(6)?,
         updated: time::OffsetDateTime::parse(
             &updated,
             &time::format_description::well_known::Rfc3339,
@@ -414,6 +422,24 @@ mod tests {
                 "prefix {partial:?} should match"
             );
         }
+    }
+
+    #[test]
+    fn a_tag_is_findable_by_search() {
+        let f = Fixture::new();
+        let note = f.vault.create_note("Untagged title", None).unwrap();
+        f.vault
+            .save_note(&note.summary.id, "Untagged title", "Body without the word.")
+            .unwrap();
+        f.vault
+            .set_meta(&note.summary.id, None, None, vec!["sb2se3".into()])
+            .unwrap();
+        f.index.rebuild(&f.vault).unwrap();
+
+        // The tag appears in neither the title nor the body.
+        let hits = f.index.search("sb2se3", 10).unwrap();
+        assert_eq!(hits.len(), 1, "a tag should be findable");
+        assert_eq!(hits[0].title, "Untagged title");
     }
 
     #[test]

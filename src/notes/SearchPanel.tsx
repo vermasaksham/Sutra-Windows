@@ -9,18 +9,26 @@ import { indexApi, type SearchHit } from "../vault/api";
  * excerpt shows why a note matched rather than just its first line.
  */
 export default function SearchPanel({
+  initialQuery = "",
   onClose,
   onSelect,
 }: {
+  /** Pre-filled when the panel is opened by clicking a tag. */
+  initialQuery?: string;
   onClose: () => void;
   onSelect: (id: string) => void;
 }) {
-  const [query, setQuery] = useState("");
+  const [query, setQuery] = useState(initialQuery);
   const [hits, setHits] = useState<SearchHit[]>([]);
   const [selected, setSelected] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  useEffect(() => inputRef.current?.focus(), []);
+  useEffect(() => {
+    const input = inputRef.current;
+    input?.focus();
+    // Select a pre-filled query so typing replaces it rather than appending.
+    input?.select();
+  }, []);
 
   useEffect(() => {
     // Debounced, so a fast typist does not queue a query per keystroke.

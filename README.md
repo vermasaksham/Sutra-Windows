@@ -75,6 +75,10 @@ src/
   App.tsx             Top bar, note list, and the writing surface
   notes/
     useNote.ts        Buffer, autosave, external-change handling
+    NoteHeader.tsx    Cover, icon, title, tags — all frontmatter
+    IconPicker.tsx    Curated emoji, no dependency
+    TagEditor.tsx     Tag chips; clicking one searches for it
+    shortcuts.ts      App-level keys only; the editor owns its own
     tree.ts           Flat list -> tree, tolerant of cycles and orphans
     NoteTree.tsx      Nested, collapsible sidebar
     Breadcrumbs.tsx   Root-to-note chain
@@ -104,6 +108,7 @@ src-tauri/
     commands.rs       The entire surface the frontend can call
     vault.rs          Vault operations: list, read, save, delete, attach
     index.rs          SQLite: tree, FTS5 search, backlinks. Disposable.
+    protocol.rs       sutra:// scheme serving vault attachments
     links.rs          Finding [[id]] references in markdown
     frontmatter.rs    The YAML block, parsing and serialising
     note.rs           Filenames, slugging, atomic writes
@@ -157,6 +162,6 @@ an earlier one is open.
       backlinks, breadcrumbs.
 - [x] **Phase 5 — maths and chemistry.** KaTeX + mhchem, lossless markdown
       round-trip.
-- [ ] **Phase 6 — daily driver.** Shortcuts, tags, icons and covers, motion,
+- [x] **Phase 6 — daily driver.** Shortcuts, tags, icons and covers, motion,
       empty states, error handling.
 - [ ] **Phase 7 — research tools.** Zotero, docx and PDF export.

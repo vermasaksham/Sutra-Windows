@@ -117,6 +117,26 @@ pub fn save_note(
     })
 }
 
+/// Replace a note's icon, cover and tags. The body is untouched.
+#[tauri::command]
+pub fn set_note_meta(
+    state: State<'_, AppState>,
+    id: String,
+    icon: Option<String>,
+    cover: Option<String>,
+    tags: Vec<String>,
+) -> Result<NoteSummary> {
+    state.with_both(|vault, index| {
+        let summary = vault.set_meta(&id, icon.clone(), cover.clone(), tags.clone())?;
+        // The body has not changed, but the index row carries the title, tags
+        // and icon, so it has to be rewritten. Re-read rather than assume: the
+        // note on disk is the truth.
+        let doc = vault.read_note(&id)?;
+        index.upsert(&summary, &doc.body)?;
+        Ok(summary)
+    })
+}
+
 /// Move a note to the trash folder. Nothing is unlinked.
 #[tauri::command]
 pub fn delete_note(state: State<'_, AppState>, id: String) -> Result<()> {

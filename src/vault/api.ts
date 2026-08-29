@@ -18,6 +18,7 @@ export type NoteSummary = {
   position: number;
   tags: string[];
   icon: string | null;
+  cover: string | null;
   /** RFC3339, e.g. 2026-08-21T11:02:00Z */
   updated: string;
 };
@@ -41,6 +42,13 @@ export const notesApi = {
   save: (id: string, title: string, body: string) =>
     invoke<NoteSummary>("save_note", { id, title, body }),
   remove: (id: string) => invoke<void>("delete_note", { id }),
+  /** Replace a note's page-level metadata. Send the complete desired state. */
+  setMeta: (
+    id: string,
+    icon: string | null,
+    cover: string | null,
+    tags: string[],
+  ) => invoke<NoteSummary>("set_note_meta", { id, icon, cover, tags }),
   /** Opens the native file picker and copies the result into the vault.
    *  Resolves the vault-relative reference to put in the markdown. */
   attach: () => invoke<string | null>("attach_file"),

@@ -1,5 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { notesApi, onVaultChanged, type NoteDoc } from "../vault/api";
+import {
+  notesApi,
+  onVaultChanged,
+  type NoteDoc,
+  type NoteSummary,
+} from "../vault/api";
 
 const AUTOSAVE_DELAY = 600;
 
@@ -113,6 +118,20 @@ export function useNote(id: string | null, onSaved: () => void) {
   );
 
   /**
+   * Take new page metadata without disturbing the body.
+   *
+   * Icon, cover and tags are written by their own command, which returns the
+   * updated summary. Re-reading the whole note instead would be simpler but
+   * wrong: it would replace the body with what is on disk and throw away any
+   * edit still sitting in the buffer.
+   */
+  const applyMeta = useCallback((summary: NoteSummary) => {
+    setDoc((current) =>
+      current && current.id === summary.id ? { ...current, ...summary } : current,
+    );
+  }, []);
+
+  /**
    * Throw away a pending autosave without writing it.
    *
    * Needed when the open note is being deleted: the queued timer would
@@ -220,6 +239,7 @@ export function useNote(id: string | null, onSaved: () => void) {
     setTitle,
     flush,
     discard,
+    applyMeta,
     resolveConflict,
   };
 }

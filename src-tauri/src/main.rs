@@ -49,6 +49,7 @@ fn main() {
             commands::read_note,
             commands::create_note,
             commands::save_note,
+            commands::set_note_meta,
             commands::delete_note,
             commands::attach_file,
         ])
