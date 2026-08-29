@@ -144,3 +144,13 @@ The `<=>` case looks alarming given mhchem uses it, but chemistry is unaffected:
 in Phase 5 `\ce{…}` lives inside a maths node that declares its own
 `renderMarkdown`, so its content never passes through the prose text escaper.
 That is the same property that made this architecture the right choice.
+
+### Postscript: what this bought in Phase 5
+
+The maths nodes proved the argument. `\ce{Sb2Se3 + 3I2 <=> 2SbI3 + 3Se}` is
+exactly the string the prose serialiser would have mangled — `<=>` into
+`&lt;=&gt;`, every `\` doubled — and it round-trips byte-identically, because
+the node owns its own `renderMarkdown` and the text never reaches the escaper.
+
+Ten round-trip cases, all lossless, including formulas full of `_`, `*` and
+`{}`; and `$5 and $7` in prose still produces no maths nodes at all.

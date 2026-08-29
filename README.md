@@ -88,6 +88,7 @@ src/
     Editor.tsx        TipTap instance and the drag handle
     markdown.ts       Markdown ↔ editor, and why it lives here
     wikilink/         [[id]] node, its markdown spec, and [[ autocomplete
+    math/             $…$ and $$…$$ nodes, KaTeX rendering, mhchem
     extensions.ts     The block vocabulary
     initialContent.ts Seed document — Phase 2 has no persistence
     icons.tsx         Inline SVGs, all currentColor
@@ -154,7 +155,7 @@ an earlier one is open.
       read/write, autosave, file watching.
 - [x] **Phase 4 — navigation.** SQLite index, sidebar tree, search, wikilinks,
       backlinks, breadcrumbs.
-- [ ] **Phase 5 — maths and chemistry.** KaTeX + mhchem, lossless markdown
+- [x] **Phase 5 — maths and chemistry.** KaTeX + mhchem, lossless markdown
       round-trip.
 - [ ] **Phase 6 — daily driver.** Shortcuts, tags, icons and covers, motion,
       empty states, error handling.

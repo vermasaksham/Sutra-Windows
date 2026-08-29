@@ -2,12 +2,14 @@ import type { Editor, Range } from "@tiptap/core";
 import type { ComponentType, SVGProps } from "react";
 import {
   BulletListIcon,
+  ChemistryIcon,
   CodeIcon,
   DividerIcon,
   H1Icon,
   H2Icon,
   H3Icon,
   ImageIcon,
+  MathIcon,
   OrderedListIcon,
   QuoteIcon,
   TableIcon,
@@ -161,6 +163,40 @@ export const SLASH_ITEMS: SlashItem[] = [
         .focus()
         .deleteRange(range)
         .insertTable({ rows: 3, cols: 3, withHeaderRow: true })
+        .run(),
+  },
+  {
+    id: "math",
+    title: "Equation",
+    hint: "Display maths block",
+    keywords: ["latex", "katex", "formula", "$$", "maths", "math"],
+    icon: MathIcon,
+    group: "Blocks",
+    run: (editor, range) =>
+      editor
+        .chain()
+        .focus()
+        .deleteRange(range)
+        // Empty on purpose: the block opens straight into its editor, so the
+        // next keystroke goes into the formula.
+        .insertContent({ type: "mathBlock", attrs: { latex: "" } })
+        .run(),
+  },
+  {
+    id: "chemistry",
+    title: "Chemical equation",
+    hint: "Display block, pre-filled with \\ce{}",
+    keywords: ["mhchem", "reaction", "ce", "chem"],
+    icon: ChemistryIcon,
+    group: "Blocks",
+    run: (editor, range) =>
+      editor
+        .chain()
+        .focus()
+        .deleteRange(range)
+        // Pre-filled, because \ce{} is the part nobody remembers and the
+        // formula inside it is the part they came to write.
+        .insertContent({ type: "mathBlock", attrs: { latex: "\\ce{}" } })
         .run(),
   },
   {

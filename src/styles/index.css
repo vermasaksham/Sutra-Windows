@@ -6,6 +6,10 @@
 @import "@fontsource/source-sans-3/600.css";
 @import "@fontsource/source-sans-3/700.css";
 
+/* KaTeX's stylesheet, self-hosted with the fonts it references. Same reason as
+   Source Sans 3: the app has to render with no network. */
+@import "katex/dist/katex.min.css";
+
 @import "tailwindcss";
 @import "./tokens.css";
 @import "./editor.css";

@@ -5,6 +5,8 @@ import Image from "@tiptap/extension-image";
 import { Placeholder } from "@tiptap/extensions";
 import { Markdown } from "@tiptap/markdown";
 import { SlashCommand } from "./slash/SlashCommand";
+import { MathBlock } from "./math/MathBlock";
+import { MathInline } from "./math/MathInline";
 import { WikiLink } from "./wikilink/WikiLink";
 import { WikiLinkSuggestion } from "./wikilink/WikiLinkSuggestion";
 
@@ -68,4 +70,10 @@ export const extensions = [
   // title, so renaming a note cannot break a link.
   WikiLink,
   WikiLinkSuggestion,
+
+  // Maths and chemistry. MathBlock is registered before MathInline so the
+  // block tokenizer sees `$$` first — otherwise the inline rule would match
+  // the opening `$$` as an empty formula and the fence would never form.
+  MathBlock,
+  MathInline,
 ];

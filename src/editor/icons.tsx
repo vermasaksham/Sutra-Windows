@@ -118,6 +118,22 @@ export const ImageIcon = (p: IconProps) => (
   </Svg>
 );
 
+export const MathIcon = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="M4 19c2.5 0 3-1.5 3.6-4.2L9.6 6C10 4.3 10.8 3 12.5 3c1 0 1.7.4 2 .9" />
+    <path d="M6.5 10.5h6" />
+    <path d="M14 12l6 7M20 12l-6 7" />
+  </Svg>
+);
+
+export const ChemistryIcon = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="M10 3v6.2L4.6 18A2 2 0 0 0 6.3 21h11.4a2 2 0 0 0 1.7-3L14 9.2V3" />
+    <path d="M8.5 3h7" />
+    <path d="M7.2 14.5h9.6" />
+  </Svg>
+);
+
 export const GripIcon = (p: IconProps) => (
   <Svg {...p} strokeWidth={0}>
     {[7, 12, 17].map((cy) =>

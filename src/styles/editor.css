@@ -386,3 +386,101 @@
   color: var(--highlight);
   border-radius: 2px;
 }
+
+/* --- Maths and chemistry ------------------------------------------------ */
+
+.sutra-math-inline-wrapper {
+  display: inline;
+}
+
+.sutra-math-inline {
+  cursor: pointer;
+  border-radius: 4px;
+  padding: 0 0.15em;
+  transition: background-color var(--duration-fast) var(--ease-out);
+}
+
+.sutra-math-inline:hover,
+.sutra-math-inline.is-selected {
+  background-color: var(--accent-bg);
+}
+
+/* A formula with nothing in it still needs to be findable and clickable. */
+.sutra-math-inline.is-empty::after {
+  content: "empty formula";
+  color: var(--text-muted);
+  font-size: 0.85em;
+  font-style: italic;
+}
+
+.sutra-math-block {
+  margin-block: 1rem;
+  border-radius: 8px;
+  border: 1px solid transparent;
+  transition: border-color var(--duration-fast) var(--ease-out);
+}
+
+.sutra-math-block.is-selected {
+  border-color: var(--accent);
+}
+
+.sutra-math-rendered {
+  padding: 0.75rem 1rem;
+  overflow-x: auto;
+  cursor: pointer;
+  border-radius: 8px;
+  transition: background-color var(--duration-fast) var(--ease-out);
+}
+
+.sutra-math-rendered:hover {
+  background-color: var(--surface);
+}
+
+/* Raw LaTeX, while editing. Monospaced because alignment matters in a formula
+   and the author is reading source, not prose. */
+.sutra-math-textarea,
+.sutra-math-input {
+  font-family: var(--font-mono);
+  font-size: 0.875rem;
+  line-height: 1.6;
+  color: var(--text-primary);
+  background-color: var(--surface);
+  border: 1px solid var(--accent);
+  border-radius: 8px;
+  padding: 0.5rem 0.75rem;
+  outline: none;
+  resize: vertical;
+}
+
+.sutra-math-textarea {
+  display: block;
+  width: 100%;
+}
+
+.sutra-math-input {
+  display: inline-block;
+  padding: 0.05rem 0.3rem;
+  border-radius: 4px;
+}
+
+.sutra-math-textarea::placeholder,
+.sutra-math-input::placeholder {
+  color: var(--text-muted);
+}
+
+/* KaTeX defaults to the surrounding colour, which is what we want, but its
+   error markup hardcodes red. Route that through the token instead. */
+.sutra-prose .katex {
+  color: inherit;
+}
+
+.sutra-prose .katex .katex-error {
+  color: var(--highlight) !important;
+}
+
+/* Long display formulas scroll rather than widening the content column. */
+.sutra-prose .katex-display {
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding-block: 0.2em;
+}
