@@ -1,28 +1,49 @@
+import { useState } from "react";
 import ThemeToggle from "../components/ThemeToggle";
+import { buildFolders, flattenFolders, type FolderNode } from "./tree";
 import type { NoteSummary } from "../vault/api";
 
 /**
  * The left rail: what to look at, rather than which note.
  *
- * Bear's shape — a narrow column of collections above a tag list, sitting on
- * the darkest of the three grounds so the list and the page read as stacked in
- * front of it. Sutra's collections are simply "everything" and "notes carrying
- * this tag", because tags are the only cross-cutting axis the frontmatter has.
+ * Three groups, deliberately not one hierarchy — a folder is where a note
+ * lives, a tag is what it is about, and the two must never be presented as the
+ * same kind of thing. Location comes first because it is the only one of the
+ * three that is a fact about the filesystem.
  */
 export default function Sidebar({
   vaultName,
   notes,
+  folders,
+  activeFolder,
   activeTag,
+  onSelectFolder,
   onSelectTag,
   onNewNote,
+  onNewFolder,
 }: {
   vaultName: string;
   notes: NoteSummary[];
+  folders: string[];
+  activeFolder: string | null;
   activeTag: string | null;
+  onSelectFolder: (folder: string | null) => void;
   onSelectTag: (tag: string | null) => void;
   onNewNote: () => void;
+  onNewFolder: (parent: string | null) => void;
 }) {
+  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+  const tree = buildFolders(folders, notes);
+  const rows = flattenFolders(tree, collapsed);
   const counts = tagCounts(notes);
+
+  const toggle = (path: string) =>
+    setCollapsed((prev) => {
+      const next = new Set(prev);
+      if (next.has(path)) next.delete(path);
+      else next.add(path);
+      return next;
+    });
 
   return (
     <nav
@@ -45,40 +66,134 @@ export default function Sidebar({
         </button>
       </div>
 
-      <div className="px-1.5">
-        <Row
-          label="All notes"
-          count={notes.length}
-          active={activeTag === null}
-          onClick={() => onSelectTag(null)}
-        />
-      </div>
+      <div className="min-h-0 flex-1 overflow-y-auto pb-2">
+        <div className="px-1.5">
+          <Row
+            label="All notes"
+            count={notes.length}
+            active={activeFolder === null && activeTag === null}
+            onClick={() => onSelectFolder(null)}
+          />
+        </div>
 
-      {counts.length > 0 && (
-        <>
-          <p className="px-3 pt-4 pb-1 text-[0.6875rem] font-semibold tracking-wide text-ink-muted uppercase">
-            Tags
+        <div className="flex items-center justify-between px-3 pt-4 pb-1">
+          <p className="text-[0.6875rem] font-semibold tracking-wide text-ink-muted uppercase">
+            Folders
           </p>
-          <ul className="min-h-0 flex-1 overflow-y-auto px-1.5 pb-2">
-            {counts.map(([tag, count]) => (
-              <li key={tag}>
-                <Row
-                  label={tag}
-                  hash
-                  count={count}
-                  active={activeTag === tag}
-                  onClick={() => onSelectTag(activeTag === tag ? null : tag)}
+          <button
+            type="button"
+            onClick={() => onNewFolder(activeFolder)}
+            aria-label="New folder"
+            title="New folder"
+            className="grid size-4 place-items-center rounded text-ink-muted transition-colors duration-150 ease-out hover:text-accent"
+          >
+            <Plus small />
+          </button>
+        </div>
+
+        {rows.length === 0 ? (
+          <p className="px-3 pb-1 text-xs text-ink-muted">
+            No folders yet. Notes live at the top level.
+          </p>
+        ) : (
+          <ul className="px-1.5">
+            {rows.map((node) => (
+              <li key={node.path}>
+                <FolderRow
+                  node={node}
+                  active={activeFolder === node.path && activeTag === null}
+                  collapsed={collapsed.has(node.path)}
+                  onToggle={() => toggle(node.path)}
+                  onSelect={() => onSelectFolder(node.path)}
                 />
               </li>
             ))}
           </ul>
-        </>
-      )}
+        )}
 
-      <div className="mt-auto p-2">
+        {counts.length > 0 && (
+          <>
+            <p className="px-3 pt-4 pb-1 text-[0.6875rem] font-semibold tracking-wide text-ink-muted uppercase">
+              Tags
+            </p>
+            <ul className="px-1.5">
+              {counts.map(([tag, count]) => (
+                <li key={tag}>
+                  <Row
+                    label={tag}
+                    hash
+                    count={count}
+                    active={activeTag === tag}
+                    onClick={() => onSelectTag(activeTag === tag ? null : tag)}
+                  />
+                </li>
+              ))}
+            </ul>
+          </>
+        )}
+      </div>
+
+      <div className="p-2">
         <ThemeToggle />
       </div>
     </nav>
+  );
+}
+
+function FolderRow({
+  node,
+  active,
+  collapsed,
+  onToggle,
+  onSelect,
+}: {
+  node: FolderNode;
+  active: boolean;
+  collapsed: boolean;
+  onToggle: () => void;
+  onSelect: () => void;
+}) {
+  const hasChildren = node.children.length > 0;
+  return (
+    <div
+      className={[
+        "flex items-center rounded-md transition-colors duration-150 ease-out",
+        active
+          ? "bg-row-active text-accent"
+          : "text-ink-soft hover:bg-row-hover hover:text-ink",
+      ].join(" ")}
+      // Indent by depth on the row rather than with a nested list, so every
+      // row is the same height and the hit targets stay aligned.
+      style={{ paddingInlineStart: `${node.depth * 10}px` }}
+    >
+      <button
+        type="button"
+        onClick={onToggle}
+        aria-label={
+          hasChildren
+            ? collapsed
+              ? `Expand ${node.name}`
+              : `Collapse ${node.name}`
+            : undefined
+        }
+        aria-expanded={hasChildren ? !collapsed : undefined}
+        tabIndex={hasChildren ? 0 : -1}
+        className="grid size-4 shrink-0 place-items-center rounded text-ink-muted"
+      >
+        {hasChildren && <Chevron open={!collapsed} />}
+      </button>
+      <button
+        type="button"
+        onClick={onSelect}
+        aria-current={active ? "true" : undefined}
+        className="min-w-0 flex-1 truncate py-1 pr-1 text-left text-sm"
+      >
+        {node.name}
+      </button>
+      <span className="shrink-0 pr-2 text-xs tabular-nums text-ink-muted">
+        {node.total || ""}
+      </span>
+    </div>
   );
 }
 
@@ -164,7 +279,7 @@ function Star() {
   );
 }
 
-function Plus() {
+function Plus({ small }: { small?: boolean } = {}) {
   return (
     <svg
       viewBox="0 0 24 24"
@@ -172,10 +287,28 @@ function Plus() {
       stroke="currentColor"
       strokeWidth={1.75}
       strokeLinecap="round"
-      className="size-4"
+      className={small ? "size-3" : "size-4"}
       aria-hidden
     >
       <path d="M12 5v14M5 12h14" />
+    </svg>
+  );
+}
+
+function Chevron({ open }: { open: boolean }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={2}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className="size-3 transition-transform duration-150 ease-out"
+      style={{ transform: open ? "rotate(90deg)" : "none" }}
+      aria-hidden
+    >
+      <path d="M9 6l6 6-6 6" />
     </svg>
   );
 }

@@ -14,7 +14,8 @@ export type VaultInfo = { name: string };
 export type NoteSummary = {
   id: string;
   title: string;
-  parent: string | null;
+  /** Vault-relative directory, `/`-separated. "" is the root. */
+  folder: string;
   position: number;
   tags: string[];
   icon: string | null;
@@ -39,8 +40,11 @@ export const vaultApi = {
 export const notesApi = {
   list: () => invoke<NoteSummary[]>("list_notes"),
   read: (id: string) => invoke<NoteDoc>("read_note", { id }),
-  create: (title: string, parent: string | null = null) =>
-    invoke<NoteDoc>("create_note", { title, parent }),
+  create: (title: string, folder: string | null = null) =>
+    invoke<NoteDoc>("create_note", { title, folder }),
+  /** Move a note into another folder. Nothing that links to it changes. */
+  move: (id: string, folder: string) =>
+    invoke<NoteSummary>("move_note", { id, folder }),
   save: (id: string, title: string, body: string) =>
     invoke<NoteSummary>("save_note", { id, title, body }),
   remove: (id: string) => invoke<void>("delete_note", { id }),
@@ -51,9 +55,17 @@ export const notesApi = {
     cover: string | null,
     tags: string[],
   ) => invoke<NoteSummary>("set_note_meta", { id, icon, cover, tags }),
-  /** Opens the native file picker and copies the result into the vault.
-   *  Resolves the vault-relative reference to put in the markdown. */
-  attach: () => invoke<string | null>("attach_file"),
+  /** Opens the native file picker and copies the result into the vault,
+   *  beside the note that will reference it. Resolves the vault-relative
+   *  reference to put in the markdown. */
+  attach: (folder: string | null = null) =>
+    invoke<string | null>("attach_file", { folder }),
+};
+
+export const foldersApi = {
+  list: () => invoke<string[]>("list_folders"),
+  /** Create a folder, and any missing parents. Resolves its normalised path. */
+  create: (folder: string) => invoke<string>("create_folder", { folder }),
 };
 
 export type SearchHit = { id: string; title: string; excerpt: string };

@@ -16,13 +16,16 @@ use std::sync::Mutex;
 /// Bumped whenever the schema changes. On mismatch the index is dropped and
 /// rebuilt rather than migrated — migrations are for data you cannot recreate,
 /// and this is not that.
-const SCHEMA_VERSION: i32 = 3;
+const SCHEMA_VERSION: i32 = 4;
 
 const SCHEMA: &str = r#"
 CREATE TABLE notes (
     id        TEXT PRIMARY KEY,
     title     TEXT NOT NULL,
-    parent    TEXT,
+    -- Vault-relative directory, '' for the root. Replaces a parent id: a
+    -- note's location is where its file is, so this is copied from the path
+    -- rather than from anything the note claims about itself.
+    folder    TEXT NOT NULL,
     position  INTEGER NOT NULL,
     tags      TEXT NOT NULL,
     icon      TEXT,
@@ -32,7 +35,7 @@ CREATE TABLE notes (
     excerpt   TEXT NOT NULL DEFAULT '',
     updated   TEXT NOT NULL
 );
-CREATE INDEX notes_by_parent ON notes(parent, position);
+CREATE INDEX notes_by_folder ON notes(folder, position);
 
 -- Contentless-adjacent: we store the text because the body is not otherwise in
 -- the database, and FTS5 needs something to tokenise.
@@ -165,9 +168,9 @@ impl Index {
     pub fn all_notes(&self) -> Result<Vec<NoteSummary>> {
         let guard = self.conn.lock().unwrap_or_else(|e| e.into_inner());
         let mut stmt = guard.prepare(
-            "SELECT id, title, parent, position, tags, icon, cover, excerpt, updated
+            "SELECT id, title, folder, position, tags, icon, cover, excerpt, updated
              FROM notes
-             ORDER BY position, title COLLATE NOCASE",
+             ORDER BY folder, position, title COLLATE NOCASE",
         )?;
         let rows = stmt.query_map([], row_to_summary)?;
         Ok(rows.filter_map(std::result::Result::ok).collect())
@@ -240,12 +243,12 @@ fn create_schema(conn: &Connection) -> Result<()> {
 fn insert_note(tx: &rusqlite::Transaction<'_>, note: &NoteSummary, body: &str) -> Result<()> {
     let tags = serde_json::to_string(&note.tags).unwrap_or_else(|_| "[]".into());
     tx.execute(
-        "INSERT INTO notes (id, title, parent, position, tags, icon, cover, excerpt, updated)
+        "INSERT INTO notes (id, title, folder, position, tags, icon, cover, excerpt, updated)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
         params![
             note.id,
             note.title,
-            note.parent,
+            note.folder,
             note.position,
             tags,
             note.icon,
@@ -286,7 +289,7 @@ fn row_to_summary(row: &rusqlite::Row<'_>) -> rusqlite::Result<NoteSummary> {
     Ok(NoteSummary {
         id: row.get(0)?,
         title: row.get(1)?,
-        parent: row.get(2)?,
+        folder: row.get(2)?,
         position: row.get(3)?,
         tags: serde_json::from_str(&tags).unwrap_or_default(),
         icon: row.get(5)?,

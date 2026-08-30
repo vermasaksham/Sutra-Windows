@@ -1,3 +1,17 @@
+> **Superseded in part, 30 August 2026.**
+>
+> Decisions 1 and 6 below have changed. Notes no longer live in one flat
+> directory under `title_ULID.md` names: they live in real nested folders, at
+> most four deep, under clean human filenames with no id in them. The id moved
+> entirely into frontmatter, which is what lets a note be moved without any
+> link changing — see `moving_a_note_preserves_every_relationship` in
+> `vault.rs`. The trash moved to `.sutra/trash/`, and attachments to a hidden
+> `.attachments/` beside the notes that use them.
+>
+> Everything else here still holds: markdown is the source of truth, the index
+> is disposable, conflicts prompt if dirty and reload if clean, and writes are
+> atomic.
+
 # Phase 3 — storage design
 
 Decisions taken before implementation. Recorded here so the reasoning survives

@@ -1,7 +1,6 @@
 //! Watching the vault for changes made outside the app.
 
 use crate::index::Index;
-use crate::note;
 use crate::vault::Vault;
 use notify_debouncer_full::notify::RecommendedWatcher;
 use notify_debouncer_full::notify::{RecursiveMode, Result as NotifyResult};
@@ -40,14 +39,16 @@ pub type VaultWatcher = Debouncer<RecommendedWatcher, RecommendedCache>;
 
 /// Start watching a vault directory, emitting `vault:changed` to the frontend.
 ///
-/// Non-recursive: notes are flat in the root, and we do not want every write
-/// into `attachments/` or `trash/` waking the UI.
+/// Recursive, because notes live in nested folders now. The cost is that
+/// writes into a hidden `.attachments` or `.sutra` also arrive, so those are
+/// filtered out below rather than by the watch mode.
 pub fn watch(
     app: AppHandle,
     root: &Path,
     vault: Arc<Vault>,
     index: Arc<Index>,
 ) -> NotifyResult<VaultWatcher> {
+    let root_for_events = root.to_path_buf();
     let mut debouncer = new_debouncer(QUIET_PERIOD, None, move |result: DebounceEventResult| {
         let Ok(events) = result else { return };
 
@@ -61,11 +62,19 @@ pub fn watch(
                 };
                 // Skip our own in-flight temp files; the rename that
                 // follows is the event that matters.
-                if name.ends_with(".tmp") {
+                if !name.ends_with(".md") || name.ends_with(".tmp") {
                     continue;
                 }
-                if let Some(id) = note::id_from_file_name(name) {
-                    changed.insert(id.to_string());
+                // Anything inside a hidden folder is ours, not the user's:
+                // `.sutra/trash` fills up on every delete and must not look
+                // like a note appearing.
+                if is_hidden(path, root_for_events.as_path()) {
+                    continue;
+                }
+                // The id is inside the file now, so only the vault can say
+                // which note a path belongs to.
+                if let Some(id) = vault.id_at(path) {
+                    changed.insert(id);
                 }
             }
         }
@@ -105,6 +114,24 @@ pub fn watch(
         let _ = app.emit("vault:changed", payload);
     })?;
 
-    debouncer.watch(root, RecursiveMode::NonRecursive)?;
+    debouncer.watch(root, RecursiveMode::Recursive)?;
     Ok(debouncer)
+}
+
+/// True when any folder between the vault root and this file starts with a dot.
+///
+/// The same one rule that keeps `.sutra` and every `.attachments` out of the
+/// note listing, applied to events.
+fn is_hidden(path: &Path, root: &Path) -> bool {
+    let Ok(relative) = path.strip_prefix(root) else {
+        // Outside the vault entirely. Not ours either way.
+        return true;
+    };
+    relative
+        .components()
+        .filter_map(|c| match c {
+            std::path::Component::Normal(n) => n.to_str(),
+            _ => None,
+        })
+        .any(|name| name.starts_with('.'))
 }

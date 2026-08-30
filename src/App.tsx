@@ -5,7 +5,7 @@ import { setNavigate, setTitles } from "./editor/wikilink/titleStore";
 import BacklinksPanel from "./notes/BacklinksPanel";
 import Bibliography, { citationKeys } from "./notes/Bibliography";
 import ExportMenu from "./notes/ExportMenu";
-import Breadcrumbs from "./notes/Breadcrumbs";
+import FolderBar from "./notes/FolderBar";
 import ConflictPrompt from "./notes/ConflictPrompt";
 import NoteHeader from "./notes/NoteHeader";
 import NoteList from "./notes/NoteList";
@@ -13,11 +13,14 @@ import Sidebar from "./notes/Sidebar";
 import VaultPicker from "./notes/VaultPicker";
 import { buildDocument } from "./export/buildDocument";
 import { useShortcuts } from "./notes/shortcuts";
+import { notesUnder } from "./notes/tree";
+import { setCurrentFolder } from "./notes/folderStore";
 import { useNote } from "./notes/useNote";
 import type { Editor as TiptapEditor } from "@tiptap/core";
 import {
   exportApi,
   indexApi,
+  foldersApi,
   notesApi,
   vaultApi,
   type Backlink,
@@ -44,6 +47,9 @@ export default function App() {
   /** Results for `query`, or null when there is no search running. */
   const [hits, setHits] = useState<SearchHit[] | null>(null);
   const [activeTag, setActiveTag] = useState<string | null>(null);
+  /** The folder the list is showing. null means the whole vault. */
+  const [activeFolder, setActiveFolder] = useState<string | null>(null);
+  const [folders, setFolders] = useState<string[]>([]);
   /** Bumped to move focus to the search field; the shortcut lives up here but
    *  the input is three components down. */
   const [focusSearch, setFocusSearch] = useState(0);
@@ -113,6 +119,12 @@ export default function App() {
     return () => clearTimeout(timer);
   }, [query, notes]);
 
+  // The slash menu's attach item reads this, so an attachment lands beside the
+  // note that will reference it.
+  useEffect(() => {
+    setCurrentFolder(note.doc?.folder ?? null);
+  }, [note.doc?.folder]);
+
   useEffect(() => {
     if (!selectedId) return setBacklinks([]);
     indexApi
@@ -121,11 +133,20 @@ export default function App() {
       .catch(() => setBacklinks([]));
   }, [selectedId, notes]);
 
+  const refreshFolders = useCallback(() => {
+    foldersApi
+      .list()
+      .then(setFolders)
+      .catch(() => setFolders([]));
+  }, []);
+
+  useEffect(refreshFolders, [refreshFolders, notes]);
+
   const createNote = useCallback(
-    async (parent: string | null) => {
+    async (folder: string | null) => {
       try {
         await note.flush();
-        const created = await notesApi.create("Untitled", parent);
+        const created = await notesApi.create("Untitled", folder);
         await refresh();
         setSelectedId(created.id);
       } catch (cause) {
@@ -135,9 +156,42 @@ export default function App() {
     [note, refresh, report],
   );
 
+  const moveNote = useCallback(
+    async (folder: string) => {
+      if (!selectedId) return;
+      try {
+        // Flush first: an autosave landing after the rename would write the
+        // note back to where it used to be.
+        await note.flush();
+        const summary = await notesApi.move(selectedId, folder);
+        // The open note's folder is part of what the page shows, and the doc in
+        // the buffer still says where it used to be. Merge rather than re-read:
+        // re-reading would replace the body with what is on disk.
+        note.applyMeta(summary);
+        await refresh();
+        refreshFolders();
+      } catch (cause) {
+        report("Could not move the note", cause);
+      }
+    },
+    [selectedId, note, refresh, refreshFolders, report],
+  );
+
+  const createFolder = useCallback(
+    async (folder: string) => {
+      try {
+        await foldersApi.create(folder);
+        refreshFolders();
+      } catch (cause) {
+        report("Could not create the folder", cause);
+      }
+    },
+    [refreshFolders, report],
+  );
+
   useShortcuts({
     search: () => setFocusSearch((n) => n + 1),
-    newNote: () => void createNote(null),
+    newNote: () => void createNote(activeFolder),
     save: () => void note.flush(),
   });
 
@@ -213,7 +267,7 @@ export default function App() {
 
   async function pickCover() {
     try {
-      const reference = await notesApi.attach();
+      const reference = await notesApi.attach(note.doc?.folder ?? null);
       if (reference) await setMeta({ cover: reference });
     } catch (cause) {
       report("Could not add the cover", cause);
@@ -227,10 +281,12 @@ export default function App() {
     );
   }
 
-  // What the middle column lists. A tag narrows it; a search replaces it.
+  // What the middle column lists. A folder or a tag narrows it; a search
+  // replaces it. Selecting a folder includes everything beneath it, because a
+  // parent that held only subfolders would otherwise look empty.
   const listed = activeTag
-    ? notes.filter((note) => note.tags.includes(activeTag))
-    : notes;
+    ? notes.filter((n) => n.tags.includes(activeTag))
+    : notesUnder(notes, activeFolder);
 
   return (
     <div className="sutra-shell flex h-screen">
@@ -238,9 +294,29 @@ export default function App() {
         <Sidebar
           vaultName={vault.name}
           notes={notes}
+          folders={folders}
+          activeFolder={activeFolder}
           activeTag={activeTag}
-          onSelectTag={setActiveTag}
-          onNewNote={() => void createNote(null)}
+          onSelectFolder={(folder) => {
+            setActiveFolder(folder);
+            setActiveTag(null);
+          }}
+          onSelectTag={(tag) => {
+            setActiveTag(tag);
+            if (tag !== null) setActiveFolder(null);
+          }}
+          onNewNote={() => void createNote(activeFolder)}
+          onNewFolder={(parent) => {
+            const name = window.prompt(
+              parent
+                ? `New folder inside ${parent}`
+                : "New folder at the top level",
+            );
+            if (name?.trim())
+              void createFolder(
+                parent ? `${parent}/${name.trim()}` : name.trim(),
+              );
+          }}
         />
 
         <NoteList
@@ -248,11 +324,16 @@ export default function App() {
           hits={hits}
           query={query}
           onQuery={setQuery}
-          heading={activeTag ? `#${activeTag}` : "All notes"}
-          nested={hits === null && activeTag === null}
+          heading={
+            activeTag
+              ? `#${activeTag}`
+              : activeFolder === null
+                ? "All notes"
+                : activeFolder
+          }
+          showFolders={activeFolder === null || activeTag !== null}
           selectedId={selectedId}
           onSelect={(id) => void select(id)}
-          onCreate={(parent) => void createNote(parent)}
           onDelete={(id) => void deleteNote(id)}
           focusSearch={focusSearch}
         />
@@ -282,10 +363,15 @@ export default function App() {
           // `group/page` so the icon and cover affordances appear on
           // approach rather than sitting there permanently.
           <div className="sutra-page group/page mx-auto max-w-content px-8 pt-2 pb-16">
-            <Breadcrumbs
-              notes={notes}
-              id={selectedId}
-              onSelect={(id) => void select(id)}
+            <FolderBar
+              folder={note.doc.folder}
+              folders={folders}
+              onSelectFolder={(folder) => {
+                setActiveFolder(folder);
+                setActiveTag(null);
+              }}
+              onMove={(folder) => void moveNote(folder)}
+              onCreateFolder={(folder) => void createFolder(folder)}
             />
             <NoteHeader
               doc={note.doc}

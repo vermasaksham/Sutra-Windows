@@ -1,20 +1,19 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { linksAsTitles } from "../editor/wikilink/titleStore";
-import { buildTree, type TreeNode } from "./tree";
 import type { NoteSummary, SearchHit } from "../vault/api";
 
 /**
  * The middle column: which note.
  *
- * Bear's list, with Sutra's model underneath. Bear's notes are flat and this
- * vault's are a tree — `parent` and `position` live in the frontmatter — so the
- * rows nest, and a row is Bear's: title, the opening line beneath it, a date
- * along the edge. The excerpt comes from Rust with the markdown markers already
- * stripped; when a search is running it is FTS5's snippet instead, with the
- * matched words marked.
+ * A flat list, always. The rail owns the folder tree, so by the time a note
+ * reaches this column the question of where it lives has been answered — what
+ * is left is choosing between the notes in that answer. Nesting them again here
+ * would say the same thing twice and hide rows inside collapsed parents.
  *
- * Searching flattens the list. There is no useful hierarchy in a result set,
- * and pretending otherwise would hide matches inside collapsed parents.
+ * A row is Bear's: title, the opening line beneath it, a date along the edge.
+ * The excerpt comes from Rust with the markdown markers already stripped; when
+ * a search is running it is FTS5's snippet instead, with the matched words
+ * marked.
  */
 
 export type ListRow = {
@@ -26,8 +25,8 @@ export type ListRow = {
   /** The excerpt carries FTS5's `<mark>` tags and needs the snippet renderer. */
   marked: boolean;
   updated: string | null;
-  depth: number;
-  children: number;
+  /** Shown when the list spans more than one folder, so a row says where it is. */
+  folder: string;
 };
 
 type Props = {
@@ -35,15 +34,12 @@ type Props = {
   hits: SearchHit[] | null;
   query: string;
   onQuery: (query: string) => void;
-  /** Names what is being listed, e.g. "All notes" or a tag. */
+  /** Names what is being listed, e.g. "All notes" or a folder. */
   heading: string;
-  /** False while a tag or a search has already narrowed the set: a result list
-   *  has no useful hierarchy, and nesting it would hide rows inside collapsed
-   *  parents that are not themselves in the set. */
-  nested: boolean;
+  /** True when rows can come from different folders, so each says where it is. */
+  showFolders: boolean;
   selectedId: string | null;
   onSelect: (id: string) => void;
-  onCreate: (parent: string | null) => void;
   onDelete: (id: string) => void;
   /** Focusing the search field is a global shortcut, so App drives it. */
   focusSearch: number;
@@ -55,16 +51,12 @@ export default function NoteList({
   query,
   onQuery,
   heading,
-  nested,
+  showFolders,
   selectedId,
   onSelect,
-  onCreate,
   onDelete,
   focusSearch,
 }: Props) {
-  // Collapsed rather than expanded, so the default is everything open. A
-  // research vault is mostly shallow, and hiding notes by default hides work.
-  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const searchRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -73,23 +65,10 @@ export default function NoteList({
     searchRef.current?.select();
   }, [focusSearch]);
 
-  const toggle = (id: string) =>
-    setCollapsed((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-
   const searching = hits !== null;
   const rows = useMemo(
-    () =>
-      hits
-        ? hitRows(hits, notes)
-        : nested
-          ? treeRows(notes, collapsed)
-          : flatRows(notes),
-    [hits, notes, nested, collapsed],
+    () => (hits ? hitRows(hits, notes) : listRows(notes)),
+    [hits, notes],
   );
 
   return (
@@ -140,11 +119,8 @@ export default function NoteList({
               key={row.id}
               row={row}
               active={row.id === selectedId}
-              nested={nested}
-              collapsed={collapsed.has(row.id)}
-              onToggle={() => toggle(row.id)}
+              showFolder={showFolders}
               onSelect={() => onSelect(row.id)}
-              onCreate={() => onCreate(row.id)}
               onDelete={() => onDelete(row.id)}
             />
           ))}
@@ -157,29 +133,18 @@ export default function NoteList({
 function Row({
   row,
   active,
-  nested,
-  collapsed,
-  onToggle,
+  showFolder,
   onSelect,
-  onCreate,
   onDelete,
 }: {
   row: ListRow;
   active: boolean;
-  nested: boolean;
-  collapsed: boolean;
-  onToggle: () => void;
+  showFolder: boolean;
   onSelect: () => void;
-  onCreate: () => void;
   onDelete: () => void;
 }) {
   return (
-    <li
-      className="group relative"
-      // Indent by depth. Margin on the row rather than a nested <ul> keeps
-      // every row the same height and the hit targets aligned.
-      style={{ marginInlineStart: nested ? `${row.depth * 10}px` : undefined }}
-    >
+    <li className="group relative">
       <div
         className={[
           "flex items-start rounded-lg transition-colors duration-150 ease-out",
@@ -188,25 +153,8 @@ function Row({
       >
         <button
           type="button"
-          onClick={onToggle}
-          aria-label={
-            row.children > 0
-              ? collapsed
-                ? `Expand ${row.title}`
-                : `Collapse ${row.title}`
-              : undefined
-          }
-          aria-expanded={row.children > 0 ? !collapsed : undefined}
-          tabIndex={row.children > 0 ? 0 : -1}
-          className="grid size-5 shrink-0 place-items-center pt-2 text-ink-muted"
-        >
-          {nested && row.children > 0 && <Chevron open={!collapsed} />}
-        </button>
-
-        <button
-          type="button"
           onClick={onSelect}
-          className="min-w-0 flex-1 py-1.5 pr-1 text-left"
+          className="min-w-0 flex-1 py-1.5 pr-1 pl-2.5 text-left"
         >
           <span className="flex items-baseline gap-1.5">
             <span
@@ -241,20 +189,14 @@ function Row({
                 {row.excerpt}
               </span>
             ))}
+          {showFolder && row.folder !== "" && (
+            <span className="mt-0.5 block truncate text-[0.6875rem] text-highlight">
+              {row.folder}
+            </span>
+          )}
         </button>
 
         <span className="flex shrink-0 items-center pt-1.5 opacity-0 transition-opacity duration-150 ease-out group-hover:opacity-100 focus-within:opacity-100">
-          {nested && (
-            <button
-              type="button"
-              onClick={onCreate}
-              aria-label={`New note inside ${row.title || "Untitled"}`}
-              title="New nested note"
-              className="grid size-5 place-items-center rounded text-ink-muted hover:text-accent"
-            >
-              <Plus />
-            </button>
-          )}
           <button
             type="button"
             onClick={onDelete}
@@ -269,41 +211,17 @@ function Row({
   );
 }
 
-function treeRows(notes: NoteSummary[], collapsed: Set<string>): ListRow[] {
-  const rows: ListRow[] = [];
-  const flatten = (nodes: TreeNode[]) => {
-    for (const node of nodes) {
-      rows.push({
-        id: node.id,
-        title: node.title,
-        icon: node.icon,
-        excerpt: node.excerpt,
-        marked: false,
-        updated: node.updated,
-        depth: node.depth,
-        children: node.children.length,
-      });
-      if (!collapsed.has(node.id)) flatten(node.children);
-    }
-  };
-  flatten(buildTree(notes));
-  return rows;
-}
-
-/** Most recently touched first — the order a filtered set wants. */
-function flatRows(notes: NoteSummary[]): ListRow[] {
-  return [...notes]
-    .sort((a, b) => b.updated.localeCompare(a.updated))
-    .map((note) => ({
-      id: note.id,
-      title: note.title,
-      icon: note.icon,
-      excerpt: note.excerpt,
-      marked: false,
-      updated: note.updated,
-      depth: 0,
-      children: 0,
-    }));
+/** Rust already sorted the list; this only reshapes it into rows. */
+function listRows(notes: NoteSummary[]): ListRow[] {
+  return notes.map((note) => ({
+    id: note.id,
+    title: note.title,
+    icon: note.icon,
+    excerpt: note.excerpt,
+    marked: false,
+    updated: note.updated,
+    folder: note.folder,
+  }));
 }
 
 function hitRows(hits: SearchHit[], notes: NoteSummary[]): ListRow[] {
@@ -315,8 +233,7 @@ function hitRows(hits: SearchHit[], notes: NoteSummary[]): ListRow[] {
     excerpt: hit.excerpt,
     marked: true,
     updated: byId.get(hit.id)?.updated ?? null,
-    depth: 0,
-    children: 0,
+    folder: byId.get(hit.id)?.folder ?? "",
   }));
 }
 
@@ -391,22 +308,6 @@ function Cross() {
   );
 }
 
-function Plus() {
-  return (
-    <svg
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth={1.75}
-      strokeLinecap="round"
-      className="size-3.5"
-      aria-hidden
-    >
-      <path d="M12 5v14M5 12h14" />
-    </svg>
-  );
-}
-
 function Trash() {
   return (
     <svg
@@ -419,24 +320,6 @@ function Trash() {
       aria-hidden
     >
       <path d="M4 7h16M9 7V5h6v2M6 7l1 13h10l1-13" />
-    </svg>
-  );
-}
-
-function Chevron({ open }: { open: boolean }) {
-  return (
-    <svg
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth={2}
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      className="size-3 transition-transform duration-150 ease-out"
-      style={{ transform: open ? "rotate(90deg)" : "none" }}
-      aria-hidden
-    >
-      <path d="M9 6l6 6-6 6" />
     </svg>
   );
 }

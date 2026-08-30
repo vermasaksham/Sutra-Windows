@@ -1,81 +1,121 @@
 import type { NoteSummary } from "../vault/api";
 
-export type TreeNode = NoteSummary & { children: TreeNode[]; depth: number };
-
 /**
- * Assemble the flat list Rust returns into a tree.
+ * The folder tree, assembled from the paths Rust reports.
  *
- * Done here rather than in SQL so no query shape crosses the boundary; Rust
- * hands over rows with `parent` and `position` and the shape is our business.
+ * Rust sends a flat list of folders and a flat list of notes, each note
+ * carrying the folder it sits in. Nesting is this side's business, because it
+ * is a display concern: the same two lists could equally be drawn flat.
  *
- * Two things the vault can contain that a naive build would choke on, because
- * these files are hand-editable:
- *
- * - A `parent` pointing at a note that does not exist. Those are treated as
- *   roots rather than dropped — the note is real and must stay reachable.
- * - A parent cycle (A's parent is B, B's parent is A). Any note not reached
- *   from a root is surfaced at the top level, so a cycle costs correct nesting
- *   but never hides a note or hangs the app.
+ * Folders that hold notes but were never listed as directories in their own
+ * right still appear — a note at `Research/Sb2Se3/Cp.md` implies both
+ * `Research` and `Research/Sb2Se3`, and inferring them is cheaper than
+ * requiring the two lists to agree.
  */
-export function buildTree(notes: NoteSummary[]): TreeNode[] {
-  const byId = new Map<string, TreeNode>();
-  for (const note of notes) {
-    byId.set(note.id, { ...note, children: [], depth: 0 });
-  }
 
-  const roots: TreeNode[] = [];
-  for (const node of byId.values()) {
-    const parent = node.parent ? byId.get(node.parent) : undefined;
-    if (parent && parent.id !== node.id) parent.children.push(node);
-    else roots.push(node);
-  }
+export type FolderNode = {
+  /** Vault-relative, `/`-separated. "" is the root. */
+  path: string;
+  /** The last segment, which is what the rail shows. */
+  name: string;
+  depth: number;
+  children: FolderNode[];
+  /** Notes directly in this folder, not in its descendants. */
+  notes: NoteSummary[];
+  /** Notes here and everywhere below, which is what a folder's count means. */
+  total: number;
+};
 
-  // Walk from the roots, assigning depth. Anything unvisited is in a cycle.
-  const visited = new Set<string>();
-  const assign = (nodes: TreeNode[], depth: number) => {
+export function buildFolders(
+  folders: string[],
+  notes: NoteSummary[],
+): FolderNode {
+  const root: FolderNode = {
+    path: "",
+    name: "",
+    depth: -1,
+    children: [],
+    notes: [],
+    total: notes.length,
+  };
+  const byPath = new Map<string, FolderNode>([["", root]]);
+
+  // `ensure` walks down from the root creating what is missing, so a path
+  // arriving before its parent still lands in the right place.
+  const ensure = (path: string): FolderNode => {
+    const existing = byPath.get(path);
+    if (existing) return existing;
+
+    const cut = path.lastIndexOf("/");
+    const parent = ensure(cut === -1 ? "" : path.slice(0, cut));
+    const node: FolderNode = {
+      path,
+      name: path.slice(cut + 1),
+      depth: parent.depth + 1,
+      children: [],
+      notes: [],
+      total: 0,
+    };
+    parent.children.push(node);
+    byPath.set(path, node);
+    return node;
+  };
+
+  for (const folder of folders) if (folder !== "") ensure(folder);
+  for (const note of notes) ensure(note.folder).notes.push(note);
+
+  // Totals roll up, so a parent's count includes everything beneath it.
+  const rollUp = (node: FolderNode): number => {
+    node.total =
+      node.notes.length + node.children.reduce((sum, c) => sum + rollUp(c), 0);
+    return node.total;
+  };
+  for (const child of root.children) rollUp(child);
+
+  const sort = (node: FolderNode) => {
+    node.children.sort((a, b) =>
+      a.name.localeCompare(b.name, undefined, { sensitivity: "base" }),
+    );
+    node.children.forEach(sort);
+  };
+  sort(root);
+
+  return root;
+}
+
+/** Depth-first, so the rail can render one flat list of rows. */
+export function flattenFolders(
+  root: FolderNode,
+  collapsed: Set<string>,
+): FolderNode[] {
+  const rows: FolderNode[] = [];
+  const walk = (nodes: FolderNode[]) => {
     for (const node of nodes) {
-      if (visited.has(node.id)) continue;
-      visited.add(node.id);
-      node.depth = depth;
-      node.children.sort(compare);
-      assign(node.children, depth + 1);
+      rows.push(node);
+      if (!collapsed.has(node.path)) walk(node.children);
     }
   };
-  roots.sort(compare);
-  assign(roots, 0);
-
-  for (const node of byId.values()) {
-    if (!visited.has(node.id)) {
-      node.depth = 0;
-      node.children = [];
-      roots.push(node);
-    }
-  }
-
-  roots.sort(compare);
-  return roots;
+  walk(root.children);
+  return rows;
 }
 
-function compare(a: NoteSummary, b: NoteSummary) {
-  return (
-    a.position - b.position ||
-    a.title.localeCompare(b.title, undefined, { sensitivity: "base" })
-  );
+/** The notes in a folder and everything below it, newest first. */
+export function notesUnder(
+  notes: NoteSummary[],
+  folder: string | null,
+): NoteSummary[] {
+  const matching =
+    folder === null
+      ? notes
+      : notes.filter(
+          (n) => n.folder === folder || n.folder.startsWith(`${folder}/`),
+        );
+  return [...matching].sort((a, b) => b.updated.localeCompare(a.updated));
 }
 
-/** The chain from the root down to `id`, for breadcrumbs. */
-export function pathTo(notes: NoteSummary[], id: string | null): NoteSummary[] {
-  if (!id) return [];
-  const byId = new Map(notes.map((n) => [n.id, n]));
-  const path: NoteSummary[] = [];
-  // A cycle in `parent` would loop forever, so remember where we have been.
-  const seen = new Set<string>();
-
-  let current = byId.get(id);
-  while (current && !seen.has(current.id)) {
-    seen.add(current.id);
-    path.unshift(current);
-    current = current.parent ? byId.get(current.parent) : undefined;
-  }
-  return path;
+/** `Research/Sb2Se3` -> [["Research","Research"], ["Sb2Se3","Research/Sb2Se3"]] */
+export function folderCrumbs(folder: string): Array<[string, string]> {
+  if (folder === "") return [];
+  const parts = folder.split("/");
+  return parts.map((name, i) => [name, parts.slice(0, i + 1).join("/")]);
 }

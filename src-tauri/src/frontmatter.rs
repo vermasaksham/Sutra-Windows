@@ -19,10 +19,13 @@ pub struct Frontmatter {
     /// ULID. Stable and permanent — the note's real identity.
     pub id: String,
     pub title: String,
-    /// `None` for a root-level note. In YAML this is `parent: null`.
-    #[serde(default)]
+    /// Dead: hierarchy is the folder a note sits in, not a claim the note
+    /// makes about itself. Kept on the struct so an unmigrated vault's
+    /// `parent:` key survives being read and written back — the migration is
+    /// the only thing that reads it, and the only thing that clears it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub parent: Option<String>,
-    /// Sort order among siblings.
+    /// Sort order among the notes in a folder. Ties fall back to title.
     #[serde(default)]
     pub position: i64,
     /// `time::serde::rfc3339` tells serde to read and write these as
@@ -53,13 +56,13 @@ pub fn now() -> OffsetDateTime {
 
 impl Frontmatter {
     /// A brand new note's metadata.
-    pub fn new(id: String, title: String, parent: Option<String>, position: i64) -> Self {
+    pub fn new(id: String, title: String) -> Self {
         let now = now();
         Self {
             id,
             title,
-            parent,
-            position,
+            parent: None,
+            position: 0,
             created: now,
             updated: now,
             tags: Vec::new(),

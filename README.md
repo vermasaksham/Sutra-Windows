@@ -10,7 +10,7 @@ files on disk, and LaTeX maths and chemical equations are first-class.
 
 - Every note is one `.md` file in a flat vault directory. No folder nesting.
 - Hierarchy lives in YAML frontmatter, not the filesystem.
-- SQLite holds only derived data: full-text search, the page tree, backlinks.
+- SQLite holds only derived data: full-text search, the folder tree, backlinks.
 - Delete the database and the app rebuilds it on next launch, losing nothing.
 - Nothing is ever stored in SQLite that does not also exist in a markdown file.
 
@@ -79,10 +79,11 @@ src/
     IconPicker.tsx    Curated emoji, no dependency
     TagEditor.tsx     Tag chips; clicking one selects that tag
     shortcuts.ts      App-level keys only; the editor owns its own
-    tree.ts           Flat list -> tree, tolerant of cycles and orphans
-    Sidebar.tsx       Rail: the vault, all notes, the tag list
-    NoteList.tsx      Middle column: rows, nesting, and the search field
-    Breadcrumbs.tsx   Root-to-note chain
+    tree.ts           Folder paths -> a tree, inferring missing parents
+    folderStore.ts    The open note's folder, for the slash menu's attach
+    Sidebar.tsx       Rail: the vault, the folder tree, the tag list
+    NoteList.tsx      Middle column: rows and the search field
+    FolderBar.tsx     Where the note lives, and the only way to move it
     BacklinksPanel.tsx
     VaultPicker.tsx   Shown until a vault is chosen
     ConflictPrompt.tsx

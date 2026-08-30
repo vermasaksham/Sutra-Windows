@@ -57,25 +57,110 @@ pub fn slugify(title: &str) -> String {
     }
 }
 
-/// `<slug>_<ULID>.md`
-pub fn file_name(title: &str, id: &str) -> String {
-    format!("{}_{}.md", slugify(title), id)
+/// Names Windows refuses outright, with or without an extension.
+///
+/// `CON.md` is not a file you can create on Windows. These are historical
+/// device names and the restriction is still enforced.
+const RESERVED: [&str; 22] = [
+    "CON", "PRN", "AUX", "NUL", "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8",
+    "COM9", "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
+];
+
+/// Turn a title into a filename stem a person would recognise.
+///
+/// Deliberately *not* `slugify`. The whole point of a real folder tree is that
+/// it reads well in Explorer or Finder, and `Sb2Se3 Cp.md` reads better than
+/// `sb2se3-cp.md`. So spaces and case survive; only what the filesystem
+/// actually refuses is removed.
+///
+/// Still lossy, and still never round-trips — the title of record is in
+/// frontmatter. Two notes in one folder can want the same stem, which the
+/// caller resolves by adding a suffix.
+pub fn file_stem(title: &str) -> String {
+    let mut out = String::with_capacity(title.len());
+    let mut pending_space = false;
+
+    for ch in title.chars() {
+        if ch.is_whitespace() {
+            // Collapse runs of whitespace, and only emit once real text
+            // follows, which trims the trailing space for free.
+            pending_space = !out.is_empty();
+        } else if ch.is_control() || FORBIDDEN.contains(&ch) {
+            continue;
+        } else {
+            if pending_space {
+                out.push(' ');
+                pending_space = false;
+            }
+            out.push(ch);
+        }
+    }
+
+    if out.chars().count() > MAX_SLUG {
+        out = out.chars().take(MAX_SLUG).collect();
+    }
+    // Windows silently strips trailing dots and spaces, which would make the
+    // name on disk disagree with the one we think we wrote.
+    let mut out = out.trim_end_matches(['.', ' ']).to_string();
+
+    if out.is_empty() {
+        out = "Untitled".to_string();
+    }
+    // A reserved name is only reserved as the whole stem, so a suffix is enough.
+    if RESERVED
+        .iter()
+        .any(|r| r.eq_ignore_ascii_case(out.split('.').next().unwrap_or(&out)))
+    {
+        out.push('_');
+    }
+    out
 }
 
-/// Recover a note's id from its filename: the part after the last `_`.
+/// `<stem>.md`
 ///
-/// Returns `None` for anything that is not a note we wrote, which is how
-/// directory scans skip `README.md` and similar.
-pub fn id_from_file_name(name: &str) -> Option<&str> {
-    let stem = name.strip_suffix(".md")?;
-    let (_, id) = stem.rsplit_once('_')?;
-    // A ULID is 26 characters of Crockford base32. Checking the shape stops us
-    // adopting `my_notes.md` as a note with the id "notes".
-    let looks_like_ulid = id.len() == 26
-        && id
-            .bytes()
-            .all(|b| b.is_ascii_digit() || b.is_ascii_uppercase());
-    looks_like_ulid.then_some(id)
+/// The id is no longer here. It lives in the frontmatter, which is what lets a
+/// note be renamed or moved without a single link changing.
+pub fn file_name(title: &str) -> String {
+    format!("{}.md", file_stem(title))
+}
+
+/// Crockford base32 — the alphabet ULIDs use. No I, L, O or U, so nothing
+/// reads as a different character.
+const CROCKFORD: &[u8; 32] = b"0123456789ABCDEFGHJKMNPQRSTVWXYZ";
+
+/// A stable id for a file that has no frontmatter.
+///
+/// Adopting a stray `.md` used to be easy: its id was in its name. Now the id
+/// lives inside the file, and a file without frontmatter has none — so one is
+/// derived from its path instead. Deterministic, so the same file keeps the
+/// same id from one listing to the next and the editor can open it; replaced
+/// by a real ULID the first time the note is saved.
+///
+/// Moving such a file changes its id, which is acceptable precisely because
+/// nothing can link to a note whose id was never written down.
+pub fn adopted_id(relative: &str) -> String {
+    let bits = ((fnv1a(relative.as_bytes(), 0xcbf2_9ce4_8422_2325) as u128) << 64)
+        | fnv1a(relative.as_bytes(), 0x9e37_79b9_7f4a_7c15) as u128;
+
+    let mut buf = [0u8; 26];
+    let mut n = bits;
+    for slot in buf.iter_mut().rev() {
+        *slot = CROCKFORD[(n & 0x1f) as usize];
+        n >>= 5;
+    }
+    // Every byte came from CROCKFORD, so this is ASCII by construction.
+    String::from_utf8(buf.to_vec()).unwrap_or_else(|_| "0".repeat(26))
+}
+
+/// FNV-1a, 64-bit. Not cryptographic and does not need to be — this only has
+/// to be stable across runs and spread paths out.
+fn fnv1a(bytes: &[u8], seed: u64) -> u64 {
+    let mut hash = seed;
+    for byte in bytes {
+        hash ^= *byte as u64;
+        hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    hash
 }
 
 /// Write `contents` to `path` atomically.
@@ -173,23 +258,39 @@ mod tests {
 
     #[test]
     fn reserved_windows_names_gain_a_suffix() {
-        // CON and NUL are illegal alone but fine with the ULID appended.
-        let name = file_name("CON", "01HQ3M8K2P0000000000000000");
-        assert_eq!(name, "CON_01HQ3M8K2P0000000000000000.md");
+        // `CON.md` is not a file Windows will create, whatever the extension.
+        assert_eq!(file_name("CON"), "CON_.md");
+        assert_eq!(file_name("nul"), "nul_.md");
+        // Only as the whole stem, though.
+        assert_eq!(file_name("CONduction"), "CONduction.md");
     }
 
     #[test]
-    fn ids_come_back_out_of_filenames() {
-        let id = "01HQ3M8K2P0000000000000000";
-        let name = file_name("Some title", id);
-        assert_eq!(id_from_file_name(&name), Some(id));
+    fn a_note_filename_keeps_spaces_and_case() {
+        // The folder tree is meant to be read in Explorer, so titles are not
+        // slugged the way attachment names are.
+        assert_eq!(file_name("Sb2Se3 Cp"), "Sb2Se3 Cp.md");
+        assert_eq!(file_name("Zhou 2019 — ribbons"), "Zhou 2019 — ribbons.md");
     }
 
     #[test]
-    fn foreign_files_are_not_mistaken_for_notes() {
-        assert_eq!(id_from_file_name("README.md"), None);
-        assert_eq!(id_from_file_name("my_notes.md"), None);
-        assert_eq!(id_from_file_name("notes.txt"), None);
+    fn a_note_filename_drops_what_the_filesystem_refuses() {
+        assert_eq!(file_name("Cp: 300/800 K?"), "Cp 300800 K.md");
+        assert_eq!(file_name("   "), "Untitled.md");
+        assert_eq!(file_name("trailing.  "), "trailing.md");
+    }
+
+    #[test]
+    fn an_adopted_id_is_deterministic_and_ulid_shaped() {
+        let a = adopted_id("Research/Sb2Se3/Cp.md");
+        assert_eq!(a, adopted_id("Research/Sb2Se3/Cp.md"), "must be stable");
+        assert_ne!(a, adopted_id("Research/SbSeI/Cp.md"));
+        assert_eq!(a.chars().count(), 26);
+        assert!(
+            a.bytes()
+                .all(|b| b.is_ascii_digit() || b.is_ascii_uppercase()),
+            "{a} is not ULID-shaped"
+        );
     }
 
     #[test]

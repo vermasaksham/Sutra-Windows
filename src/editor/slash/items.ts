@@ -1,5 +1,6 @@
 import type { Editor, Range } from "@tiptap/core";
 import { notesApi } from "../../vault/api";
+import { currentFolder } from "../../notes/folderStore";
 import type { ComponentType, SVGProps } from "react";
 import {
   BulletListIcon,
@@ -213,7 +214,7 @@ export const SLASH_ITEMS: SlashItem[] = [
     // self-contained rather than pointing at a file elsewhere on the disk that
     // could later move.
     run: async (editor, range) => {
-      const reference = await notesApi.attach();
+      const reference = await notesApi.attach(currentFolder());
       if (!reference) return; // Cancelled.
       editor
         .chain()

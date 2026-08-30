@@ -57,6 +57,9 @@ fn main() {
             commands::zotero_search,
             commands::zotero_by_keys,
             commands::attach_file,
+            commands::move_note,
+            commands::list_folders,
+            commands::create_folder,
         ])
         // `generate_context!` pulls in tauri.conf.json at compile time.
         .run(tauri::generate_context!())

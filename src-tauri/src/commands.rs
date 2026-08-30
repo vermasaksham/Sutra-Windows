@@ -91,10 +91,10 @@ pub fn read_note(state: State<'_, AppState>, id: String) -> Result<NoteDoc> {
 pub fn create_note(
     state: State<'_, AppState>,
     title: String,
-    parent: Option<String>,
+    folder: Option<String>,
 ) -> Result<NoteDoc> {
     state.with_both(|vault, index| {
-        let doc = vault.create_note(&title, parent.clone())?;
+        let doc = vault.create_note(&title, folder.clone())?;
         index.upsert(&doc.summary, &doc.body)?;
         Ok(doc)
     })
@@ -196,13 +196,45 @@ pub fn zotero_by_keys(keys: Vec<String>) -> Result<Vec<Reference>> {
 /// picks the file through the same Rust-side dialog, so again no path crosses
 /// the boundary in either direction.
 #[tauri::command]
-pub fn attach_file(app: AppHandle, state: State<'_, AppState>) -> Result<Option<String>> {
+pub fn attach_file(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    folder: Option<String>,
+) -> Result<Option<String>> {
     let Some(file) = app.dialog().file().blocking_pick_file() else {
         return Ok(None);
     };
     let path = file
         .into_path()
         .map_err(|e| SutraError::NotADirectory(e.to_string()))?;
-    let reference = state.with_vault(|vault| vault.import_attachment(&path))?;
+    let reference = state.with_vault(|vault| vault.import_attachment(&path, folder))?;
     Ok(Some(reference))
+}
+
+/// Move a note into another folder.
+///
+/// The whole operation is a rename. Nothing that links to this note is
+/// rewritten, because links name its id and the id is not in the path.
+#[tauri::command]
+pub fn move_note(state: State<'_, AppState>, id: String, folder: String) -> Result<NoteSummary> {
+    state.with_both(|vault, index| {
+        let summary = vault.move_note(&id, &folder)?;
+        // The body has not changed, but the indexed row carries the folder, so
+        // it has to be rewritten for folder filters to stay correct.
+        let doc = vault.read_note(&id)?;
+        index.upsert(&summary, &doc.body)?;
+        Ok(summary)
+    })
+}
+
+/// Every folder in the vault, shallowest first.
+#[tauri::command]
+pub fn list_folders(state: State<'_, AppState>) -> Result<Vec<String>> {
+    state.with_vault(|vault| vault.list_folders())
+}
+
+/// Make a folder. Parents are created as needed; depth is capped.
+#[tauri::command]
+pub fn create_folder(state: State<'_, AppState>, folder: String) -> Result<String> {
+    state.with_vault(|vault| vault.create_folder(&folder))
 }
