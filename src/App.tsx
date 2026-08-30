@@ -4,6 +4,7 @@ import ThemeToggle from "./components/ThemeToggle";
 import Toast from "./components/Toast";
 import { setNavigate, setTitles } from "./editor/wikilink/titleStore";
 import BacklinksPanel from "./notes/BacklinksPanel";
+import Bibliography from "./notes/Bibliography";
 import Breadcrumbs from "./notes/Breadcrumbs";
 import ConflictPrompt from "./notes/ConflictPrompt";
 import NoteHeader from "./notes/NoteHeader";
@@ -225,6 +226,7 @@ export default function App() {
                 body={note.doc.body}
                 onChange={note.setBody}
               />
+              <Bibliography body={note.doc.body} />
               <BacklinksPanel
                 backlinks={backlinks}
                 onSelect={(id) => void select(id)}

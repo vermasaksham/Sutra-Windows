@@ -572,3 +572,33 @@
     animation: none;
   }
 }
+
+/* --- Citations ---------------------------------------------------------- */
+
+.sutra-citation-wrapper {
+  display: inline;
+}
+
+.sutra-citation {
+  color: var(--accent);
+  border-radius: 4px;
+  padding: 0 0.15em;
+  white-space: nowrap;
+  transition: background-color var(--duration-fast) var(--ease-out);
+}
+
+.sutra-citation:hover,
+.sutra-citation.is-selected {
+  background-color: var(--accent-bg);
+}
+
+.sutra-citation.is-loading {
+  color: var(--text-muted);
+}
+
+/* Asked for and not in the library. The key is still in the file, so saying
+   so is more use than rendering nothing. */
+.sutra-citation.is-missing {
+  color: var(--highlight);
+  background-color: var(--highlight-bg);
+}

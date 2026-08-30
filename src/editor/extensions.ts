@@ -7,6 +7,8 @@ import ImageView from "./image/ImageView";
 import { Placeholder } from "@tiptap/extensions";
 import { Markdown } from "@tiptap/markdown";
 import { SlashCommand } from "./slash/SlashCommand";
+import { Citation } from "./citation/Citation";
+import { CitationSuggestion } from "./citation/CitationSuggestion";
 import { MathBlock } from "./math/MathBlock";
 import { MathInline } from "./math/MathInline";
 import { WikiLink } from "./wikilink/WikiLink";
@@ -84,4 +86,9 @@ export const extensions = [
   // the opening `$$` as an empty formula and the fence would never form.
   MathBlock,
   MathInline,
+
+  // Citations. Stored as [@KEY] and rendered from the live Zotero entry, so
+  // editing a reference there updates every citation of it.
+  Citation,
+  CitationSuggestion,
 ];

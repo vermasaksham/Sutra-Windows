@@ -11,6 +11,7 @@ use crate::error::{Result, SutraError};
 use crate::index::{Backlink, SearchHit};
 use crate::state::AppState;
 use crate::vault::{NoteDoc, NoteSummary};
+use crate::zotero::{Reference, Zotero};
 use serde::Serialize;
 use tauri::{AppHandle, State};
 use tauri_plugin_dialog::DialogExt;
@@ -145,6 +146,22 @@ pub fn delete_note(state: State<'_, AppState>, id: String) -> Result<()> {
         index.remove(&id)?;
         Ok(())
     })
+}
+
+/// Search the running Zotero for references.
+///
+/// Not cached: a library changes while the app is open, and a stale hit that
+/// no longer exists is worse than asking again. Zotero is on the loopback
+/// interface, so the round trip is cheap.
+#[tauri::command]
+pub fn zotero_search(query: String) -> Result<Vec<Reference>> {
+    Zotero::default().search(&query, 20)
+}
+
+/// Resolve citation keys to references, so `[@KEY]` can render a label.
+#[tauri::command]
+pub fn zotero_by_keys(keys: Vec<String>) -> Result<Vec<Reference>> {
+    Zotero::default().by_keys(&keys)
 }
 
 /// Copy a file into the vault's attachments folder.

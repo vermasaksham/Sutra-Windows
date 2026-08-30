@@ -68,6 +68,22 @@ export const indexApi = {
   reindex: () => invoke<number>("reindex"),
 };
 
+export type Reference = {
+  key: string;
+  title: string;
+  creators: string;
+  year: string | null;
+  itemType: string;
+  doi: string | null;
+};
+
+export const zoteroApi = {
+  /** Search the running Zotero. Rejects with a sentence worth showing if it
+   *  is not running or the local API is switched off. */
+  search: (query: string) => invoke<Reference[]>("zotero_search", { query }),
+  byKeys: (keys: string[]) => invoke<Reference[]>("zotero_by_keys", { keys }),
+};
+
 export type VaultChanged = { changed: string[] };
 
 /**

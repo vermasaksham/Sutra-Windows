@@ -13,6 +13,7 @@ mod protocol;
 mod state;
 mod vault;
 mod watcher;
+mod zotero;
 
 use state::AppState;
 use tauri::Manager;
@@ -51,6 +52,8 @@ fn main() {
             commands::save_note,
             commands::set_note_meta,
             commands::delete_note,
+            commands::zotero_search,
+            commands::zotero_by_keys,
             commands::attach_file,
         ])
         // `generate_context!` pulls in tauri.conf.json at compile time.

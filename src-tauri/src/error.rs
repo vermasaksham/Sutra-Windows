@@ -37,6 +37,12 @@ pub enum SutraError {
     /// broken index does not quietly degrade search into "no results".
     #[error("index error: {0}")]
     Index(#[from] rusqlite::Error),
+
+    /// Talking to Zotero. Carries a sentence a user can act on rather than a
+    /// transport error, because the fix is almost always "start Zotero" or
+    /// "turn the local API on".
+    #[error("{0}")]
+    Zotero(String),
 }
 
 /// Tauri sends a command's `Err` to the frontend as JSON, so the error has to

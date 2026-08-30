@@ -20,6 +20,7 @@ tauri-plugin-dialog = "2"
 thiserror = "2"
 time = { version = "0.3.45", features = ["formatting", "parsing", "serde-well-known", "macros"] }
 ulid = "3"
+ureq = { version = "3.4.0", default-features = false }
 
 [profile.release]
 # Smaller, faster binaries for shipping. `panic = "abort"` drops the unwinding
