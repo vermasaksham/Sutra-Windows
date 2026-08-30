@@ -44,11 +44,19 @@ export const WikiLinkSuggestion = Extension.create({
           const place = () => {
             const rect = latest?.clientRect?.();
             if (!container || !rect) return;
-            void computePosition({ getBoundingClientRect: () => rect }, container, {
-              placement: "bottom-start",
-              strategy: "fixed",
-              middleware: [offset(6), flip({ padding: 8 }), shift({ padding: 8 })],
-            }).then(({ x, y }) => {
+            void computePosition(
+              { getBoundingClientRect: () => rect },
+              container,
+              {
+                placement: "bottom-start",
+                strategy: "fixed",
+                middleware: [
+                  offset(6),
+                  flip({ padding: 8 }),
+                  shift({ padding: 8 }),
+                ],
+              },
+            ).then(({ x, y }) => {
               if (!container) return;
               container.style.left = `${x}px`;
               container.style.top = `${y}px`;

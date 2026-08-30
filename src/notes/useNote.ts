@@ -127,7 +127,9 @@ export function useNote(id: string | null, onSaved: () => void) {
    */
   const applyMeta = useCallback((summary: NoteSummary) => {
     setDoc((current) =>
-      current && current.id === summary.id ? { ...current, ...summary } : current,
+      current && current.id === summary.id
+        ? { ...current, ...summary }
+        : current,
     );
   }, []);
 

@@ -67,13 +67,13 @@ export default function MathBlockView({
           tabIndex={0}
           contentEditable={false}
           onMouseDown={(e) => {
-          // ProseMirror claims mousedown on an atom node view to make a node
-          // selection, and the click event never reaches React. Taking it here
-          // and stopping propagation is what makes the formula clickable.
-          e.preventDefault();
-          e.stopPropagation();
-          setEditing(true);
-        }}
+            // ProseMirror claims mousedown on an atom node view to make a node
+            // selection, and the click event never reaches React. Taking it here
+            // and stopping propagation is what makes the formula clickable.
+            e.preventDefault();
+            e.stopPropagation();
+            setEditing(true);
+          }}
           onKeyDown={(e) => {
             if (e.key === "Enter") {
               e.preventDefault();

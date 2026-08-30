@@ -20,7 +20,10 @@ export default function Breadcrumbs({
   if (path.length <= 1) return null;
 
   return (
-    <nav aria-label="Breadcrumb" className="mb-3 flex flex-wrap items-center gap-1 text-sm">
+    <nav
+      aria-label="Breadcrumb"
+      className="mb-3 flex flex-wrap items-center gap-1 text-sm"
+    >
       {path.slice(0, -1).map((note) => (
         <span key={note.id} className="flex items-center gap-1">
           <button

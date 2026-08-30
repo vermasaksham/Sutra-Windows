@@ -33,7 +33,8 @@ export const CitationSuggestion = Extension.create({
         items: () => [],
 
         render: () => {
-          let renderer: ReactRenderer<CitationMenuHandle, MenuProps> | null = null;
+          let renderer: ReactRenderer<CitationMenuHandle, MenuProps> | null =
+            null;
           let container: HTMLDivElement | null = null;
           let latest: SuggestionProps<never> | null = null;
           let timer: ReturnType<typeof setTimeout> | null = null;
@@ -46,11 +47,19 @@ export const CitationSuggestion = Extension.create({
           const place = () => {
             const rect = latest?.clientRect?.();
             if (!container || !rect) return;
-            void computePosition({ getBoundingClientRect: () => rect }, container, {
-              placement: "bottom-start",
-              strategy: "fixed",
-              middleware: [offset(6), flip({ padding: 8 }), shift({ padding: 8 })],
-            }).then(({ x, y }) => {
+            void computePosition(
+              { getBoundingClientRect: () => rect },
+              container,
+              {
+                placement: "bottom-start",
+                strategy: "fixed",
+                middleware: [
+                  offset(6),
+                  flip({ padding: 8 }),
+                  shift({ padding: 8 }),
+                ],
+              },
+            ).then(({ x, y }) => {
               if (!container) return;
               container.style.left = `${x}px`;
               container.style.top = `${y}px`;
@@ -109,7 +118,8 @@ export const CitationSuggestion = Extension.create({
                   if (mine !== generation) return;
                   results = [];
                   state = "error";
-                  error = cause instanceof Error ? cause.message : String(cause);
+                  error =
+                    cause instanceof Error ? cause.message : String(cause);
                   rerender();
                 });
             }, 200);

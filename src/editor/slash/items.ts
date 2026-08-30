@@ -215,7 +215,12 @@ export const SLASH_ITEMS: SlashItem[] = [
     run: async (editor, range) => {
       const reference = await notesApi.attach();
       if (!reference) return; // Cancelled.
-      editor.chain().focus().deleteRange(range).setImage({ src: reference }).run();
+      editor
+        .chain()
+        .focus()
+        .deleteRange(range)
+        .setImage({ src: reference })
+        .run();
     },
   },
 ];

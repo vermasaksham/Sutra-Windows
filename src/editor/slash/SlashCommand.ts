@@ -54,7 +54,11 @@ export const SlashCommand = Extension.create({
               {
                 placement: "bottom-start",
                 strategy: "fixed",
-                middleware: [offset(6), flip({ padding: 8 }), shift({ padding: 8 })],
+                middleware: [
+                  offset(6),
+                  flip({ padding: 8 }),
+                  shift({ padding: 8 }),
+                ],
               },
             ).then(({ x, y }) => {
               if (!container) return;

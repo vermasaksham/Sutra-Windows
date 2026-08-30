@@ -77,7 +77,8 @@ export const WikiLink = Node.create({
   parseMarkdown: (token: MarkdownToken) => ({
     type: "wikiLink",
     attrs: {
-      targetId: (token as MarkdownToken & { targetId?: string }).targetId ?? null,
+      targetId:
+        (token as MarkdownToken & { targetId?: string }).targetId ?? null,
     },
   }),
 

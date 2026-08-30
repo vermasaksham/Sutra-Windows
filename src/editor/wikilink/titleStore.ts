@@ -48,9 +48,7 @@ export function searchTitles(
   const matches = q
     ? all.filter((n) => n.title.toLowerCase().includes(q))
     : all;
-  return matches
-    .sort((a, b) => a.title.localeCompare(b.title))
-    .slice(0, limit);
+  return matches.sort((a, b) => a.title.localeCompare(b.title)).slice(0, limit);
 }
 
 /**
