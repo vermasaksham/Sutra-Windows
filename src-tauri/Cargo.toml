@@ -23,6 +23,9 @@ thiserror = "2"
 time = { version = "0.3.45", features = ["formatting", "parsing", "serde-well-known", "macros"] }
 ulid = "3"
 ureq = { version = "3.4.0", default-features = false }
+# Reading back the .docx docx-rs just wrote, so vector copies of the formulas
+# can be woven in beside the raster ones. docx-rs pulls this in already.
+zip = "7.2.0"
 
 [profile.release]
 # Smaller, faster binaries for shipping. `panic = "abort"` drops the unwinding
@@ -32,6 +35,3 @@ lto = true
 opt-level = "s"
 panic = "abort"
 strip = true
-
-[dev-dependencies]
-zip = "7.2.0"

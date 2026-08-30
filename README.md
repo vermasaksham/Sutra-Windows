@@ -88,7 +88,8 @@ src/
     ConflictPrompt.tsx
   export/
     buildDocument.ts  Editor state -> a flat model Rust can write
-    mathToPng.ts      Formulas rasterised for export, and why via MathJax
+    mathToImage.ts    Formulas rendered for export, and why via MathJax
+    rasterise.ts      SVG -> PNG, for the raster copy Word insists on
   vault/api.ts        Typed wrappers over the Tauri commands
   components/
   editor/
@@ -154,10 +155,23 @@ nothing leaves the machine. It must be enabled in Zotero → Settings → Advanc
 → "Allow other applications on this computer to communicate with Zotero".
 
 Export writes `.docx` directly. PDF goes through the system print dialog —
-choose "Save as PDF" — with a print stylesheet doing the layout. Equations
-export as images: KaTeX cannot emit one, so the export renderer is MathJax,
-which produces path-only SVG that rasterises cleanly. Both are correct TeX, so
-an exported formula is faithful but not pixel-identical to the editor.
+choose "Save as PDF" — with a print stylesheet doing the layout, so a PDF is
+vector throughout: the formulas in it are the KaTeX ones from the screen.
+
+Equations in a `.docx` are pictures, and they are vector pictures. KaTeX cannot
+emit an image at all, so the export renderer is MathJax, which draws glyphs as
+`<path>` elements rather than text in a font — an SVG that stands on its own.
+Word since 2016 renders that SVG, so an exported equation stays sharp at any
+zoom and prints at the printer's resolution.
+
+Every such picture is written twice. Word's SVG support is an extension hanging
+off a `<a:blip>` that must still name a PNG, so the package carries both, and a
+reader that does not know the extension — LibreOffice, Word 2013 — falls back to
+the raster copy. docx-rs cannot express this, so the finished package is read
+back and rewritten; see `weave_vectors` in `export.rs`.
+
+Both engines are correct TeX, so an exported formula is faithful to the editor's
+but not identical in metrics.
 
 ## Build phases
 
