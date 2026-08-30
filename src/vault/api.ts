@@ -62,6 +62,23 @@ export const notesApi = {
     invoke<string | null>("attach_file", { folder }),
 };
 
+/** What reorganising a flat vault into folders would do. */
+export type MigrationPlan = {
+  /** `[from, to]`, vault-relative. */
+  moves: Array<[string, string]>;
+  /** Notes whose chain of parents was deeper than folders go. */
+  flattened: string[];
+  /** Files whose frontmatter would not parse. Left exactly where they are. */
+  skipped: string[];
+};
+
+export const migrationApi = {
+  needed: () => invoke<boolean>("migration_needed"),
+  plan: () => invoke<MigrationPlan>("migration_plan"),
+  /** Copies every note first. Resolves the number of files moved. */
+  run: () => invoke<number>("migrate_vault"),
+};
+
 export const foldersApi = {
   list: () => invoke<string[]>("list_folders"),
   /** Create a folder, and any missing parents. Resolves its normalised path. */

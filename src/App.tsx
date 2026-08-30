@@ -7,6 +7,7 @@ import Bibliography, { citationKeys } from "./notes/Bibliography";
 import ExportMenu from "./notes/ExportMenu";
 import FolderBar from "./notes/FolderBar";
 import ConflictPrompt from "./notes/ConflictPrompt";
+import MigrationPrompt from "./notes/MigrationPrompt";
 import NoteHeader from "./notes/NoteHeader";
 import NoteList from "./notes/NoteList";
 import Sidebar from "./notes/Sidebar";
@@ -21,9 +22,11 @@ import {
   exportApi,
   indexApi,
   foldersApi,
+  migrationApi,
   notesApi,
   vaultApi,
   type Backlink,
+  type MigrationPlan,
   type NoteSummary,
   type SearchHit,
   type VaultInfo,
@@ -50,6 +53,9 @@ export default function App() {
   /** The folder the list is showing. null means the whole vault. */
   const [activeFolder, setActiveFolder] = useState<string | null>(null);
   const [folders, setFolders] = useState<string[]>([]);
+  /** Set once, when a vault still records its hierarchy in frontmatter. */
+  const [migration, setMigration] = useState<MigrationPlan | null>(null);
+  const [migrating, setMigrating] = useState(false);
   /** Bumped to move focus to the search field; the shortcut lives up here but
    *  the input is three components down. */
   const [focusSearch, setFocusSearch] = useState(0);
@@ -141,6 +147,38 @@ export default function App() {
   }, []);
 
   useEffect(refreshFolders, [refreshFolders, notes]);
+
+  // Asked once per vault, on open. A vault laid out the old way still works —
+  // its notes open and its links resolve — so this is an offer, not a gate.
+  useEffect(() => {
+    if (!vault) return;
+    let cancelled = false;
+    migrationApi
+      .needed()
+      .then((needed) => (needed ? migrationApi.plan() : null))
+      .then((plan) => {
+        if (!cancelled) setMigration(plan);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [vault]);
+
+  const runMigration = useCallback(async () => {
+    setMigrating(true);
+    try {
+      await note.flush();
+      await migrationApi.run();
+      await refresh();
+      refreshFolders();
+      setMigration(null);
+    } catch (cause) {
+      report("Could not organise the vault", cause);
+    } finally {
+      setMigrating(false);
+    }
+  }, [note, refresh, refreshFolders, report]);
 
   const createNote = useCallback(
     async (folder: string | null) => {
@@ -424,6 +462,15 @@ export default function App() {
           </div>
         )}
       </main>
+
+      {migration && (
+        <MigrationPrompt
+          plan={migration}
+          busy={migrating}
+          onRun={() => void runMigration()}
+          onDismiss={() => setMigration(null)}
+        />
+      )}
 
       {note.conflict && (
         <ConflictPrompt

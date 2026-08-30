@@ -11,7 +11,7 @@ use crate::error::{Result, SutraError};
 use crate::export::ExportDocument;
 use crate::index::{Backlink, SearchHit};
 use crate::state::AppState;
-use crate::vault::{NoteDoc, NoteSummary};
+use crate::vault::{MigrationPlan, NoteDoc, NoteSummary};
 use crate::zotero::{Reference, Zotero};
 use serde::Serialize;
 use tauri::{AppHandle, State};
@@ -224,6 +224,32 @@ pub fn move_note(state: State<'_, AppState>, id: String, folder: String) -> Resu
         let doc = vault.read_note(&id)?;
         index.upsert(&summary, &doc.body)?;
         Ok(summary)
+    })
+}
+
+/// Whether this vault still records its hierarchy in frontmatter.
+#[tauri::command]
+pub fn migration_needed(state: State<'_, AppState>) -> Result<bool> {
+    state.with_vault(|vault| vault.needs_migration())
+}
+
+/// What migrating would do, without doing any of it.
+#[tauri::command]
+pub fn migration_plan(state: State<'_, AppState>) -> Result<MigrationPlan> {
+    state.with_vault(|vault| vault.migration_plan())
+}
+
+/// Reorganise a flat vault into folders. Copies every note first.
+///
+/// The index is rebuilt rather than patched: a migration moves most of the
+/// vault at once, and rebuilding from the markdown afterwards is both simpler
+/// and the thing that proves the index really is derived.
+#[tauri::command]
+pub fn migrate_vault(state: State<'_, AppState>) -> Result<usize> {
+    state.with_both(|vault, index| {
+        let moved = vault.migrate()?;
+        index.rebuild(vault)?;
+        Ok(moved)
     })
 }
 

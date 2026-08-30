@@ -27,6 +27,10 @@ const TRASH: &str = "trash";
 /// directory, so the note explorer only ever contains notes.
 const ATTACHMENTS: &str = ".attachments";
 
+/// Where attachments lived before they moved beside their notes. Still read,
+/// never written — an old vault's pictures have to keep working.
+const LEGACY_ATTACHMENTS: &str = "attachments";
+
 /// How deep a note may sit below the root. The brief asks for three or four
 /// levels; four is the cap. It is also roughly what keeps a Windows path under
 /// the 260-character default once a long title and a deep `Documents\...`
@@ -413,15 +417,177 @@ impl Vault {
         if !relative.components().all(is_plain) {
             return Err(refused());
         }
-        let in_attachments = relative
-            .parent()
-            .and_then(|p| p.file_name())
-            .is_some_and(|n| n == ATTACHMENTS);
+        // Either the hidden folder beside a note, or — for a vault written
+        // before attachments moved there — the old top-level `attachments/`.
+        // References live in note bodies, so refusing the old spelling would
+        // break every picture in an existing vault to no purpose.
+        let directory = relative.parent().and_then(|p| p.file_name());
+        let in_attachments = directory.is_some_and(|n| n == ATTACHMENTS)
+            || (directory.is_some_and(|n| n == LEGACY_ATTACHMENTS)
+                && relative.components().count() == 2);
         if !in_attachments {
             return Err(refused());
         }
 
         Ok(fs::read(self.root.join(relative))?)
+    }
+
+    // ---- migrating a vault laid out the old way -----------------------------
+
+    /// Whether this vault still records its hierarchy in frontmatter.
+    ///
+    /// True the moment any note claims a `parent`. That claim is now dead
+    /// weight — folders are the truth — but it is not thrown away, so the
+    /// hierarchy someone built is still recoverable until they say what to do
+    /// with it.
+    pub fn needs_migration(&self) -> Result<bool> {
+        Ok(self.legacy_notes()?.0.iter().any(|n| n.parent.is_some()))
+    }
+
+    /// What migrating would do, without doing any of it.
+    ///
+    /// Shown before anything moves, because reorganising someone's research
+    /// vault on their behalf without telling them first is the failure this
+    /// whole design is trying to avoid.
+    pub fn migration_plan(&self) -> Result<MigrationPlan> {
+        let (notes, skipped) = self.legacy_notes()?;
+        let by_id: HashMap<&str, &LegacyNote> = notes.iter().map(|n| (n.id.as_str(), n)).collect();
+
+        let mut moves = Vec::new();
+        let mut flattened = Vec::new();
+        // Tracks names already claimed in each target folder, so two notes
+        // that would land on one filename get a suffix instead of one of them
+        // overwriting the other.
+        let mut taken: HashMap<String, Vec<String>> = HashMap::new();
+
+        for note in &notes {
+            let (ancestors, deep) = ancestry(note, &by_id);
+            if deep {
+                flattened.push(note.title.clone());
+            }
+
+            let folder = ancestors.join("/");
+            let claimed = taken.entry(folder.clone()).or_default();
+            let stem = note::file_stem(&note.title);
+            let mut name = format!("{stem}.md");
+            let mut attempt = 1;
+            while claimed.contains(&name) {
+                attempt += 1;
+                name = format!("{stem} {attempt}.md");
+            }
+            claimed.push(name.clone());
+
+            let to = join_relative(&folder, &name);
+            if to != note.relative {
+                moves.push((note.relative.clone(), to));
+            }
+        }
+
+        moves.sort();
+        Ok(MigrationPlan {
+            moves,
+            flattened,
+            skipped,
+        })
+    }
+
+    /// Carry out the plan. Returns how many files moved.
+    ///
+    /// Every markdown file is copied into `.sutra/backups/` first. Only the
+    /// markdown — attachments are not touched by any of this, and copying a
+    /// vault's worth of PDFs to rename some text files would be absurd.
+    ///
+    /// Renames happen before any frontmatter is rewritten, so an interrupted
+    /// run leaves files in their new homes still claiming their old parents,
+    /// which is exactly the state a second run knows how to finish.
+    pub fn migrate(&self) -> Result<usize> {
+        let plan = self.migration_plan()?;
+        self.back_up()?;
+
+        for (from, to) in &plan.moves {
+            let target = self.root.join(to);
+            if let Some(parent) = target.parent() {
+                fs::create_dir_all(parent)?;
+            }
+            fs::rename(self.root.join(from), &target)?;
+        }
+
+        // Now the claim is redundant, and a redundant claim is one that can
+        // disagree with the truth later. Timestamps are left alone: moving a
+        // file is not editing a note.
+        for note in self.legacy_notes()?.0 {
+            if note.parent.is_none() {
+                continue;
+            }
+            let path = self.root.join(&note.relative);
+            let Ok(contents) = fs::read_to_string(&path) else {
+                continue;
+            };
+            let Ok((Some(mut fm), body)) = frontmatter::split(&contents) else {
+                continue;
+            };
+            fm.parent = None;
+            let body = body.to_string();
+            note::write_atomic(&path, &frontmatter::join(&fm, &body)?)?;
+        }
+
+        self.list_notes()?;
+        Ok(plan.moves.len())
+    }
+
+    /// Copy every markdown file into a timestamped folder under `.sutra`.
+    fn back_up(&self) -> Result<PathBuf> {
+        let directory = self
+            .root
+            .join(SUTRA)
+            .join("backups")
+            .join(Ulid::generate().to_string());
+
+        let mut files = Vec::new();
+        collect(&self.root, &self.root, 0, &mut files)?;
+        for relative in files {
+            let target = directory.join(&relative);
+            if let Some(parent) = target.parent() {
+                fs::create_dir_all(parent)?;
+            }
+            fs::copy(self.root.join(&relative), &target)?;
+        }
+        Ok(directory)
+    }
+
+    /// Every note with the fields the migration reasons about, and the paths of
+    /// the files it could not read.
+    ///
+    /// The second list matters. A hand-edited note can easily hold frontmatter
+    /// that is not valid YAML — `title: Cp: 300 K` is one colon away — and such
+    /// a file is left exactly where it is. Leaving it is right; leaving it
+    /// *quietly* is not, so the plan says which ones and the dialog shows them.
+    fn legacy_notes(&self) -> Result<(Vec<LegacyNote>, Vec<String>)> {
+        let mut files = Vec::new();
+        collect(&self.root, &self.root, 0, &mut files)?;
+
+        let mut out = Vec::new();
+        let mut skipped = Vec::new();
+        for relative in files {
+            let Ok(contents) = fs::read_to_string(self.root.join(&relative)) else {
+                skipped.push(relative);
+                continue;
+            };
+            match frontmatter::split(&contents) {
+                Ok((Some(fm), _)) => out.push(LegacyNote {
+                    id: fm.id,
+                    title: fm.title,
+                    parent: fm.parent,
+                    relative,
+                }),
+                // No frontmatter at all is not a problem: the file has no
+                // parent to honour, so leaving it where it is loses nothing.
+                Ok((None, _)) => {}
+                Err(_) => skipped.push(relative),
+            }
+        }
+        skipped.sort();
+        Ok((out, skipped))
     }
 
     /// The id of the note at an absolute path, for the file watcher.
@@ -556,6 +722,55 @@ impl Vault {
             .to_string();
         Frontmatter::new(note::adopted_id(relative), title)
     }
+}
+
+/// What a migration would do.
+#[derive(Debug, Clone, Serialize)]
+pub struct MigrationPlan {
+    /// Vault-relative `from` and `to`, sorted so the list reads stably.
+    pub moves: Vec<(String, String)>,
+    /// Notes whose chain of parents was deeper than the folder cap, so they
+    /// were placed as deep as folders go rather than deeper.
+    pub flattened: Vec<String>,
+    /// Files whose frontmatter could not be parsed. Left untouched.
+    pub skipped: Vec<String>,
+}
+
+/// A note as the migration sees it: an id, a title, a claimed parent, a path.
+struct LegacyNote {
+    id: String,
+    title: String,
+    parent: Option<String>,
+    relative: String,
+}
+
+/// The folder names a note's ancestors imply, outermost first.
+///
+/// Returns whether the chain had to be cut short. A note that was six deep in
+/// the old tree cannot be six folders deep in the new one, so it is placed at
+/// the cap — a note in a shallower folder than you expected is recoverable, a
+/// note the filesystem refused to create is not.
+///
+/// A `parent` pointing at nothing, or at a cycle, yields a shorter chain rather
+/// than an error. These files are hand-editable and both happen.
+fn ancestry(note: &LegacyNote, by_id: &HashMap<&str, &LegacyNote>) -> (Vec<String>, bool) {
+    let mut chain = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    let mut current = note.parent.as_deref();
+
+    while let Some(id) = current {
+        if !seen.insert(id.to_string()) {
+            break;
+        }
+        let Some(ancestor) = by_id.get(id) else { break };
+        chain.push(note::file_stem(&ancestor.title));
+        current = ancestor.parent.as_deref();
+    }
+
+    chain.reverse();
+    let deep = chain.len() > MAX_DEPTH;
+    chain.truncate(MAX_DEPTH);
+    (chain, deep)
 }
 
 /// A path component that is an ordinary name — not `..`, not a root, not a
@@ -1417,5 +1632,211 @@ mod tests {
             .unwrap();
         let listed = vault.list_notes().unwrap();
         assert_eq!(listed[0].excerpt, "Ramped to 400 C over two hours.");
+    }
+    /// Migrate a real vault named by $SUTRA_VAULT, so the result can be looked
+    /// at with something other than our own assertions.
+    ///
+    /// Run with `SUTRA_VAULT=... cargo test --bins -- --ignored migrate_a_real_vault`.
+    #[test]
+    #[ignore]
+    fn migrate_a_real_vault() {
+        let root = std::path::PathBuf::from(std::env::var("SUTRA_VAULT").unwrap());
+        let vault = Vault::open(root).unwrap();
+        let plan = vault.migration_plan().unwrap();
+        for (from, to) in &plan.moves {
+            println!("  {from}  ->  {to}");
+        }
+        println!("flattened: {:?}", plan.flattened);
+        println!("moved {} files", vault.migrate().unwrap());
+    }
+
+    // ---- migration -----------------------------------------------------------
+
+    /// Write a note the old way: flat in the root, id in the filename, and the
+    /// hierarchy claimed in frontmatter.
+    fn legacy(vault: &Vault, id: &str, title: &str, parent: Option<&str>) {
+        let mut fm = Frontmatter::new(id.to_string(), title.to_string());
+        fm.parent = parent.map(str::to_string);
+        let name = format!("{}_{id}.md", title.to_lowercase().replace(' ', "-"));
+        note::write_atomic(
+            &vault.root().join(name),
+            &frontmatter::join(&fm, "the body").unwrap(),
+        )
+        .unwrap();
+    }
+
+    const A: &str = "01HQ3M8K2P00000000000000A1";
+    const B: &str = "01HQ3M8K2P00000000000000B1";
+    const C: &str = "01HQ3M8K2P00000000000000C1";
+
+    #[test]
+    fn a_note_whose_frontmatter_will_not_parse_is_reported_not_moved() {
+        let vault = TempVault::new();
+        legacy(&vault, A, "Research", None);
+        // An unquoted colon in a title: valid to type, not valid YAML.
+        fs::write(
+            vault.root().join("hand-edited.md"),
+            "---\nid: x\ntitle: Cp: 300 K\n---\n\nbody\n",
+        )
+        .unwrap();
+
+        let plan = vault.migration_plan().unwrap();
+        assert_eq!(plan.skipped, vec!["hand-edited.md"]);
+
+        vault.migrate().unwrap();
+        assert!(
+            vault.root().join("hand-edited.md").is_file(),
+            "it must be left exactly where it was"
+        );
+    }
+
+    #[test]
+    fn an_old_vaults_attachment_references_still_resolve() {
+        // Bodies written before attachments moved beside their notes point at
+        // a top-level `attachments/`, and those pictures have to keep working.
+        let vault = TempVault::new();
+        let legacy_dir = vault.root().join("attachments");
+        fs::create_dir_all(&legacy_dir).unwrap();
+        fs::write(legacy_dir.join("fig.png"), b"old bytes").unwrap();
+
+        assert_eq!(
+            vault.read_attachment("attachments/fig.png").unwrap(),
+            b"old bytes"
+        );
+        // But it is still only that one directory, not a way in anywhere else.
+        assert!(vault.read_attachment("attachments/sub/fig.png").is_err());
+    }
+
+    #[test]
+    fn a_flat_vault_is_recognised_and_a_folder_one_is_not() {
+        let vault = TempVault::new();
+        assert!(!vault.needs_migration().unwrap(), "empty vault");
+
+        vault.create_note("Modern", folder("Research")).unwrap();
+        assert!(!vault.needs_migration().unwrap(), "no note claims a parent");
+
+        legacy(&vault, A, "Research", None);
+        legacy(&vault, B, "Sb2Se3", Some(A));
+        assert!(vault.needs_migration().unwrap());
+    }
+
+    #[test]
+    fn the_plan_turns_claimed_parents_into_folders() {
+        let vault = TempVault::new();
+        legacy(&vault, A, "Research", None);
+        legacy(&vault, B, "Sb2Se3", Some(A));
+        legacy(&vault, C, "Cp", Some(B));
+
+        let plan = vault.migration_plan().unwrap();
+        let targets: Vec<&str> = plan.moves.iter().map(|(_, to)| to.as_str()).collect();
+
+        assert!(targets.contains(&"Research.md"));
+        assert!(targets.contains(&"Research/Sb2Se3.md"));
+        assert!(targets.contains(&"Research/Sb2Se3/Cp.md"));
+        assert!(plan.flattened.is_empty());
+    }
+
+    #[test]
+    fn migrating_moves_the_files_and_clears_the_claim() {
+        let vault = TempVault::new();
+        legacy(&vault, A, "Research", None);
+        legacy(&vault, B, "Sb2Se3", Some(A));
+        legacy(&vault, C, "Cp", Some(B));
+
+        let moved = vault.migrate().unwrap();
+        assert_eq!(moved, 3);
+
+        assert!(vault.root().join("Research.md").is_file());
+        assert!(vault.root().join("Research/Sb2Se3.md").is_file());
+        assert!(vault.root().join("Research/Sb2Se3/Cp.md").is_file());
+
+        // A parent note keeps being a note, and gains a folder beside it.
+        assert!(vault.root().join("Research").is_dir());
+
+        // Ids survive, so nothing that linked to these notes broke.
+        let deepest = vault.read_note(C).unwrap();
+        assert_eq!(deepest.summary.id, C);
+        assert_eq!(deepest.summary.folder, "Research/Sb2Se3");
+        assert_eq!(deepest.body, "the body\n");
+
+        // And the claim is gone, so nothing can disagree with the path later.
+        assert!(!vault.needs_migration().unwrap());
+    }
+
+    #[test]
+    fn migrating_keeps_a_copy_of_every_note_first() {
+        let vault = TempVault::new();
+        legacy(&vault, A, "Research", None);
+        legacy(&vault, B, "Sb2Se3", Some(A));
+
+        vault.migrate().unwrap();
+
+        let backups = vault.root().join(SUTRA).join("backups");
+        let run = fs::read_dir(&backups).unwrap().next().unwrap().unwrap();
+        let kept: Vec<_> = fs::read_dir(run.path()).unwrap().flatten().collect();
+        assert_eq!(kept.len(), 2, "both notes should have been copied");
+    }
+
+    #[test]
+    fn a_chain_deeper_than_the_cap_is_placed_at_the_cap() {
+        let vault = TempVault::new();
+        let ids: Vec<String> = (0..7)
+            .map(|i| format!("01HQ3M8K2P0000000000000{i:03}"))
+            .collect();
+        for (i, id) in ids.iter().enumerate() {
+            legacy(
+                &vault,
+                id,
+                &format!("L{i}"),
+                if i == 0 { None } else { Some(&ids[i - 1]) },
+            );
+        }
+
+        let plan = vault.migration_plan().unwrap();
+        assert!(!plan.flattened.is_empty(), "it must say what it cut short");
+        for (_, to) in &plan.moves {
+            // Folders, not path segments: four folders is at the cap.
+            assert!(
+                to.matches('/').count() <= MAX_DEPTH,
+                "{to} is deeper than the cap"
+            );
+        }
+        vault.migrate().unwrap();
+        assert_eq!(vault.list_notes().unwrap().len(), 7, "nothing lost");
+    }
+
+    #[test]
+    fn a_parent_that_does_not_exist_lands_the_note_at_the_top() {
+        let vault = TempVault::new();
+        legacy(&vault, B, "Orphan", Some("01HQNOSUCHPARENT0000000000"));
+        vault.migrate().unwrap();
+        assert_eq!(vault.read_note(B).unwrap().summary.folder, "");
+    }
+
+    #[test]
+    fn a_parent_cycle_does_not_hang_the_migration() {
+        let vault = TempVault::new();
+        legacy(&vault, A, "One", Some(B));
+        legacy(&vault, B, "Two", Some(A));
+
+        let plan = vault.migration_plan().unwrap();
+        assert_eq!(plan.moves.len(), 2, "both must still be placed somewhere");
+        vault.migrate().unwrap();
+        assert_eq!(vault.list_notes().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn two_siblings_with_one_title_do_not_overwrite_each_other() {
+        let vault = TempVault::new();
+        legacy(&vault, A, "Parent", None);
+        legacy(&vault, B, "Cp", Some(A));
+        legacy(&vault, C, "Cp", Some(A));
+
+        vault.migrate().unwrap();
+
+        assert!(vault.root().join("Parent/Cp.md").is_file());
+        assert!(vault.root().join("Parent/Cp 2.md").is_file());
+        assert!(vault.read_note(B).is_ok());
+        assert!(vault.read_note(C).is_ok());
     }
 }

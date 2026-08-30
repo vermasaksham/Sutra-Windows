@@ -60,6 +60,9 @@ fn main() {
             commands::move_note,
             commands::list_folders,
             commands::create_folder,
+            commands::migration_needed,
+            commands::migration_plan,
+            commands::migrate_vault,
         ])
         // `generate_context!` pulls in tauri.conf.json at compile time.
         .run(tauri::generate_context!())
