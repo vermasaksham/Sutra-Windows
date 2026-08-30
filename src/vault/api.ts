@@ -77,6 +77,13 @@ export type Reference = {
   doi: string | null;
 };
 
+export const exportApi = {
+  /** Write the note as .docx. Opens a save dialog in Rust; resolves the chosen
+   *  file's name, or null if cancelled. */
+  docx: (document: unknown) =>
+    invoke<string | null>("export_docx", { document }),
+};
+
 export const zoteroApi = {
   /** Search the running Zotero. Rejects with a sentence worth showing if it
    *  is not running or the local API is switched off. */

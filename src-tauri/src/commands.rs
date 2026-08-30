@@ -8,6 +8,7 @@
 //!    for the file and its frontmatter, not for interpreting the prose.
 
 use crate::error::{Result, SutraError};
+use crate::export::ExportDocument;
 use crate::index::{Backlink, SearchHit};
 use crate::state::AppState;
 use crate::vault::{NoteDoc, NoteSummary};
@@ -146,6 +147,31 @@ pub fn delete_note(state: State<'_, AppState>, id: String) -> Result<()> {
         index.remove(&id)?;
         Ok(())
     })
+}
+
+/// Write a note out as a .docx.
+///
+/// Opens a save dialog on the Rust side, so no path crosses the boundary here
+/// either. Returns the chosen file's name for the confirmation message, or
+/// None if the user cancelled.
+#[tauri::command]
+pub fn export_docx(app: AppHandle, document: ExportDocument) -> Result<Option<String>> {
+    let suggested = format!("{}.docx", crate::note::slugify(&document.title));
+    let Some(target) = app
+        .dialog()
+        .file()
+        .set_file_name(&suggested)
+        .add_filter("Word document", &["docx"])
+        .blocking_save_file()
+    else {
+        return Ok(None);
+    };
+
+    let path = target
+        .into_path()
+        .map_err(|e| SutraError::Export(e.to_string()))?;
+    crate::export::write_docx(&document, &path)?;
+    Ok(path.file_name().map(|n| n.to_string_lossy().to_string()))
 }
 
 /// Search the running Zotero for references.

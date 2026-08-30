@@ -1,4 +1,6 @@
+import { useEffect } from "react";
 import { EditorContent, useEditor } from "@tiptap/react";
+import type { Editor as TiptapEditor } from "@tiptap/core";
 import { DragHandle } from "@tiptap/extension-drag-handle-react";
 import { extensions } from "./extensions";
 import { GripIcon } from "./icons";
@@ -9,9 +11,12 @@ type Props = {
   body: string;
   /** Called with markdown on every edit. */
   onChange: (markdown: string) => void;
+  /** Hands the live editor up, so export can read the document as JSON rather
+   *  than re-parsing the markdown it was built from. */
+  onReady?: (editor: TiptapEditor | null) => void;
 };
 
-export default function Editor({ body, onChange }: Props) {
+export default function Editor({ body, onChange, onReady }: Props) {
   const editor = useEditor({
     extensions,
     // Content is loaded in onCreate instead of here: parsing markdown needs the
@@ -28,6 +33,11 @@ export default function Editor({ body, onChange }: Props) {
       },
     },
   });
+
+  useEffect(() => {
+    onReady?.(editor);
+    return () => onReady?.(null);
+  }, [editor, onReady]);
 
   if (!editor) return null;
 

@@ -602,3 +602,68 @@
   color: var(--highlight);
   background-color: var(--highlight-bg);
 }
+
+/* --- Printing ----------------------------------------------------------- */
+
+/*
+ * PDF export goes through the system print dialog, so the print stylesheet is
+ * the export format. Everything that is chrome disappears and the note is laid
+ * out for paper: black on white, no interface, no interaction affordances.
+ */
+@media print {
+  .sutra-no-print {
+    display: none !important;
+  }
+
+  html,
+  body {
+    background: #ffffff !important;
+    color: #000000 !important;
+  }
+
+  /* The app is a fixed-height flex shell with its own scroll container, which
+     would otherwise print exactly one screenful. */
+  .sutra-shell,
+  .sutra-main {
+    display: block !important;
+    height: auto !important;
+    overflow: visible !important;
+  }
+
+  .sutra-page {
+    max-width: none !important;
+    padding: 0 !important;
+  }
+
+  .sutra-prose {
+    padding-block-end: 0 !important;
+  }
+
+  /* Keep a heading with the text it introduces, and never split a formula or a
+     picture across a page. */
+  h1,
+  h2,
+  h3 {
+    break-after: avoid;
+  }
+
+  .sutra-math-block,
+  .sutra-image-wrapper,
+  table,
+  pre {
+    break-inside: avoid;
+  }
+
+  /* A link's destination is invisible on paper otherwise. */
+  .sutra-prose a[href^="http"]::after {
+    content: " (" attr(href) ")";
+    font-size: 0.85em;
+    color: #444444;
+  }
+
+  .sutra-citation,
+  .sutra-wikilink {
+    color: #000000 !important;
+    background: none !important;
+  }
+}

@@ -4,16 +4,20 @@ import ThemeToggle from "./components/ThemeToggle";
 import Toast from "./components/Toast";
 import { setNavigate, setTitles } from "./editor/wikilink/titleStore";
 import BacklinksPanel from "./notes/BacklinksPanel";
-import Bibliography from "./notes/Bibliography";
+import Bibliography, { citationKeys } from "./notes/Bibliography";
+import ExportMenu from "./notes/ExportMenu";
 import Breadcrumbs from "./notes/Breadcrumbs";
 import ConflictPrompt from "./notes/ConflictPrompt";
 import NoteHeader from "./notes/NoteHeader";
 import NoteTree from "./notes/NoteTree";
 import SearchPanel from "./notes/SearchPanel";
 import VaultPicker from "./notes/VaultPicker";
+import { buildDocument } from "./export/buildDocument";
 import { useShortcuts } from "./notes/shortcuts";
 import { useNote } from "./notes/useNote";
+import type { Editor as TiptapEditor } from "@tiptap/core";
 import {
+  exportApi,
   indexApi,
   notesApi,
   vaultApi,
@@ -37,6 +41,8 @@ export default function App() {
   const [backlinks, setBacklinks] = useState<Backlink[]>([]);
   const [search, setSearch] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [editor, setEditor] = useState<TiptapEditor | null>(null);
+  const [exporting, setExporting] = useState(false);
 
   /** Report a failed command instead of swallowing it. */
   const report = useCallback((what: string, cause: unknown) => {
@@ -154,6 +160,32 @@ export default function App() {
     [note, refresh, report],
   );
 
+  async function exportDocx() {
+    if (!note.doc || !editor) return;
+    setExporting(true);
+    try {
+      // Built here rather than in Rust because the pieces that need a browser
+      // — rasterising formulas, reading attachments — only exist on this side.
+      const document = await buildDocument(
+        note.doc.title,
+        editor.getJSON(),
+        citationKeys(note.doc.body),
+      );
+      const saved = await exportApi.docx(document);
+      if (saved) setError(`Exported ${saved}`);
+    } catch (cause) {
+      report("Could not export", cause);
+    } finally {
+      setExporting(false);
+    }
+  }
+
+  function exportPdf() {
+    // The webview's print dialog offers "Save as PDF" on every platform we
+    // target. The print stylesheet is what makes the output worth having.
+    window.print();
+  }
+
   async function pickCover() {
     try {
       const reference = await notesApi.attach();
@@ -169,8 +201,8 @@ export default function App() {
   }
 
   return (
-    <div className="flex h-screen flex-col">
-      <header className="flex h-11 shrink-0 items-center justify-between border-b border-border px-3">
+    <div className="sutra-shell flex h-screen flex-col">
+      <header className="sutra-no-print flex h-11 shrink-0 items-center justify-between border-b border-border px-3">
         <span className="text-sm font-semibold tracking-tight text-ink-soft">
           {vault.name}
         </span>
@@ -182,6 +214,11 @@ export default function App() {
           >
             Search <span className="font-mono">Ctrl K</span>
           </button>
+          <ExportMenu
+            onDocx={() => void exportDocx()}
+            onPdf={exportPdf}
+            busy={exporting}
+          />
           <span className="text-xs text-ink-muted tabular-nums" aria-live="polite">
             {SAVE_LABEL[note.saveState]}
           </span>
@@ -190,6 +227,7 @@ export default function App() {
       </header>
 
       <div className="flex min-h-0 flex-1">
+        <div className="sutra-no-print contents">
         <NoteTree
           notes={notes}
           selectedId={selectedId}
@@ -197,12 +235,13 @@ export default function App() {
           onCreate={(parent) => void createNote(parent)}
           onDelete={(id) => void deleteNote(id)}
         />
+        </div>
 
-        <main className="min-w-0 flex-1 overflow-y-auto">
+        <main className="sutra-main min-w-0 flex-1 overflow-y-auto">
           {note.doc ? (
             // `group/page` so the icon and cover affordances appear on
             // approach rather than sitting there permanently.
-            <div className="group/page mx-auto max-w-content px-6 pt-6 pb-12">
+            <div className="sutra-page group/page mx-auto max-w-content px-6 pt-6 pb-12">
               <Breadcrumbs
                 notes={notes}
                 id={selectedId}
@@ -225,6 +264,7 @@ export default function App() {
                 key={`${note.doc.id}:${note.revision}`}
                 body={note.doc.body}
                 onChange={note.setBody}
+                onReady={setEditor}
               />
               <Bibliography body={note.doc.body} />
               <BacklinksPanel

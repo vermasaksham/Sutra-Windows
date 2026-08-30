@@ -38,6 +38,9 @@ pub enum SutraError {
     #[error("index error: {0}")]
     Index(#[from] rusqlite::Error),
 
+    #[error("export failed: {0}")]
+    Export(String),
+
     /// Talking to Zotero. Carries a sentence a user can act on rather than a
     /// transport error, because the fix is almost always "start Zotero" or
     /// "turn the local API on".

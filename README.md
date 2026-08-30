@@ -86,6 +86,9 @@ src/
     BacklinksPanel.tsx
     VaultPicker.tsx   Shown until a vault is chosen
     ConflictPrompt.tsx
+  export/
+    buildDocument.ts  Editor state -> a flat model Rust can write
+    mathToPng.ts      Formulas rasterised for export, and why via MathJax
   vault/api.ts        Typed wrappers over the Tauri commands
   components/
   editor/
@@ -109,6 +112,8 @@ src-tauri/
     vault.rs          Vault operations: list, read, save, delete, attach
     index.rs          SQLite: tree, FTS5 search, backlinks. Disposable.
     protocol.rs       sutra:// scheme serving vault attachments
+    export.rs         .docx writing
+    zotero.rs         Reading references from a running Zotero
     links.rs          Finding [[id]] references in markdown
     frontmatter.rs    The YAML block, parsing and serialising
     note.rs           Filenames, slugging, atomic writes
@@ -144,7 +149,15 @@ Deliberately out, and not up for discussion: database views, kanban boards,
 relations, filtered tables. Sutra is a writing tool, not a database with a UI.
 Also out: real-time collaboration, cloud sync, mobile apps, plugin systems.
 
-Deferred: Zotero citations, `.docx` and PDF export.
+Citations come from a running Zotero over its local API on 127.0.0.1, so
+nothing leaves the machine. It must be enabled in Zotero → Settings → Advanced
+→ "Allow other applications on this computer to communicate with Zotero".
+
+Export writes `.docx` directly. PDF goes through the system print dialog —
+choose "Save as PDF" — with a print stylesheet doing the layout. Equations
+export as images: KaTeX cannot emit one, so the export renderer is MathJax,
+which produces path-only SVG that rasterises cleanly. Both are correct TeX, so
+an exported formula is faithful but not pixel-identical to the editor.
 
 ## Build phases
 
@@ -164,4 +177,4 @@ an earlier one is open.
       round-trip.
 - [x] **Phase 6 — daily driver.** Shortcuts, tags, icons and covers, motion,
       empty states, error handling.
-- [ ] **Phase 7 — research tools.** Zotero, docx and PDF export.
+- [x] **Phase 7 — research tools.** Zotero, docx and PDF export.

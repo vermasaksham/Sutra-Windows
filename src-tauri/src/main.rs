@@ -5,6 +5,7 @@
 
 mod commands;
 mod error;
+mod export;
 mod frontmatter;
 mod index;
 mod links;
@@ -52,6 +53,7 @@ fn main() {
             commands::save_note,
             commands::set_note_meta,
             commands::delete_note,
+            commands::export_docx,
             commands::zotero_search,
             commands::zotero_by_keys,
             commands::attach_file,
