@@ -26,6 +26,8 @@ pub struct NoteSummary {
     pub tags: Vec<String>,
     pub icon: Option<String>,
     pub cover: Option<String>,
+    /// The opening prose, for the list to show beneath the title.
+    pub excerpt: String,
     #[serde(with = "time::serde::rfc3339")]
     pub updated: OffsetDateTime,
 }
@@ -104,11 +106,11 @@ impl Vault {
             let Ok(contents) = fs::read_to_string(entry.path()) else {
                 continue;
             };
-            let Ok((parsed, _)) = frontmatter::split(&contents) else {
+            let Ok((parsed, body)) = frontmatter::split(&contents) else {
                 continue;
             };
             let fm = parsed.unwrap_or_else(|| Self::synthesise(id, name));
-            notes.push(summary_of(&fm));
+            notes.push(summary_of(&fm, body));
         }
 
         // Siblings sort by position, then title, so the order is stable even
@@ -133,7 +135,7 @@ impl Vault {
             .unwrap_or_default();
         let fm = parsed.unwrap_or_else(|| Self::synthesise(id, name));
         Ok(NoteDoc {
-            summary: summary_of(&fm),
+            summary: summary_of(&fm, body),
             body: body.to_string(),
             adopted,
         })
@@ -147,7 +149,7 @@ impl Vault {
         let path = self.root.join(note::file_name(title, &id));
         note::write_atomic(&path, &frontmatter::join(&fm, "")?)?;
         Ok(NoteDoc {
-            summary: summary_of(&fm),
+            summary: summary_of(&fm, ""),
             body: String::new(),
             adopted: false,
         })
@@ -188,7 +190,7 @@ impl Vault {
             fs::remove_file(&path)?;
         }
 
-        Ok(summary_of(&fm))
+        Ok(summary_of(&fm, body))
     }
 
     /// Replace a note's page-level metadata.
@@ -229,7 +231,7 @@ impl Vault {
 
         let body = body.to_string();
         note::write_atomic(&path, &frontmatter::join(&fm, &body)?)?;
-        Ok(summary_of(&fm))
+        Ok(summary_of(&fm, &body))
     }
 
     /// Move a note to `trash/` rather than unlinking it.
@@ -372,7 +374,7 @@ fn normalise_tags(tags: Vec<String>) -> Vec<String> {
     out
 }
 
-fn summary_of(fm: &Frontmatter) -> NoteSummary {
+fn summary_of(fm: &Frontmatter, body: &str) -> NoteSummary {
     NoteSummary {
         id: fm.id.clone(),
         title: fm.title.clone(),
@@ -381,8 +383,100 @@ fn summary_of(fm: &Frontmatter) -> NoteSummary {
         tags: fm.tags.clone(),
         icon: fm.icon.clone(),
         cover: fm.cover.clone(),
+        excerpt: excerpt_of(body),
         updated: fm.updated,
     }
+}
+
+/// How much of the opening prose the list shows. One line at the widths the
+/// list column is ever given, with a little slack for a narrow window.
+const EXCERPT_LIMIT: usize = 160;
+
+/// The first prose in a note, flattened to a single line.
+///
+/// Not a markdown renderer, and not trying to be. It drops the markers that
+/// would read as noise in a preview — heading hashes, bullets, emphasis, the
+/// 26 characters of a `[[id]]` link — and leaves everything else exactly as
+/// written. Cheap enough to do for every note on every listing, which matters:
+/// the whole vault is re-listed whenever a file changes on disk.
+fn excerpt_of(body: &str) -> String {
+    let mut out = String::new();
+
+    for raw in body.lines() {
+        let line = raw.trim();
+        if line.is_empty() || line.starts_with("```") || line == "---" {
+            continue;
+        }
+        // A heading's hashes, a quote's caret, a bullet — but only where they
+        // are actually markers, so a line like "-5 C" keeps its minus sign.
+        let line = line.trim_start_matches('#');
+        let line = line.strip_prefix("> ").unwrap_or(line);
+        let line = ["- ", "* ", "+ "]
+            .iter()
+            .find_map(|marker| line.strip_prefix(marker))
+            .unwrap_or(line)
+            .trim();
+        if line.is_empty() {
+            continue;
+        }
+        if !out.is_empty() {
+            out.push(' ');
+        }
+        out.push_str(line);
+        if out.len() >= EXCERPT_LIMIT {
+            break;
+        }
+    }
+
+    let out = strip_links(&out);
+    let out: String = out.chars().filter(|c| !"*_`".contains(*c)).collect();
+    let out = out.trim();
+
+    // Truncate on a character boundary — `out` is UTF-8 and a formula or a
+    // chemical name can put a multi-byte character anywhere.
+    match out.char_indices().nth(EXCERPT_LIMIT) {
+        Some((at, _)) => format!("{}…", out[..at].trim_end()),
+        None => out.to_string(),
+    }
+}
+
+/// Drop `[[id]]` links, `![alt](src)` images and `$...$` formulas from a
+/// preview line.
+///
+/// All three are unreadable as source. A wikilink is a raw ULID on disk — the
+/// title only exists at render time — so it would be 26 characters of noise,
+/// and a formula in a one-line preview is backslashes.
+fn strip_links(line: &str) -> String {
+    let mut out = String::new();
+    let mut rest = line;
+
+    while let Some(at) = ["[[", "![", "$"]
+        .iter()
+        .filter_map(|marker| rest.find(marker))
+        .min()
+    {
+        out.push_str(&rest[..at]);
+        let closing = if rest[at..].starts_with("[[") {
+            rest[at..].find("]]").map(|end| at + end + 2)
+        } else if rest[at..].starts_with("![") {
+            rest[at..].find(')').map(|end| at + end + 1)
+        } else {
+            // A formula runs to its closing delimiter. `$$` is a display block,
+            // which is on its own line and so already gone by here.
+            rest[at + 1..].find('$').map(|end| at + end + 2)
+        };
+        match closing {
+            Some(end) => rest = &rest[end..],
+            // An unclosed marker is just text; keep it and stop looking.
+            None => {
+                out.push_str(&rest[at..]);
+                return out;
+            }
+        }
+    }
+
+    out.push_str(rest);
+    out
 }
 
 #[cfg(test)]
@@ -721,5 +815,76 @@ mod tests {
         assert!(vault.root().join(&first).is_file());
         assert!(vault.root().join(&second).is_file());
         let _ = fs::remove_file(source);
+    }
+    #[test]
+    fn an_excerpt_is_the_opening_prose_without_the_markers() {
+        let body = "# Growth log\n\n- Source at 560 C\n- **Sink** at 380 C\n";
+        assert_eq!(excerpt_of(body), "Growth log Source at 560 C Sink at 380 C");
+    }
+
+    #[test]
+    fn an_excerpt_keeps_a_minus_sign_that_is_not_a_bullet() {
+        // "-5" is a temperature, not a list. Only "- " starts a bullet.
+        assert_eq!(excerpt_of("-5 C overnight"), "-5 C overnight");
+    }
+
+    #[test]
+    fn an_excerpt_drops_wikilinks_and_images() {
+        let body = "See [[01H8XGJWBWBAQ4ZQ2XYZ0000AA]] and ![plot](attachments/x.png) here";
+        assert_eq!(excerpt_of(body), "See  and  here");
+    }
+
+    #[test]
+    fn an_unclosed_link_is_kept_as_text() {
+        assert_eq!(excerpt_of("a [[ b"), "a [[ b");
+    }
+
+    #[test]
+    fn a_lone_dollar_is_kept() {
+        // No closing delimiter means it was never a formula.
+        assert_eq!(excerpt_of("costs $5 total"), "costs $5 total");
+    }
+
+    #[test]
+    fn an_excerpt_drops_inline_formulas() {
+        // Raw LaTeX in a one-line preview is backslashes, not information.
+        assert_eq!(
+            excerpt_of("Band gap $E_g = 1.2\\,\\mathrm{eV}$ measured"),
+            "Band gap  measured"
+        );
+    }
+
+    #[test]
+    fn a_long_excerpt_is_cut_on_a_character_boundary() {
+        // A multi-byte character sitting exactly on the limit would panic a
+        // byte slice, so the cut is by characters.
+        let body = "é".repeat(400);
+        let excerpt = excerpt_of(&body);
+        assert!(excerpt.ends_with('…'));
+        assert_eq!(excerpt.chars().count(), EXCERPT_LIMIT + 1);
+    }
+
+    #[test]
+    fn a_fence_and_its_rule_are_skipped() {
+        assert_eq!(
+            excerpt_of("```rust\nfn main() {}\n```\n---\ntext"),
+            "fn main() {} text"
+        );
+    }
+
+    #[test]
+    fn listing_carries_an_excerpt() {
+        let vault = TempVault::new();
+        let note = vault.0.create_note("Anneal", None).unwrap();
+        vault
+            .0
+            .save_note(
+                &note.summary.id,
+                "Anneal",
+                "Ramped to 400 C over two hours.",
+            )
+            .unwrap();
+        let listed = vault.0.list_notes().unwrap();
+        assert_eq!(listed[0].excerpt, "Ramped to 400 C over two hours.");
     }
 }

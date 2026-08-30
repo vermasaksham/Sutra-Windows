@@ -25,9 +25,12 @@
  * `text-ink-soft` instead of the doubled-up `text-text-primary`.
  */
 @theme inline {
+  --color-rail: var(--rail);
   --color-canvas: var(--canvas);
   --color-surface: var(--surface);
   --color-border: var(--border);
+  --color-row-hover: var(--row-hover);
+  --color-row-active: var(--row-active);
 
   --color-ink: var(--text-primary);
   --color-ink-soft: var(--text-secondary);
@@ -43,6 +46,9 @@
 
   --ease-out: var(--ease-out);
   --container-content: var(--content-width);
+  --shadow-pane: var(--shadow);
+  --spacing-rail: var(--rail-width);
+  --spacing-list: var(--list-width);
 }
 
 @layer base {
@@ -53,7 +59,7 @@
   }
 
   body {
-    background-color: var(--canvas);
+    background-color: var(--rail);
     color: var(--text-primary);
     font-family: var(--font-body);
     font-size: var(--text-size-body);

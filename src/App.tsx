@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
 import Editor from "./editor/Editor";
-import ThemeToggle from "./components/ThemeToggle";
 import Toast from "./components/Toast";
 import { setNavigate, setTitles } from "./editor/wikilink/titleStore";
 import BacklinksPanel from "./notes/BacklinksPanel";
@@ -9,8 +8,8 @@ import ExportMenu from "./notes/ExportMenu";
 import Breadcrumbs from "./notes/Breadcrumbs";
 import ConflictPrompt from "./notes/ConflictPrompt";
 import NoteHeader from "./notes/NoteHeader";
-import NoteTree from "./notes/NoteTree";
-import SearchPanel from "./notes/SearchPanel";
+import NoteList from "./notes/NoteList";
+import Sidebar from "./notes/Sidebar";
 import VaultPicker from "./notes/VaultPicker";
 import { buildDocument } from "./export/buildDocument";
 import { useShortcuts } from "./notes/shortcuts";
@@ -23,6 +22,7 @@ import {
   vaultApi,
   type Backlink,
   type NoteSummary,
+  type SearchHit,
   type VaultInfo,
 } from "./vault/api";
 
@@ -39,7 +39,14 @@ export default function App() {
   const [notes, setNotes] = useState<NoteSummary[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [backlinks, setBacklinks] = useState<Backlink[]>([]);
-  const [search, setSearch] = useState<string | null>(null);
+  /** What is typed in the list's search field. "" means not searching. */
+  const [query, setQuery] = useState("");
+  /** Results for `query`, or null when there is no search running. */
+  const [hits, setHits] = useState<SearchHit[] | null>(null);
+  const [activeTag, setActiveTag] = useState<string | null>(null);
+  /** Bumped to move focus to the search field; the shortcut lives up here but
+   *  the input is three components down. */
+  const [focusSearch, setFocusSearch] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [editor, setEditor] = useState<TiptapEditor | null>(null);
   const [exporting, setExporting] = useState(false);
@@ -85,12 +92,26 @@ export default function App() {
       // Flush first, so switching away never drops the last few keystrokes.
       await note.flush();
       setSelectedId(id);
-      setSearch(null);
     },
     [note],
   );
 
   useEffect(() => setNavigate((id) => void select(id)), [select]);
+
+  useEffect(() => {
+    if (query.trim() === "") {
+      setHits(null);
+      return;
+    }
+    // Debounced, so a fast typist does not queue a query per keystroke.
+    const timer = setTimeout(() => {
+      indexApi
+        .search(query)
+        .then(setHits)
+        .catch(() => setHits([]));
+    }, 120);
+    return () => clearTimeout(timer);
+  }, [query, notes]);
 
   useEffect(() => {
     if (!selectedId) return setBacklinks([]);
@@ -115,7 +136,7 @@ export default function App() {
   );
 
   useShortcuts({
-    search: () => setSearch((open) => (open === null ? "" : null)),
+    search: () => setFocusSearch((n) => n + 1),
     newNote: () => void createNote(null),
     save: () => void note.flush(),
   });
@@ -138,7 +159,11 @@ export default function App() {
 
   /** Icon, cover and tags all go the same way: full desired state to Rust. */
   const setMeta = useCallback(
-    async (patch: { icon?: string | null; cover?: string | null; tags?: string[] }) => {
+    async (patch: {
+      icon?: string | null;
+      cover?: string | null;
+      tags?: string[];
+    }) => {
       const current = note.doc;
       if (!current) return;
       try {
@@ -197,116 +222,122 @@ export default function App() {
 
   if (!checked) return null;
   if (!vault) {
-    return <VaultPicker onOpened={() => void vaultApi.current().then(setVault)} />;
+    return (
+      <VaultPicker onOpened={() => void vaultApi.current().then(setVault)} />
+    );
   }
 
+  // What the middle column lists. A tag narrows it; a search replaces it.
+  const listed = activeTag
+    ? notes.filter((note) => note.tags.includes(activeTag))
+    : notes;
+
   return (
-    <div className="sutra-shell flex h-screen flex-col">
-      <header className="sutra-no-print flex h-11 shrink-0 items-center justify-between border-b border-border px-3">
-        <span className="text-sm font-semibold tracking-tight text-ink-soft">
-          {vault.name}
-        </span>
-        <div className="flex items-center gap-3">
-          <button
-            type="button"
-            onClick={() => setSearch("")}
-            className="rounded-md border border-border px-2 py-0.5 text-xs text-ink-muted transition-colors duration-150 ease-out hover:text-ink"
+    <div className="sutra-shell flex h-screen">
+      <div className="sutra-no-print contents">
+        <Sidebar
+          vaultName={vault.name}
+          notes={notes}
+          activeTag={activeTag}
+          onSelectTag={setActiveTag}
+          onNewNote={() => void createNote(null)}
+        />
+
+        <NoteList
+          notes={listed}
+          hits={hits}
+          query={query}
+          onQuery={setQuery}
+          heading={activeTag ? `#${activeTag}` : "All notes"}
+          nested={hits === null && activeTag === null}
+          selectedId={selectedId}
+          onSelect={(id) => void select(id)}
+          onCreate={(parent) => void createNote(parent)}
+          onDelete={(id) => void deleteNote(id)}
+          focusSearch={focusSearch}
+        />
+      </div>
+
+      <main className="sutra-main relative min-w-0 flex-1 overflow-y-auto bg-surface">
+        {/*
+          The window's only chrome, and it floats over the page rather than
+          sitting in a bar above it — the point of this layout is that the note
+          is the window. Sticky so it stays reachable while reading.
+        */}
+        <div className="sutra-no-print sticky top-0 z-10 flex items-center justify-end gap-3 bg-surface/85 px-4 py-2 backdrop-blur-sm">
+          <span
+            className="text-xs tabular-nums text-ink-muted"
+            aria-live="polite"
           >
-            Search <span className="font-mono">Ctrl K</span>
-          </button>
+            {SAVE_LABEL[note.saveState]}
+          </span>
           <ExportMenu
             onDocx={() => void exportDocx()}
             onPdf={exportPdf}
             busy={exporting}
           />
-          <span className="text-xs text-ink-muted tabular-nums" aria-live="polite">
-            {SAVE_LABEL[note.saveState]}
-          </span>
-          <ThemeToggle />
-        </div>
-      </header>
-
-      <div className="flex min-h-0 flex-1">
-        <div className="sutra-no-print contents">
-        <NoteTree
-          notes={notes}
-          selectedId={selectedId}
-          onSelect={(id) => void select(id)}
-          onCreate={(parent) => void createNote(parent)}
-          onDelete={(id) => void deleteNote(id)}
-        />
         </div>
 
-        <main className="sutra-main min-w-0 flex-1 overflow-y-auto">
-          {note.doc ? (
-            // `group/page` so the icon and cover affordances appear on
-            // approach rather than sitting there permanently.
-            <div className="sutra-page group/page mx-auto max-w-content px-6 pt-6 pb-12">
-              <Breadcrumbs
-                notes={notes}
-                id={selectedId}
-                onSelect={(id) => void select(id)}
-              />
-              <NoteHeader
-                doc={note.doc}
-                onTitle={note.setTitle}
-                onIcon={(icon) => void setMeta({ icon })}
-                onCover={() => void pickCover()}
-                onTags={(tags) => void setMeta({ tags })}
-                onSelectTag={(tag) => setSearch(tag)}
-              />
-              {note.doc.adopted && (
-                <p className="mb-4 rounded-lg bg-highlight-bg px-3 py-2 text-sm text-highlight">
-                  This file had no frontmatter. Sutra will add one when you save.
-                </p>
+        {note.doc ? (
+          // `group/page` so the icon and cover affordances appear on
+          // approach rather than sitting there permanently.
+          <div className="sutra-page group/page mx-auto max-w-content px-8 pt-2 pb-16">
+            <Breadcrumbs
+              notes={notes}
+              id={selectedId}
+              onSelect={(id) => void select(id)}
+            />
+            <NoteHeader
+              doc={note.doc}
+              onTitle={note.setTitle}
+              onIcon={(icon) => void setMeta({ icon })}
+              onCover={() => void pickCover()}
+              onTags={(tags) => void setMeta({ tags })}
+              onSelectTag={setActiveTag}
+            />
+            {note.doc.adopted && (
+              <p className="mb-4 rounded-lg bg-highlight-bg px-3 py-2 text-sm text-highlight">
+                This file had no frontmatter. Sutra will add one when you save.
+              </p>
+            )}
+            <Editor
+              key={`${note.doc.id}:${note.revision}`}
+              body={note.doc.body}
+              onChange={note.setBody}
+              onReady={setEditor}
+            />
+            <Bibliography body={note.doc.body} />
+            <BacklinksPanel
+              backlinks={backlinks}
+              onSelect={(id) => void select(id)}
+            />
+          </div>
+        ) : (
+          <div className="grid h-full place-items-center px-6">
+            <div className="flex max-w-sm flex-col items-center gap-2 text-center">
+              <p className="text-ink-soft">
+                {notes.length === 0
+                  ? "This vault is empty."
+                  : "No note selected."}
+              </p>
+              <p className="text-sm text-ink-muted">
+                {notes.length === 0
+                  ? "Every note is one markdown file in the folder you chose."
+                  : "Pick one from the list, or search with Ctrl K."}
+              </p>
+              {notes.length === 0 && (
+                <button
+                  type="button"
+                  onClick={() => void createNote(null)}
+                  className="mt-2 rounded-lg bg-accent px-3 py-1.5 text-sm font-medium text-surface transition-opacity duration-150 ease-out hover:opacity-90"
+                >
+                  New note
+                </button>
               )}
-              <Editor
-                key={`${note.doc.id}:${note.revision}`}
-                body={note.doc.body}
-                onChange={note.setBody}
-                onReady={setEditor}
-              />
-              <Bibliography body={note.doc.body} />
-              <BacklinksPanel
-                backlinks={backlinks}
-                onSelect={(id) => void select(id)}
-              />
             </div>
-          ) : (
-            <div className="grid h-full place-items-center px-6">
-              <div className="flex max-w-sm flex-col items-center gap-2 text-center">
-                <p className="text-ink-soft">
-                  {notes.length === 0
-                    ? "This vault is empty."
-                    : "No note selected."}
-                </p>
-                <p className="text-sm text-ink-muted">
-                  {notes.length === 0
-                    ? "Every note is one markdown file in the folder you chose."
-                    : "Pick one from the sidebar, or search with Ctrl K."}
-                </p>
-                {notes.length === 0 && (
-                  <button
-                    type="button"
-                    onClick={() => void createNote(null)}
-                    className="mt-2 rounded-lg bg-accent px-3 py-1.5 text-sm font-medium text-surface transition-opacity duration-150 ease-out hover:opacity-90"
-                  >
-                    New note
-                  </button>
-                )}
-              </div>
-            </div>
-          )}
-        </main>
-      </div>
-
-      {search !== null && (
-        <SearchPanel
-          initialQuery={search}
-          onClose={() => setSearch(null)}
-          onSelect={(id) => void select(id)}
-        />
-      )}
+          </div>
+        )}
+      </main>
 
       {note.conflict && (
         <ConflictPrompt

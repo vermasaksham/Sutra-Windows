@@ -29,7 +29,10 @@ export default function TagEditor({
   return (
     <div className="mb-4 flex flex-wrap items-center gap-1.5">
       {tags.map((tag) => (
-        <span key={tag} className="group/tag inline-flex items-center rounded-full bg-highlight-bg text-highlight">
+        <span
+          key={tag}
+          className="group/tag inline-flex items-center rounded-full bg-highlight-bg text-highlight"
+        >
           <button
             type="button"
             onClick={() => onSelect(tag)}
@@ -77,7 +80,7 @@ export default function TagEditor({
         <button
           type="button"
           onClick={() => setAdding(true)}
-          className="rounded-full border border-border px-2 py-0.5 text-xs text-ink-muted transition-colors duration-150 ease-out hover:border-accent hover:text-accent"
+          className="sutra-no-print rounded-full border border-border px-2 py-0.5 text-xs text-ink-muted transition-colors duration-150 ease-out hover:border-accent hover:text-accent"
         >
           + tag
         </button>

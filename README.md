@@ -72,17 +72,17 @@ cargo check           # from src-tauri/ — compile the Rust side
 index.html            Sets data-theme before first paint
 src/
   main.tsx            React entry
-  App.tsx             Top bar, note list, and the writing surface
+  App.tsx             The three-pane shell
   notes/
     useNote.ts        Buffer, autosave, external-change handling
     NoteHeader.tsx    Cover, icon, title, tags — all frontmatter
     IconPicker.tsx    Curated emoji, no dependency
-    TagEditor.tsx     Tag chips; clicking one searches for it
+    TagEditor.tsx     Tag chips; clicking one selects that tag
     shortcuts.ts      App-level keys only; the editor owns its own
     tree.ts           Flat list -> tree, tolerant of cycles and orphans
-    NoteTree.tsx      Nested, collapsible sidebar
+    Sidebar.tsx       Rail: the vault, all notes, the tag list
+    NoteList.tsx      Middle column: rows, nesting, and the search field
     Breadcrumbs.tsx   Root-to-note chain
-    SearchPanel.tsx   Full-text search overlay (Ctrl/Cmd K)
     BacklinksPanel.tsx
     VaultPicker.tsx   Shown until a vault is chosen
     ConflictPrompt.tsx
@@ -137,8 +137,20 @@ on `<html>`; because the light and dark blocks define the same variable names,
 nothing downstream needs to know which theme is active.
 
 The neutrals are warm, not grey — deliberate, and to be preserved. Body text is
-off-white in dark mode, never pure white. Indigo is for links and interactive
-accents; saffron is reserved strictly for highlights and tags.
+off-white in dark mode, never pure white. Persimmon is for links and interactive
+accents; teal is reserved strictly for highlights and tags.
+
+The palette is drawn from the application icon, so the two belong to each other.
+It replaces the indigo-and-saffron pair the original brief named — a deliberate
+change, recorded at the top of `tokens.css` along with what to do to get the old
+one back.
+
+The window is three panes, after Bear: a rail naming what to look at, a list
+choosing which note, and the page itself. Each sits on its own ground, darkest
+to lightest, so the stack reads as depth rather than as three boxes. There is no
+toolbar — the only chrome is a save state and an export menu floating over the
+top-right of the page. Search lives at the head of the list rather than in an
+overlay, and Ctrl/Cmd K puts the cursor in it.
 
 ## Scope
 

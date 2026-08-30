@@ -2,7 +2,9 @@ import { useEffect, useImperativeHandle, useRef, useState } from "react";
 import type { Ref } from "react";
 import type { Reference } from "../../vault/api";
 
-export type CitationMenuHandle = { onKeyDown: (event: KeyboardEvent) => boolean };
+export type CitationMenuHandle = {
+  onKeyDown: (event: KeyboardEvent) => boolean;
+};
 
 type Props = {
   items: Reference[];
@@ -12,7 +14,13 @@ type Props = {
   ref?: Ref<CitationMenuHandle>;
 };
 
-export default function CitationMenu({ items, state, error, onSelect, ref }: Props) {
+export default function CitationMenu({
+  items,
+  state,
+  error,
+  onSelect,
+  ref,
+}: Props) {
   const [selected, setSelected] = useState(0);
   const listRef = useRef<HTMLDivElement>(null);
 
@@ -43,8 +51,7 @@ export default function CitationMenu({ items, state, error, onSelect, ref }: Pro
     },
   }));
 
-  const shell =
-    "w-96 rounded-xl border border-border bg-surface shadow-lg shadow-black/5";
+  const shell = "w-96 rounded-xl border border-border bg-surface shadow-pane";
 
   // Zotero being switched off is the single most likely reason this is empty,
   // and it is fixable — so say so here rather than showing "no results".
@@ -71,7 +78,12 @@ export default function CitationMenu({ items, state, error, onSelect, ref }: Pro
   }
 
   return (
-    <div ref={listRef} role="listbox" aria-label="Cite a reference" className={`${shell} max-h-80 overflow-y-auto p-1`}>
+    <div
+      ref={listRef}
+      role="listbox"
+      aria-label="Cite a reference"
+      className={`${shell} max-h-80 overflow-y-auto p-1`}
+    >
       {items.map((item, index) => {
         const isSelected = index === selected;
         return (
@@ -89,7 +101,9 @@ export default function CitationMenu({ items, state, error, onSelect, ref }: Pro
               isSelected ? "bg-accent-bg" : "",
             ].join(" ")}
           >
-            <span className={`block truncate text-sm ${isSelected ? "text-accent" : "text-ink"}`}>
+            <span
+              className={`block truncate text-sm ${isSelected ? "text-accent" : "text-ink"}`}
+            >
               {item.title}
             </span>
             <span className="block truncate text-xs text-ink-muted">

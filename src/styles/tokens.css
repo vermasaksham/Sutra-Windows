@@ -10,54 +10,86 @@
  * names are identical, nothing downstream needs to know which theme is active.
  *
  * The neutrals are warm, not grey. That is deliberate — keep it.
+ *
+ * ---------------------------------------------------------------------------
+ * A departure, stated plainly rather than slipped in.
+ *
+ * The original brief fixed indigo #4A45A8 for links and saffron #A6660F for
+ * highlights and tags. That is no longer what these say. The app now asks for
+ * three distinct grounds — rail, list, page — which the old three-colour set
+ * could not supply, and the accent is drawn from the application icon so the
+ * two belong to each other: persimmon from the red of the trail, teal from the
+ * band beside it. Everything else stays neutral, which is what keeps two
+ * saturated hues from fighting.
+ *
+ * If the old palette is wanted back, it is this file and nothing else.
+ * ---------------------------------------------------------------------------
  */
 
 :root {
-  /* Surfaces */
-  --canvas: #faf8f5;
-  --surface: #ffffff;
-  --border: #e7e1d7;
+  /* Three grounds, darkest to lightest. The eye reads the stack as depth:
+     rail behind list behind page. */
+  --rail: #ebe4d8;
+  --canvas: #f6f2ea;
+  --surface: #fffcf7;
+  --border: #e3dcce;
+
+  /* Rows in the rail and the list. Faint on purpose — a list of forty notes
+     with strong hover states is a strobe. */
+  --row-hover: #e4dccd;
+  --row-active: #f6e2da;
 
   /* Text */
-  --text-primary: #211f1b;
-  --text-secondary: #6e6960;
-  --text-muted: #8a8478;
+  --text-primary: #26221b;
+  --text-secondary: #6c645a;
+  --text-muted: #8b8375;
 
-  /* Indigo — links and interactive accents */
-  --accent: #4a45a8;
-  --accent-bg: #edecf7;
+  /* Persimmon — links, selection, anything the pointer can act on. */
+  --accent: #b0472e;
+  --accent-bg: #f6e2da;
 
-  /* Saffron — highlights and tags only. Nothing else. */
-  --highlight: #a6660f;
-  --highlight-bg: #faf0e2;
+  /* Teal — highlights and tags only. Nothing else. */
+  --highlight: #2d7d78;
+  --highlight-bg: #dfeeec;
+
+  /* Depth. One shadow, used sparingly: overlays and the editor's floating
+     controls, never on a row. */
+  --shadow: 0 1px 2px rgb(38 34 27 / 0.06), 0 8px 24px rgb(38 34 27 / 0.1);
 
   /* Tells the OS to draw scrollbars and form controls to match. */
   color-scheme: light;
 }
 
 [data-theme="dark"] {
-  --canvas: #1a1815;
-  --surface: #232019;
-  --border: #332f29;
+  --rail: #141310;
+  --canvas: #1b1915;
+  --surface: #211e19;
+  --border: #322e27;
+
+  --row-hover: #26221c;
+  --row-active: #3b241c;
 
   /* Off-white, never pure white. */
-  --text-primary: #ede9e2;
-  --text-secondary: #9a9488;
-  --text-muted: #857f74;
+  --text-primary: #ece7dd;
+  --text-secondary: #a39b8d;
+  --text-muted: #857d70;
 
-  --accent: #a9a4e8;
-  --accent-bg: #2a2748;
+  --accent: #e8886c;
+  --accent-bg: #3b241c;
 
-  --highlight: #e0b463;
-  --highlight-bg: #3a2c16;
+  --highlight: #6cc3bb;
+  --highlight-bg: #16332f;
+
+  --shadow: 0 1px 2px rgb(0 0 0 / 0.4), 0 8px 24px rgb(0 0 0 / 0.45);
 
   color-scheme: dark;
 }
 
 :root {
   /* Typography — Notion/Apple Notes density. */
-  --font-body: "Source Sans 3", ui-sans-serif, system-ui, -apple-system,
-    "Segoe UI", sans-serif;
+  --font-body:
+    "Source Sans 3", ui-sans-serif, system-ui, -apple-system, "Segoe UI",
+    sans-serif;
   --font-mono: ui-monospace, "Cascadia Mono", "Consolas", monospace;
 
   --text-size-body: 1rem; /* 16px */
@@ -65,6 +97,8 @@
 
   /* Layout */
   --content-width: 700px;
+  --rail-width: 13rem;
+  --list-width: 19rem;
 
   /* Motion — snappy, never floaty. */
   --ease-out: cubic-bezier(0.2, 0, 0, 1);

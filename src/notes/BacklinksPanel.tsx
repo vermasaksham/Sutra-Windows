@@ -7,6 +7,9 @@ import type { Backlink } from "../vault/api";
  * Always rendered, even when empty — an absent panel reads as "this feature is
  * broken", whereas an empty one reads as "nothing links here yet", which is
  * the actual fact.
+ *
+ * Not printed, though: it is a way of getting somewhere else, and on paper
+ * there is nowhere else to get to.
  */
 export default function BacklinksPanel({
   backlinks,
@@ -16,7 +19,7 @@ export default function BacklinksPanel({
   onSelect: (id: string) => void;
 }) {
   return (
-    <section className="mt-16 border-t border-border pt-4">
+    <section className="sutra-no-print mt-16 border-t border-border pt-4">
       <h2 className="mb-2 text-xs font-semibold tracking-wide text-ink-muted uppercase">
         Linked from {backlinks.length > 0 && `(${backlinks.length})`}
       </h2>

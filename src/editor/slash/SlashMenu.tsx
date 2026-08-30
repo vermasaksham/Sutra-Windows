@@ -21,7 +21,6 @@ export default function SlashMenu({ items, onSelect, onDismiss, ref }: Props) {
   // The item list is re-filtered on every keystroke; keep the highlight in range.
   useEffect(() => setSelected(0), [items]);
 
-
   // Keep the highlighted row visible without scrolling the page behind it.
   useEffect(() => {
     listRef.current
@@ -58,7 +57,7 @@ export default function SlashMenu({ items, onSelect, onDismiss, ref }: Props) {
 
   if (items.length === 0) {
     return (
-      <div className="w-72 rounded-xl border border-border bg-surface px-3 py-2.5 text-sm text-ink-muted shadow-lg shadow-black/5">
+      <div className="w-72 rounded-xl border border-border bg-surface px-3 py-2.5 text-sm text-ink-muted shadow-pane">
         No blocks match
       </div>
     );
@@ -71,7 +70,7 @@ export default function SlashMenu({ items, onSelect, onDismiss, ref }: Props) {
       ref={listRef}
       role="listbox"
       aria-label="Insert block"
-      className="max-h-80 w-72 overflow-y-auto rounded-xl border border-border bg-surface p-1 shadow-lg shadow-black/5"
+      className="max-h-80 w-72 overflow-y-auto rounded-xl border border-border bg-surface p-1 shadow-pane"
     >
       {items.map((item, index) => {
         const isSelected = index === selected;

@@ -16,7 +16,7 @@ use std::sync::Mutex;
 /// Bumped whenever the schema changes. On mismatch the index is dropped and
 /// rebuilt rather than migrated — migrations are for data you cannot recreate,
 /// and this is not that.
-const SCHEMA_VERSION: i32 = 2;
+const SCHEMA_VERSION: i32 = 3;
 
 const SCHEMA: &str = r#"
 CREATE TABLE notes (
@@ -27,6 +27,9 @@ CREATE TABLE notes (
     tags      TEXT NOT NULL,
     icon      TEXT,
     cover     TEXT,
+    -- Derived from the body, like everything else here. Kept so the note list
+    -- can show a preview without re-reading every file in the vault.
+    excerpt   TEXT NOT NULL DEFAULT '',
     updated   TEXT NOT NULL
 );
 CREATE INDEX notes_by_parent ON notes(parent, position);
@@ -162,7 +165,7 @@ impl Index {
     pub fn all_notes(&self) -> Result<Vec<NoteSummary>> {
         let guard = self.conn.lock().unwrap_or_else(|e| e.into_inner());
         let mut stmt = guard.prepare(
-            "SELECT id, title, parent, position, tags, icon, cover, updated
+            "SELECT id, title, parent, position, tags, icon, cover, excerpt, updated
              FROM notes
              ORDER BY position, title COLLATE NOCASE",
         )?;
@@ -237,8 +240,8 @@ fn create_schema(conn: &Connection) -> Result<()> {
 fn insert_note(tx: &rusqlite::Transaction<'_>, note: &NoteSummary, body: &str) -> Result<()> {
     let tags = serde_json::to_string(&note.tags).unwrap_or_else(|_| "[]".into());
     tx.execute(
-        "INSERT INTO notes (id, title, parent, position, tags, icon, cover, updated)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+        "INSERT INTO notes (id, title, parent, position, tags, icon, cover, excerpt, updated)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
         params![
             note.id,
             note.title,
@@ -247,6 +250,7 @@ fn insert_note(tx: &rusqlite::Transaction<'_>, note: &NoteSummary, body: &str) -
             tags,
             note.icon,
             note.cover,
+            note.excerpt,
             note.updated
                 .format(&time::format_description::well_known::Rfc3339)
                 .unwrap_or_default(),
@@ -278,7 +282,7 @@ fn remove_note(tx: &rusqlite::Transaction<'_>, id: &str) -> Result<()> {
 
 fn row_to_summary(row: &rusqlite::Row<'_>) -> rusqlite::Result<NoteSummary> {
     let tags: String = row.get(4)?;
-    let updated: String = row.get(7)?;
+    let updated: String = row.get(8)?;
     Ok(NoteSummary {
         id: row.get(0)?,
         title: row.get(1)?,
@@ -287,6 +291,7 @@ fn row_to_summary(row: &rusqlite::Row<'_>) -> rusqlite::Result<NoteSummary> {
         tags: serde_json::from_str(&tags).unwrap_or_default(),
         icon: row.get(5)?,
         cover: row.get(6)?,
+        excerpt: row.get(7)?,
         updated: time::OffsetDateTime::parse(
             &updated,
             &time::format_description::well_known::Rfc3339,

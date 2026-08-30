@@ -21,7 +21,7 @@ export default function ConflictPrompt({ note, onResolve }: Props) {
       aria-labelledby="sutra-conflict-title"
       className="fixed inset-0 z-50 grid place-items-center bg-canvas/70 px-6 backdrop-blur-sm"
     >
-      <div className="flex max-w-md flex-col gap-3 rounded-xl border border-border bg-surface p-5 shadow-lg shadow-black/10">
+      <div className="flex max-w-md flex-col gap-3 rounded-xl border border-border bg-surface p-5 shadow-pane">
         <h2
           id="sutra-conflict-title"
           className="text-lg font-semibold text-ink"

@@ -26,7 +26,7 @@ export default function Toast({
     <div
       role="status"
       aria-live="polite"
-      className="sutra-toast fixed bottom-4 left-1/2 z-50 flex max-w-md -translate-x-1/2 items-start gap-3 rounded-lg border border-border bg-surface px-4 py-2.5 shadow-lg shadow-black/10"
+      className="sutra-toast fixed bottom-4 left-1/2 z-50 flex max-w-md -translate-x-1/2 items-start gap-3 rounded-lg border border-border bg-surface px-4 py-2.5 shadow-pane"
     >
       <span className="text-sm text-ink">{message}</span>
       <button

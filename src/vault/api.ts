@@ -19,6 +19,8 @@ export type NoteSummary = {
   tags: string[];
   icon: string | null;
   cover: string | null;
+  /** The opening prose, markers stripped, for the list to show. */
+  excerpt: string;
   /** RFC3339, e.g. 2026-08-21T11:02:00Z */
   updated: string;
 };

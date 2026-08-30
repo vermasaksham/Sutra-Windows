@@ -26,7 +26,9 @@ export default function ExportMenu({
     function onKey(event: KeyboardEvent) {
       if (event.key === "Escape") setOpen(false);
     }
-    const timer = setTimeout(() => document.addEventListener("mousedown", onPointerDown));
+    const timer = setTimeout(() =>
+      document.addEventListener("mousedown", onPointerDown),
+    );
     document.addEventListener("keydown", onKey);
     return () => {
       clearTimeout(timer);
@@ -50,7 +52,7 @@ export default function ExportMenu({
       {open && (
         <div
           role="menu"
-          className="absolute top-full right-0 z-30 mt-1 w-56 rounded-xl border border-border bg-surface p-1 shadow-lg shadow-black/10"
+          className="absolute top-full right-0 z-30 mt-1 w-56 rounded-xl border border-border bg-surface p-1 shadow-pane"
         >
           <button
             type="button"

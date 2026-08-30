@@ -6,7 +6,7 @@ import { label, useCitation } from "./citationStore";
  *
  * Three states, all of them meaning something different to the author:
  * still fetching, resolved, and asked-for-but-not-in-the-library. The last is
- * shown in saffron rather than hidden — the key is in the file either way, and
+ * shown in the highlight colour rather than hidden — the key is in the file either way, and
  * a citation that quietly disappears is worse than one that admits it is
  * unresolved.
  */

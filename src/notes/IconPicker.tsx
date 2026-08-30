@@ -8,10 +8,38 @@ import { useEffect, useRef, useState } from "react";
  * marks a lab notebook actually uses.
  */
 const ICONS = [
-  "🧪", "⚗️", "🔬", "🧫", "🧬", "⚛️", "🔭", "💎",
-  "📊", "📈", "📉", "🗂️", "📋", "📐", "🧭", "🔎",
-  "📝", "📌", "🔖", "⭐", "🔥", "❄️", "⚡", "💡",
-  "✅", "⚠️", "❓", "🚧", "🗒️", "📦", "🧰", "🕯️",
+  "🧪",
+  "⚗️",
+  "🔬",
+  "🧫",
+  "🧬",
+  "⚛️",
+  "🔭",
+  "💎",
+  "📊",
+  "📈",
+  "📉",
+  "🗂️",
+  "📋",
+  "📐",
+  "🧭",
+  "🔎",
+  "📝",
+  "📌",
+  "🔖",
+  "⭐",
+  "🔥",
+  "❄️",
+  "⚡",
+  "💡",
+  "✅",
+  "⚠️",
+  "❓",
+  "🚧",
+  "🗒️",
+  "📦",
+  "🧰",
+  "🕯️",
 ] as const;
 
 export default function IconPicker({
@@ -38,7 +66,9 @@ export default function IconPicker({
       if (event.key === "Escape") onClose();
     }
     // Deferred a tick, or the click that opened this closes it again.
-    const timer = setTimeout(() => document.addEventListener("mousedown", onPointerDown));
+    const timer = setTimeout(() =>
+      document.addEventListener("mousedown", onPointerDown),
+    );
     document.addEventListener("keydown", onKey);
     return () => {
       clearTimeout(timer);
@@ -58,7 +88,7 @@ export default function IconPicker({
       // `items-center` that means being centred on the icon row — which pulls a
       // 136px-tall popover upward until its first rows sit behind the header,
       // where they cannot be clicked. Anchoring it below the row fixes that.
-      className="absolute top-full left-0 z-30 mt-1 w-64 rounded-xl border border-border bg-surface p-2 shadow-lg shadow-black/10 transition-opacity duration-150 ease-out"
+      className="absolute top-full left-0 z-30 mt-1 w-64 rounded-xl border border-border bg-surface p-2 shadow-pane transition-opacity duration-150 ease-out"
     >
       <div className="grid grid-cols-8 gap-0.5">
         {ICONS.map((candidate) => (
@@ -70,7 +100,7 @@ export default function IconPicker({
             aria-pressed={icon === candidate}
             className={[
               "grid aspect-square place-items-center rounded-md text-lg transition-colors duration-150 ease-out",
-              icon === candidate ? "bg-accent-bg" : "hover:bg-canvas",
+              icon === candidate ? "bg-accent-bg" : "hover:bg-row-hover",
             ].join(" ")}
           >
             {candidate}

@@ -366,7 +366,7 @@
 }
 
 /* A link whose target no longer exists. The text is still in the file, so it
-   is shown rather than hidden — in saffron, which is the colour reserved for
+   is shown rather than hidden — in the highlight colour, which is reserved for
    things that want attention. */
 .sutra-wikilink.is-missing {
   color: var(--highlight);
@@ -622,12 +622,14 @@
   }
 
   /* The app is a fixed-height flex shell with its own scroll container, which
-     would otherwise print exactly one screenful. */
+     would otherwise print exactly one screenful. The pane also carries its own
+     ground, which would print as a tinted rectangle behind the text. */
   .sutra-shell,
   .sutra-main {
     display: block !important;
     height: auto !important;
     overflow: visible !important;
+    background: #ffffff !important;
   }
 
   .sutra-page {

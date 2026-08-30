@@ -49,7 +49,7 @@ export default function WikiLinkMenu({ items, onSelect, ref }: Props) {
 
   if (items.length === 0) {
     return (
-      <div className="w-72 rounded-xl border border-border bg-surface px-3 py-2.5 text-sm text-ink-muted shadow-lg shadow-black/5">
+      <div className="w-72 rounded-xl border border-border bg-surface px-3 py-2.5 text-sm text-ink-muted shadow-pane">
         No matching note
       </div>
     );
@@ -60,7 +60,7 @@ export default function WikiLinkMenu({ items, onSelect, ref }: Props) {
       ref={listRef}
       role="listbox"
       aria-label="Link to note"
-      className="max-h-72 w-72 overflow-y-auto rounded-xl border border-border bg-surface p-1 shadow-lg shadow-black/5"
+      className="max-h-72 w-72 overflow-y-auto rounded-xl border border-border bg-surface p-1 shadow-pane"
     >
       {items.map((item, index) => {
         const isSelected = index === selected;
