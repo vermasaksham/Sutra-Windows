@@ -41,6 +41,7 @@ type Props = {
   onSetType: (type: NoteType) => void;
   onExportDocx: () => void;
   onExportPdf: () => void;
+  onManageTags: () => void;
   onReindex: () => void;
   /** Null when no note is open, which disables the note-specific commands. */
   openNoteId: string | null;
@@ -56,6 +57,7 @@ export default function CommandPalette({
   onSetType,
   onExportDocx,
   onExportPdf,
+  onManageTags,
   onReindex,
   openNoteId,
 }: Props) {
@@ -110,6 +112,13 @@ export default function CommandPalette({
     }
 
     out.push({
+      id: "tags",
+      label: "Manage tags — rename, merge, tidy",
+      group: "Vault",
+      run: onManageTags,
+    });
+
+    out.push({
       id: "reindex",
       label: "Rebuild the search index",
       group: "Vault",
@@ -124,6 +133,7 @@ export default function CommandPalette({
     onSetType,
     onExportDocx,
     onExportPdf,
+    onManageTags,
     onReindex,
     openNoteId,
   ]);

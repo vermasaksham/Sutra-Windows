@@ -2,6 +2,7 @@ import { useState } from "react";
 import { MOD, shortcut } from "../platform";
 import ThemeToggle from "../components/ThemeToggle";
 import { buildFolders, flattenFolders, type FolderNode } from "./tree";
+import { buildTagTree, flattenTags, type TagNode } from "./tags";
 import type { NoteSummary } from "../vault/api";
 
 /**
@@ -26,6 +27,7 @@ export default function Sidebar({
   onSelectTag,
   onCapture,
   onNewFolder,
+  onManageTags,
 }: {
   vaultName: string;
   notes: NoteSummary[];
@@ -36,8 +38,10 @@ export default function Sidebar({
   onSelectTag: (tag: string | null) => void;
   onCapture: () => void;
   onNewFolder: (parent: string | null) => void;
+  onManageTags: () => void;
 }) {
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+  const [tagsCollapsed, setTagsCollapsed] = useState<Set<string>>(new Set());
   // The Inbox is pinned above, so it must not also appear in the tree.
   const tree = buildFolders(
     folders.filter((f) => f !== INBOX && !f.startsWith(`${INBOX}/`)),
@@ -49,15 +53,18 @@ export default function Sidebar({
     (n) => n.folder === INBOX || n.folder.startsWith(`${INBOX}/`),
   ).length;
   const rows = flattenFolders(tree, collapsed);
-  const counts = tagCounts(notes);
+  const tagRows = flattenTags(buildTagTree(notes), tagsCollapsed);
 
-  const toggle = (path: string) =>
-    setCollapsed((prev) => {
-      const next = new Set(prev);
-      if (next.has(path)) next.delete(path);
-      else next.add(path);
-      return next;
-    });
+  const toggler =
+    (set: (fn: (prev: Set<string>) => Set<string>) => void) => (path: string) =>
+      set((prev) => {
+        const next = new Set(prev);
+        if (next.has(path)) next.delete(path);
+        else next.add(path);
+        return next;
+      });
+  const toggle = toggler(setCollapsed);
+  const toggleTag = toggler(setTagsCollapsed);
 
   return (
     <nav
@@ -117,7 +124,7 @@ export default function Sidebar({
             No folders yet. Notes live at the top level.
           </p>
         ) : (
-          <ul className="px-1.5">
+          <ul aria-label="Folders" className="px-1.5">
             {rows.map((node) => (
               <li key={node.path}>
                 <FolderRow
@@ -132,20 +139,33 @@ export default function Sidebar({
           </ul>
         )}
 
-        {counts.length > 0 && (
+        {tagRows.length > 0 && (
           <>
-            <p className="px-3 pt-4 pb-1 text-[0.6875rem] font-semibold tracking-wide text-ink-muted uppercase">
-              Tags
-            </p>
-            <ul className="px-1.5">
-              {counts.map(([tag, count]) => (
-                <li key={tag}>
-                  <Row
-                    label={tag}
-                    hash
-                    count={count}
-                    active={activeTag === tag}
-                    onClick={() => onSelectTag(activeTag === tag ? null : tag)}
+            <div className="flex items-center justify-between px-3 pt-4 pb-1">
+              <p className="text-[0.6875rem] font-semibold tracking-wide text-ink-muted uppercase">
+                Tags
+              </p>
+              <button
+                type="button"
+                onClick={onManageTags}
+                aria-label="Manage tags"
+                title="Rename, merge and tidy tags"
+                className="text-[0.6875rem] text-ink-muted transition-colors duration-150 ease-out hover:text-accent"
+              >
+                Manage
+              </button>
+            </div>
+            <ul aria-label="Tags" className="px-1.5">
+              {tagRows.map((node) => (
+                <li key={node.path}>
+                  <TagRow
+                    node={node}
+                    active={activeTag === node.path}
+                    collapsed={tagsCollapsed.has(node.path)}
+                    onToggle={() => toggleTag(node.path)}
+                    onSelect={() =>
+                      onSelectTag(activeTag === node.path ? null : node.path)
+                    }
                   />
                 </li>
               ))}
@@ -267,17 +287,71 @@ function Row({
   );
 }
 
-/** Every tag in the vault with how many notes carry it, commonest first. */
-function tagCounts(notes: NoteSummary[]): Array<[string, number]> {
-  const counts = new Map<string, number>();
-  for (const note of notes) {
-    for (const tag of note.tags) {
-      counts.set(tag, (counts.get(tag) ?? 0) + 1);
-    }
-  }
-  return [...counts].sort(
-    ([aTag, aCount], [bTag, bCount]) =>
-      bCount - aCount || aTag.localeCompare(bTag),
+/**
+ * One level of the tag tree.
+ *
+ * Shaped like a folder row on purpose — nesting reads the same whether it is
+ * location or classification — but the hash keeps the two from being mistaken
+ * for one hierarchy, which is the whole point of separating them.
+ */
+function TagRow({
+  node,
+  active,
+  collapsed,
+  onToggle,
+  onSelect,
+}: {
+  node: TagNode;
+  active: boolean;
+  collapsed: boolean;
+  onToggle: () => void;
+  onSelect: () => void;
+}) {
+  const hasChildren = node.children.length > 0;
+  return (
+    <div
+      className={[
+        "flex items-center rounded-md transition-colors duration-150 ease-out",
+        active
+          ? "bg-row-active text-accent"
+          : "text-ink-soft hover:bg-row-hover hover:text-ink",
+      ].join(" ")}
+      style={{ paddingInlineStart: `${node.depth * 10}px` }}
+    >
+      <button
+        type="button"
+        onClick={onToggle}
+        aria-label={
+          hasChildren
+            ? collapsed
+              ? `Expand ${node.path}`
+              : `Collapse ${node.path}`
+            : undefined
+        }
+        aria-expanded={hasChildren ? !collapsed : undefined}
+        tabIndex={hasChildren ? 0 : -1}
+        className="grid size-4 shrink-0 place-items-center rounded text-ink-muted"
+      >
+        {hasChildren && <Chevron open={!collapsed} />}
+      </button>
+      <button
+        type="button"
+        onClick={onSelect}
+        aria-current={active ? "true" : undefined}
+        className="flex min-w-0 flex-1 items-center gap-0.5 py-1 pr-1 text-left text-sm"
+      >
+        <span className="text-highlight" aria-hidden>
+          #
+        </span>
+        <span className="min-w-0 flex-1 truncate">{node.name}</span>
+      </button>
+      <span
+        className="shrink-0 pr-2 text-xs tabular-nums text-ink-muted"
+        title={`${node.total} notes with this tag or one beneath it`}
+      >
+        {node.total}
+      </span>
+    </div>
   );
 }
 

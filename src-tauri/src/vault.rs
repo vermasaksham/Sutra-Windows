@@ -9,7 +9,8 @@
 use crate::error::{Result, SutraError};
 use crate::frontmatter::{self, Frontmatter, NoteType};
 use crate::note;
-use serde::Serialize;
+use crate::tags;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Component, Path, PathBuf};
@@ -345,7 +346,7 @@ impl Vault {
         // Tags are normalised here rather than in the UI so that a tag typed
         // in one note matches the same tag typed in another, whatever case or
         // stray whitespace it arrived with.
-        fm.tags = normalise_tags(tags);
+        fm.tags = tags::normalise_all(tags);
         fm.updated = frontmatter::now();
 
         let body = body.to_string();
@@ -626,6 +627,118 @@ impl Vault {
         Ok((out, skipped))
     }
 
+    // ---- tags ----------------------------------------------------------------
+
+    /// Every tag in the vault, exactly as written, with how many notes carry it.
+    ///
+    /// As written, not rolled up: a suggestion to merge two tags has to be
+    /// about tags someone actually typed, and the implied ancestors of
+    /// `research/materials/sb2se3` were never typed by anyone.
+    pub fn list_tags(&self) -> Result<HashMap<String, usize>> {
+        let mut counts = HashMap::new();
+        for note in self.list_notes()? {
+            for tag in note.tags {
+                *counts.entry(tag).or_insert(0) += 1;
+            }
+        }
+        Ok(counts)
+    }
+
+    /// Tags that look like they were meant to be the same. Offered, never applied.
+    pub fn similar_tags(&self) -> Result<Vec<tags::Suggestion>> {
+        Ok(tags::similar(&self.list_tags()?))
+    }
+
+    /// Rename a tag across the whole vault, or merge it into another.
+    ///
+    /// One operation for both, because they are the same edit: renaming onto a
+    /// name that already exists *is* a merge, and pretending otherwise would
+    /// mean two code paths that must agree about hierarchy and de-duplication.
+    ///
+    /// Hierarchy comes along. Renaming `research/materials` to `materials` also
+    /// moves `research/materials/sb2se3` to `materials/sb2se3`, because a tag
+    /// tree that only half-moves is worse than one that does not move at all.
+    ///
+    /// Returns what every touched note's tags used to be, which is what makes
+    /// this undoable — including for a merge, where the inverse rename would
+    /// not restore the original state.
+    pub fn retag(&self, from: &str, to: &str) -> Result<Retag> {
+        let from = tags::normalise(from)
+            .ok_or_else(|| SutraError::NoteNotFound(format!("not a tag: {from}")))?;
+        let to = tags::normalise(to)
+            .ok_or_else(|| SutraError::NoteNotFound(format!("not a tag: {to}")))?;
+
+        let mut changed = Vec::new();
+        if from == to {
+            return Ok(Retag { changed });
+        }
+
+        let prefix = format!("{from}/");
+        for summary in self.list_notes()? {
+            if !summary
+                .tags
+                .iter()
+                .any(|t| *t == from || t.starts_with(&prefix))
+            {
+                continue;
+            }
+            let previous = summary.tags.clone();
+            let rewritten: Vec<String> = previous
+                .iter()
+                .map(|tag| {
+                    if *tag == from {
+                        to.clone()
+                    } else if let Some(rest) = tag.strip_prefix(&prefix) {
+                        format!("{to}/{rest}")
+                    } else {
+                        tag.clone()
+                    }
+                })
+                .collect();
+
+            // Normalising again is what collapses a merge: two tags that have
+            // just become the same one must not both survive.
+            self.write_tags(&summary.id, tags::normalise_all(rewritten))?;
+            changed.push(TagChange {
+                id: summary.id,
+                previous,
+            });
+        }
+
+        Ok(Retag { changed })
+    }
+
+    /// Put the tags back exactly as they were before a retag.
+    ///
+    /// Replays a recording rather than inverting an operation, so it undoes a
+    /// merge as faithfully as a rename. Notes deleted in the meantime are
+    /// skipped rather than failing the whole undo.
+    pub fn undo_retag(&self, changed: &[TagChange]) -> Result<usize> {
+        let mut restored = 0;
+        for entry in changed {
+            if self.write_tags(&entry.id, entry.previous.clone()).is_ok() {
+                restored += 1;
+            }
+        }
+        Ok(restored)
+    }
+
+    /// Replace one note's tags, touching nothing else.
+    fn write_tags(&self, id: &str, tags: Vec<String>) -> Result<()> {
+        let relative = self.relative_for(id)?;
+        let path = self.root.join(&relative);
+        let contents = fs::read_to_string(&path)?;
+        let (parsed, body) = frontmatter::split(&contents)?;
+        let mut fm = parsed.unwrap_or_else(|| Self::synthesise(&relative));
+        if fm.id != id {
+            fm.id = id.to_string();
+        }
+        fm.tags = tags;
+        fm.updated = frontmatter::now();
+        let body = body.to_string();
+        note::write_atomic(&path, &frontmatter::join(&fm, &body)?)
+    }
+
     /// The id of the note at an absolute path, for the file watcher.
     ///
     /// Tries the map first, which covers a note the app already knows about,
@@ -758,6 +871,19 @@ impl Vault {
             .to_string();
         Frontmatter::new(note::adopted_id(relative), title)
     }
+}
+
+/// One note's tags before a retag, so the operation can be undone exactly.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TagChange {
+    pub id: String,
+    pub previous: Vec<String>,
+}
+
+/// What a retag did, and everything needed to put it back.
+#[derive(Debug, Clone, Serialize)]
+pub struct Retag {
+    pub changed: Vec<TagChange>,
 }
 
 /// What a migration would do.
@@ -948,22 +1074,6 @@ fn collect_dirs(dir: &Path, base: &Path, depth: usize, out: &mut Vec<String>) ->
         collect_dirs(&path, base, depth + 1, out)?;
     }
     Ok(())
-}
-
-/// Trim, lowercase, drop empties, and de-duplicate while keeping order.
-///
-/// Lowercasing is the part that matters: "CVT" and "cvt" are one tag, and a
-/// vault where they are two is a vault where filtering silently misses notes.
-fn normalise_tags(tags: Vec<String>) -> Vec<String> {
-    let mut out: Vec<String> = Vec::new();
-    for tag in tags {
-        let tag = tag.trim().to_lowercase();
-        if tag.is_empty() || out.contains(&tag) {
-            continue;
-        }
-        out.push(tag);
-    }
-    out
 }
 
 fn summary_of(fm: &Frontmatter, body: &str, folder: String) -> NoteSummary {
@@ -1950,5 +2060,237 @@ mod tests {
         assert!(vault.root().join("Parent/Cp 2.md").is_file());
         assert!(vault.read_note(B).is_ok());
         assert!(vault.read_note(C).is_ok());
+    }
+    // ---- tags -----------------------------------------------------------------
+
+    fn tag(vault: &Vault, id: &str, tags: &[&str]) {
+        vault
+            .set_meta(id, None, None, tags.iter().map(|t| t.to_string()).collect())
+            .unwrap();
+    }
+
+    #[test]
+    fn tags_are_normalised_into_a_hierarchy() {
+        let vault = TempVault::new();
+        let note = vault.create_note("T", None).unwrap();
+        tag(
+            &vault,
+            &note.summary.id,
+            &["#Research / Materials / Sb2Se3", "thermal conductivity"],
+        );
+        assert_eq!(
+            vault.read_note(&note.summary.id).unwrap().summary.tags,
+            vec!["research/materials/sb2se3", "thermal-conductivity"]
+        );
+    }
+
+    #[test]
+    fn the_vault_can_count_its_tags() {
+        let vault = TempVault::new();
+        for (i, tags) in [vec!["cvt", "sb2se3"], vec!["cvt"], vec!["xrd"]]
+            .into_iter()
+            .enumerate()
+        {
+            let n = vault.create_note(&format!("N{i}"), None).unwrap();
+            tag(&vault, &n.summary.id, &tags);
+        }
+        let counts = vault.list_tags().unwrap();
+        assert_eq!(counts.get("cvt"), Some(&2));
+        assert_eq!(counts.get("sb2se3"), Some(&1));
+        assert_eq!(counts.len(), 3);
+    }
+
+    /// The proof from the plan: rename a tag used by 200 notes, and check that
+    /// every file was rewritten, nothing was lost, and it can be put back.
+    #[test]
+    fn renaming_a_tag_across_two_hundred_notes_is_complete_and_undoable() {
+        let vault = TempVault::new();
+
+        for i in 0..200 {
+            let n = vault
+                .create_note(&format!("Note {i:03}"), folder("Research"))
+                .unwrap();
+            // Every note carries the tag; half also carry one that must not move.
+            if i % 2 == 0 {
+                tag(&vault, &n.summary.id, &["thermodynamics", "cvt"]);
+            } else {
+                tag(&vault, &n.summary.id, &["thermodynamics"]);
+            }
+        }
+        // One note that must be left completely alone.
+        let bystander = vault.create_note("Untagged", None).unwrap();
+        tag(&vault, &bystander.summary.id, &["xrd"]);
+
+        let result = vault
+            .retag("thermodynamics", "research/thermodynamics")
+            .unwrap();
+        assert_eq!(
+            result.changed.len(),
+            200,
+            "every tagged note must be rewritten"
+        );
+
+        let after = vault.list_notes().unwrap();
+        assert_eq!(after.len(), 201, "no note may be lost");
+        assert_eq!(
+            after
+                .iter()
+                .filter(|n| n.tags.contains(&"research/thermodynamics".into()))
+                .count(),
+            200
+        );
+        assert!(
+            !after
+                .iter()
+                .any(|n| n.tags.contains(&"thermodynamics".into())),
+            "the old tag must be gone everywhere"
+        );
+        // The unrelated tags survived, on exactly the notes that had them.
+        assert_eq!(
+            after
+                .iter()
+                .filter(|n| n.tags.contains(&"cvt".into()))
+                .count(),
+            100
+        );
+        assert_eq!(
+            after
+                .iter()
+                .filter(|n| n.tags.contains(&"xrd".into()))
+                .count(),
+            1
+        );
+
+        let restored = vault.undo_retag(&result.changed).unwrap();
+        assert_eq!(restored, 200);
+        let back = vault.list_notes().unwrap();
+        assert_eq!(
+            back.iter()
+                .filter(|n| n.tags.contains(&"thermodynamics".into()))
+                .count(),
+            200
+        );
+        assert!(
+            !back
+                .iter()
+                .any(|n| n.tags.contains(&"research/thermodynamics".into()))
+        );
+        assert_eq!(
+            back.iter()
+                .filter(|n| n.tags.contains(&"cvt".into()))
+                .count(),
+            100
+        );
+    }
+
+    #[test]
+    fn renaming_a_tag_brings_its_children_with_it() {
+        let vault = TempVault::new();
+        let a = vault.create_note("A", None).unwrap();
+        let b = vault.create_note("B", None).unwrap();
+        tag(&vault, &a.summary.id, &["research/materials"]);
+        tag(&vault, &b.summary.id, &["research/materials/sb2se3"]);
+
+        vault.retag("research/materials", "materials").unwrap();
+
+        assert_eq!(
+            vault.read_note(&a.summary.id).unwrap().summary.tags,
+            vec!["materials"]
+        );
+        assert_eq!(
+            vault.read_note(&b.summary.id).unwrap().summary.tags,
+            vec!["materials/sb2se3"],
+            "a half-moved tag tree is worse than one that did not move"
+        );
+    }
+
+    #[test]
+    fn renaming_onto_an_existing_tag_merges_without_duplicating() {
+        let vault = TempVault::new();
+        let note = vault.create_note("Both", None).unwrap();
+        tag(
+            &vault,
+            &note.summary.id,
+            &["thermalconductivity", "thermal-conductivity", "cvt"],
+        );
+
+        let result = vault
+            .retag("thermalconductivity", "thermal-conductivity")
+            .unwrap();
+        assert_eq!(result.changed.len(), 1);
+
+        let after = vault.read_note(&note.summary.id).unwrap().summary.tags;
+        assert_eq!(
+            after,
+            vec!["thermal-conductivity", "cvt"],
+            "no duplicate survives"
+        );
+
+        // A merge cannot be undone by renaming back, which is why the previous
+        // tags are recorded rather than the operation inverted.
+        vault.undo_retag(&result.changed).unwrap();
+        assert_eq!(
+            vault.read_note(&note.summary.id).unwrap().summary.tags,
+            vec!["thermalconductivity", "thermal-conductivity", "cvt"]
+        );
+    }
+
+    #[test]
+    fn a_tag_that_matches_nothing_changes_nothing() {
+        let vault = TempVault::new();
+        let note = vault.create_note("T", None).unwrap();
+        tag(&vault, &note.summary.id, &["cvt"]);
+        let result = vault.retag("nosuchtag", "other").unwrap();
+        assert!(result.changed.is_empty());
+        assert_eq!(
+            vault.read_note(&note.summary.id).unwrap().summary.tags,
+            vec!["cvt"]
+        );
+    }
+
+    #[test]
+    fn a_prefix_that_is_not_a_tag_boundary_is_left_alone() {
+        // `thermo` must not match `thermodynamics`. Only the tag itself and
+        // things actually beneath it in the tree move.
+        let vault = TempVault::new();
+        let note = vault.create_note("T", None).unwrap();
+        tag(
+            &vault,
+            &note.summary.id,
+            &["thermodynamics", "thermo/notes"],
+        );
+
+        vault.retag("thermo", "heat").unwrap();
+
+        let after = vault.read_note(&note.summary.id).unwrap().summary.tags;
+        assert_eq!(after, vec!["thermodynamics", "heat/notes"]);
+    }
+
+    #[test]
+    fn retagging_to_nothing_is_refused() {
+        let vault = TempVault::new();
+        assert!(vault.retag("cvt", "  ").is_err());
+        assert!(vault.retag("###", "cvt").is_err());
+    }
+
+    #[test]
+    fn similar_tags_are_found_across_the_vault() {
+        let vault = TempVault::new();
+        for (i, t) in [
+            "thermal-conductivity",
+            "thermal-conductivity",
+            "thermalconductivity",
+        ]
+        .iter()
+        .enumerate()
+        {
+            let n = vault.create_note(&format!("N{i}"), None).unwrap();
+            tag(&vault, &n.summary.id, &[t]);
+        }
+        let found = vault.similar_tags().unwrap();
+        assert_eq!(found.len(), 1, "{found:?}");
+        assert_eq!(found[0].from, "thermalconductivity");
+        assert_eq!(found[0].from_count, 1);
+        assert_eq!(found[0].into_count, 2);
     }
 }

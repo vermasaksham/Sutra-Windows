@@ -83,6 +83,8 @@ src/
     TypePicker.tsx    What kind of note this is, changeable at any time
     MigrationPrompt.tsx  Offered once to a vault laid out the old way
     tree.ts           Folder paths -> a tree, inferring missing parents
+    tags.ts           Tag paths -> a tree, plus autocomplete. Unit tested.
+    TagManager.tsx    Rename, merge and tidy tags across the vault
     folderStore.ts    The open note's folder, for the slash menu's attach
     Sidebar.tsx       Rail: the vault, the folder tree, the tag list
     NoteList.tsx      Middle column: rows and the search field
@@ -159,6 +161,16 @@ overlay. Ctrl+K opens the command palette, Ctrl+Shift+F focuses search, and
 Ctrl+N captures to the Inbox — on macOS the same bindings read ⌘K, ⌘⇧F and ⌘N,
 because Windows is the primary target and macOS is the special case, not the
 other way round.
+
+Tags nest on slashes — `#research/materials/sb2se3` — and selecting a parent
+finds everything beneath it. Renaming a tag brings its children with it, and
+renaming onto a tag that already exists is a merge; both are one operation
+because they are the same edit. Every retag records what each note's tags were,
+so a merge can be undone exactly, which renaming back would not achieve.
+
+There is no such thing as an unused tag here. A tag exists exactly while some
+note carries it, so the brief's "unused-tag detection" has nothing to detect —
+worth saying rather than shipping a button that can never fire.
 
 ## Scope
 

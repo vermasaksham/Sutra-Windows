@@ -19,6 +19,7 @@ export default function NoteHeader({
   onTags,
   onSelectTag,
   onType,
+  allTags,
 }: {
   doc: NoteDoc;
   onTitle: (title: string) => void;
@@ -27,6 +28,9 @@ export default function NoteHeader({
   onTags: (tags: string[]) => void;
   onSelectTag: (tag: string) => void;
   onType: (type: NoteType) => void;
+  /** Every tag already in the vault, so the editor can suggest instead of
+   *  letting a second spelling be created. */
+  allTags: string[];
 }) {
   const [picking, setPicking] = useState(false);
   const [coverFailed, setCoverFailed] = useState(false);
@@ -109,7 +113,12 @@ export default function NoteHeader({
 
       <div className="mb-4 flex flex-wrap items-center gap-1.5">
         <TypePicker type={doc.type} onChange={onType} />
-        <TagEditor tags={doc.tags} onChange={onTags} onSelect={onSelectTag} />
+        <TagEditor
+          tags={doc.tags}
+          all={allTags}
+          onChange={onTags}
+          onSelect={onSelectTag}
+        />
       </div>
     </>
   );

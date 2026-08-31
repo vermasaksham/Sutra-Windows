@@ -12,9 +12,11 @@ use crate::export::ExportDocument;
 use crate::frontmatter::NoteType;
 use crate::index::{Backlink, SearchHit};
 use crate::state::AppState;
-use crate::vault::{MigrationPlan, NoteDoc, NoteSummary};
+use crate::tags::Suggestion;
+use crate::vault::{MigrationPlan, NoteDoc, NoteSummary, Retag, TagChange};
 use crate::zotero::{Reference, Zotero};
 use serde::Serialize;
+use std::collections::HashMap;
 use tauri::{AppHandle, State};
 use tauri_plugin_dialog::DialogExt;
 
@@ -225,6 +227,51 @@ pub fn move_note(state: State<'_, AppState>, id: String, folder: String) -> Resu
         let doc = vault.read_note(&id)?;
         index.upsert(&summary, &doc.body)?;
         Ok(summary)
+    })
+}
+
+/// Every tag in the vault, as written, with how many notes carry it.
+#[tauri::command]
+pub fn list_tags(state: State<'_, AppState>) -> Result<HashMap<String, usize>> {
+    state.with_vault(|vault| vault.list_tags())
+}
+
+/// Tags that look like they were meant to be the same. Offered, never applied.
+#[tauri::command]
+pub fn similar_tags(state: State<'_, AppState>) -> Result<Vec<Suggestion>> {
+    state.with_vault(|vault| vault.similar_tags())
+}
+
+/// Rename a tag across the vault, or merge it into another.
+///
+/// Returns what every touched note's tags used to be, which is what the
+/// frontend hands back to undo it.
+#[tauri::command]
+pub fn retag(state: State<'_, AppState>, from: String, to: String) -> Result<Retag> {
+    state.with_both(|vault, index| {
+        let result = vault.retag(&from, &to)?;
+        // Only the notes that changed are re-indexed. A full rebuild would also
+        // be correct, and on a large vault it would be a visible pause for an
+        // operation that is supposed to feel like an edit.
+        for change in &result.changed {
+            let doc = vault.read_note(&change.id)?;
+            index.upsert(&doc.summary, &doc.body)?;
+        }
+        Ok(result)
+    })
+}
+
+/// Put tags back exactly as they were before a retag.
+#[tauri::command]
+pub fn undo_retag(state: State<'_, AppState>, changed: Vec<TagChange>) -> Result<usize> {
+    state.with_both(|vault, index| {
+        let restored = vault.undo_retag(&changed)?;
+        for change in &changed {
+            if let Ok(doc) = vault.read_note(&change.id) {
+                index.upsert(&doc.summary, &doc.body)?;
+            }
+        }
+        Ok(restored)
     })
 }
 

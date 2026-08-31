@@ -108,6 +108,29 @@ export const migrationApi = {
   run: () => invoke<number>("migrate_vault"),
 };
 
+/** Two tags that look like they were meant to be one. Offered, never applied. */
+export type TagSuggestion = {
+  from: string;
+  fromCount: number;
+  into: string;
+  intoCount: number;
+  /** Shown verbatim, so the reader can judge rather than trust. */
+  reason: string;
+};
+
+/** One note's tags before a retag, which is what makes the retag undoable. */
+export type TagChange = { id: string; previous: string[] };
+export type Retag = { changed: TagChange[] };
+
+export const tagsApi = {
+  /** Every tag as written, with how many notes carry it. */
+  list: () => invoke<Record<string, number>>("list_tags"),
+  similar: () => invoke<TagSuggestion[]>("similar_tags"),
+  /** Rename across the vault, or merge into an existing tag. Same operation. */
+  retag: (from: string, to: string) => invoke<Retag>("retag", { from, to }),
+  undo: (changed: TagChange[]) => invoke<number>("undo_retag", { changed }),
+};
+
 export const foldersApi = {
   list: () => invoke<string[]>("list_folders"),
   /** Create a folder, and any missing parents. Resolves its normalised path. */

@@ -9,6 +9,7 @@ import FolderBar from "./notes/FolderBar";
 import ConflictPrompt from "./notes/ConflictPrompt";
 import MigrationPrompt from "./notes/MigrationPrompt";
 import CommandPalette from "./notes/CommandPalette";
+import TagManager from "./notes/TagManager";
 import NoteHeader from "./notes/NoteHeader";
 import NoteList from "./notes/NoteList";
 import Sidebar from "./notes/Sidebar";
@@ -16,6 +17,7 @@ import VaultPicker from "./notes/VaultPicker";
 import { buildDocument } from "./export/buildDocument";
 import { useShortcuts } from "./notes/shortcuts";
 import { notesUnder } from "./notes/tree";
+import { taggedWith } from "./notes/tags";
 import { setCurrentFolder } from "./notes/folderStore";
 import { MOD, shortcut } from "./platform";
 import { useNote } from "./notes/useNote";
@@ -60,6 +62,7 @@ export default function App() {
   const [migration, setMigration] = useState<MigrationPlan | null>(null);
   const [migrating, setMigrating] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
+  const [tagsOpen, setTagsOpen] = useState(false);
   /** Bumped to move focus to the search field; the shortcut lives up here but
    *  the input is three components down. */
   const [focusSearch, setFocusSearch] = useState(0);
@@ -359,8 +362,26 @@ export default function App() {
   // What the middle column lists. A folder or a tag narrows it; a search
   // replaces it. Selecting a folder includes everything beneath it, because a
   // parent that held only subfolders would otherwise look empty.
+  // A tag selects everything beneath it too, or the tree in the rail would be
+  // decoration: picking `research` must find notes filed under
+  // `research/materials/sb2se3`.
+  // Every tag in the vault, most-used first, for the tag editor's suggestions.
+  // Derived from the notes already loaded rather than fetched: it has to be
+  // current the moment a tag is added, and a round trip would lag a keystroke
+  // behind. The order matters — suggestTags offers ties in this order, and the
+  // spelling people already use is the one to steer towards.
+  const tagUse = new Map<string, number>();
+  for (const n of notes) {
+    for (const t of n.tags) tagUse.set(t, (tagUse.get(t) ?? 0) + 1);
+  }
+  const allTags = [...tagUse.entries()]
+    .sort(
+      ([aTag, aUse], [bTag, bUse]) => bUse - aUse || aTag.localeCompare(bTag),
+    )
+    .map(([tag]) => tag);
+
   const listed = activeTag
-    ? notes.filter((n) => n.tags.includes(activeTag))
+    ? notes.filter((n) => taggedWith(n, activeTag))
     : notesUnder(notes, activeFolder);
 
   return (
@@ -381,6 +402,7 @@ export default function App() {
             if (tag !== null) setActiveFolder(null);
           }}
           onCapture={() => void capture()}
+          onManageTags={() => setTagsOpen(true)}
           onNewFolder={(parent) => {
             const name = window.prompt(
               parent
@@ -457,6 +479,7 @@ export default function App() {
               onTags={(tags) => void setMeta({ tags })}
               onSelectTag={setActiveTag}
               onType={(type) => void setType(type)}
+              allTags={allTags}
             />
             {note.doc.adopted && (
               <p className="mb-4 rounded-lg bg-highlight-bg px-3 py-2 text-sm text-highlight">
@@ -517,7 +540,16 @@ export default function App() {
           onSetType={(type) => void setType(type)}
           onExportDocx={() => void exportDocx()}
           onExportPdf={exportPdf}
+          onManageTags={() => setTagsOpen(true)}
           onReindex={() => void indexApi.reindex().then(() => refresh())}
+        />
+      )}
+
+      {tagsOpen && (
+        <TagManager
+          onClose={() => setTagsOpen(false)}
+          onChanged={() => void refresh()}
+          onReport={report}
         />
       )}
 

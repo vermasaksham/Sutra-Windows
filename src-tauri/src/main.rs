@@ -12,6 +12,7 @@ mod links;
 mod note;
 mod protocol;
 mod state;
+mod tags;
 mod vault;
 mod watcher;
 mod zotero;
@@ -65,6 +66,10 @@ fn main() {
             commands::migrate_vault,
             commands::capture,
             commands::set_note_type,
+            commands::list_tags,
+            commands::similar_tags,
+            commands::retag,
+            commands::undo_retag,
         ])
         // `generate_context!` pulls in tauri.conf.json at compile time.
         .run(tauri::generate_context!())
