@@ -436,6 +436,67 @@
   background-color: var(--surface);
 }
 
+/*
+ * The three voices of a literature note.
+ *
+ * Only ever a reading aid: these are decorations on ordinary markdown headings,
+ * so nothing here reaches the file. The source's voice gets the strongest
+ * treatment because it is the one that must never be mistaken for the reader's
+ * own words — an evidence block, set apart. The other two are marked more
+ * quietly; they are already yours.
+ */
+.sutra-voice {
+  border-inline-start: 2px solid transparent;
+  padding-inline-start: 0.9rem;
+  margin-inline-start: -0.9rem;
+}
+
+.sutra-voice-heading {
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  margin-block: 1.5rem 0.4rem;
+}
+
+.sutra-voice-source {
+  border-inline-start-color: var(--accent);
+}
+.sutra-voice-source.sutra-voice-heading {
+  color: var(--accent);
+}
+/* The quoted claim itself, which is what an evidence block is for. */
+.sutra-voice-source blockquote,
+blockquote.sutra-voice-source {
+  background: var(--accent-bg);
+  border-radius: 0 6px 6px 0;
+}
+
+.sutra-voice-interpretation {
+  border-inline-start-color: var(--border);
+}
+.sutra-voice-interpretation.sutra-voice-heading {
+  color: var(--text-muted);
+}
+
+.sutra-voice-question {
+  border-inline-start-color: var(--highlight);
+}
+.sutra-voice-question.sutra-voice-heading {
+  color: var(--highlight);
+}
+
+/* On paper the rules stay — they are the only thing separating a claim from a
+   conclusion once the colours are gone. */
+@media print {
+  .sutra-voice {
+    border-inline-start-color: #999 !important;
+  }
+  .sutra-voice-source {
+    border-inline-start-color: #000 !important;
+  }
+}
+
 /* Raw LaTeX, while editing. Monospaced because alignment matters in a formula
    and the author is reading source, not prose. */
 .sutra-math-textarea,

@@ -8,6 +8,7 @@ import { Placeholder } from "@tiptap/extensions";
 import { Markdown } from "@tiptap/markdown";
 import { SlashCommand } from "./slash/SlashCommand";
 import { Citation } from "./citation/Citation";
+import { Voices } from "./voices/Voices";
 import { CitationSuggestion } from "./citation/CitationSuggestion";
 import { MathBlock } from "./math/MathBlock";
 import { MathInline } from "./math/MathInline";
@@ -90,5 +91,6 @@ export const extensions = [
   // Citations. Stored as [@KEY] and rendered from the live Zotero entry, so
   // editing a reference there updates every citation of it.
   Citation,
+  Voices,
   CitationSuggestion,
 ];

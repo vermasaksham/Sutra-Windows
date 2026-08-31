@@ -21,7 +21,8 @@ export type NoteType =
   | "project"
   | "meeting"
   | "task"
-  | "daily";
+  | "daily"
+  | "source";
 
 export const NOTE_TYPES: ReadonlyArray<{ value: NoteType; label: string }> = [
   { value: "standard", label: "Note" },
@@ -33,7 +34,39 @@ export const NOTE_TYPES: ReadonlyArray<{ value: NoteType; label: string }> = [
   { value: "meeting", label: "Meeting" },
   { value: "task", label: "Task" },
   { value: "daily", label: "Daily" },
+  { value: "source", label: "Source" },
 ];
+
+/** What a source note records about the paper it stands for. */
+export type SourceMeta = {
+  authors?: string | null;
+  year?: string | null;
+  /** Journal, book or proceedings. */
+  container?: string | null;
+  doi?: string | null;
+  url?: string | null;
+  /** The Zotero item key it was imported from, so re-import updates it. */
+  zotero?: string | null;
+};
+
+/**
+ * One note citing one source, at one place in it.
+ *
+ * Lives in the citing note's own frontmatter, so it survives being copied to
+ * another machine or read with none of this software installed.
+ */
+export type Citation = {
+  /** The source note's ULID. Not a Zotero key. */
+  id: string;
+  /** A string: "S12", "6-8" and "iv" are all real page references. */
+  page?: string | null;
+  quote?: string | null;
+  /** RFC3339. */
+  captured?: string | null;
+};
+
+/** A note that cites a source, and where in it. */
+export type CitingNote = { id: string; title: string; page: string | null };
 
 export type NoteSummary = {
   id: string;
@@ -45,6 +78,10 @@ export type NoteSummary = {
   tags: string[];
   icon: string | null;
   cover: string | null;
+  /** Present on a note of `type: source`. */
+  source?: SourceMeta;
+  /** The sources this note draws on. Absent when it draws on none. */
+  sources?: Citation[];
   /** The opening prose, markers stripped, for the list to show. */
   excerpt: string;
   /** RFC3339, e.g. 2026-08-21T11:02:00Z */
@@ -121,6 +158,24 @@ export type TagSuggestion = {
 /** One note's tags before a retag, which is what makes the retag undoable. */
 export type TagChange = { id: string; previous: string[] };
 export type Retag = { changed: TagChange[] };
+
+export const sourcesApi = {
+  /** Every source note in the vault. */
+  list: () => invoke<NoteSummary[]>("list_sources"),
+  create: (title: string, meta: SourceMeta) =>
+    invoke<NoteDoc>("create_source", { title, meta }),
+  setMeta: (id: string, meta: SourceMeta) =>
+    invoke<NoteSummary>("set_source_meta", { id, meta }),
+  /** Replace a note's citations. Send the complete desired list. */
+  setCitations: (id: string, citations: Citation[]) =>
+    invoke<NoteSummary>("set_citations", { id, citations }),
+  /** Which notes cite this source, and where in it. */
+  citing: (id: string) => invoke<CitingNote[]>("citing_notes", { id }),
+  /** Copy a Zotero item into the vault as a source note. Updates rather than
+   *  duplicates if that item is already here. */
+  importZotero: (key: string) =>
+    invoke<NoteSummary>("import_zotero_source", { key }),
+};
 
 export const tagsApi = {
   /** Every tag as written, with how many notes carry it. */

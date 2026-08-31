@@ -4,6 +4,8 @@ import Toast from "./components/Toast";
 import { setNavigate, setTitles } from "./editor/wikilink/titleStore";
 import BacklinksPanel from "./notes/BacklinksPanel";
 import Bibliography, { citationKeys } from "./notes/Bibliography";
+import SourcesPanel from "./notes/SourcesPanel";
+import SourceDetails from "./notes/SourceDetails";
 import ExportMenu from "./notes/ExportMenu";
 import FolderBar from "./notes/FolderBar";
 import ConflictPrompt from "./notes/ConflictPrompt";
@@ -18,6 +20,7 @@ import { buildDocument } from "./export/buildDocument";
 import { useShortcuts } from "./notes/shortcuts";
 import { notesUnder } from "./notes/tree";
 import { taggedWith } from "./notes/tags";
+import { LITERATURE_TEMPLATE } from "./editor/voices/voiceRules";
 import { setCurrentFolder } from "./notes/folderStore";
 import { MOD, shortcut } from "./platform";
 import { useNote } from "./notes/useNote";
@@ -28,10 +31,13 @@ import {
   foldersApi,
   migrationApi,
   notesApi,
+  sourcesApi,
   vaultApi,
   type Backlink,
+  type Citation,
   type MigrationPlan,
   type NoteSummary,
+  type SourceMeta,
   type NoteType,
   type SearchHit,
   type VaultInfo,
@@ -58,6 +64,8 @@ export default function App() {
   /** The folder the list is showing. null means the whole vault. */
   const [activeFolder, setActiveFolder] = useState<string | null>(null);
   const [folders, setFolders] = useState<string[]>([]);
+  /** Source notes, kept separately so a citation's id can be shown as a title. */
+  const [sources, setSources] = useState<NoteSummary[]>([]);
   /** Set once, when a vault still records its hierarchy in frontmatter. */
   const [migration, setMigration] = useState<MigrationPlan | null>(null);
   const [migrating, setMigrating] = useState(false);
@@ -154,6 +162,14 @@ export default function App() {
   }, []);
 
   useEffect(refreshFolders, [refreshFolders, notes]);
+
+  useEffect(() => {
+    if (!vault) return;
+    sourcesApi
+      .list()
+      .then(setSources)
+      .catch(() => setSources([]));
+  }, [vault, notes]);
 
   // Asked once per vault, on open. A vault laid out the old way still works —
   // its notes open and its links resolve — so this is an offer, not a gate.
@@ -255,9 +271,42 @@ export default function App() {
         await note.flush();
         const summary = await notesApi.setType(selectedId, type);
         note.applyMeta(summary);
+        // A literature note starts from the three voices. Only into an empty
+        // body, so this can never overwrite anything someone has written.
+        if (type === "literature" && note.doc?.body.trim() === "") {
+          note.setBody(LITERATURE_TEMPLATE);
+          await note.flush();
+        }
         await refresh();
       } catch (cause) {
         report("Could not change the note type", cause);
+      }
+    },
+    [selectedId, note, refresh, report],
+  );
+
+  const setCitations = useCallback(
+    async (citations: Citation[]) => {
+      if (!selectedId) return;
+      try {
+        await note.flush();
+        note.applyMeta(await sourcesApi.setCitations(selectedId, citations));
+        await refresh();
+      } catch (cause) {
+        report("Could not update the sources", cause);
+      }
+    },
+    [selectedId, note, refresh, report],
+  );
+
+  const setSourceMeta = useCallback(
+    async (meta: SourceMeta) => {
+      if (!selectedId) return;
+      try {
+        note.applyMeta(await sourcesApi.setMeta(selectedId, meta));
+        await refresh();
+      } catch (cause) {
+        report("Could not update the source", cause);
       }
     },
     [selectedId, note, refresh, report],
@@ -486,12 +535,35 @@ export default function App() {
                 This file had no frontmatter. Sutra will add one when you save.
               </p>
             )}
+            {/*
+              On a source, the details come first: they are what the note is,
+              and the body below them is for your own notes about the paper.
+              On every other kind of note the sources are a footer, because
+              there the prose is the point and the citations support it.
+            */}
+            {note.doc.type === "source" && (
+              <SourceDetails
+                id={note.doc.id}
+                meta={note.doc.source ?? {}}
+                onChange={(meta) => void setSourceMeta(meta)}
+                onOpen={(id) => void select(id)}
+              />
+            )}
             <Editor
               key={`${note.doc.id}:${note.revision}`}
               body={note.doc.body}
               onChange={note.setBody}
               onReady={setEditor}
             />
+            {note.doc.type !== "source" && (
+              <SourcesPanel
+                citations={note.doc.sources ?? []}
+                sources={sources}
+                onChange={(citations) => void setCitations(citations)}
+                onOpen={(id) => void select(id)}
+                onReport={report}
+              />
+            )}
             <Bibliography body={note.doc.body} />
             <BacklinksPanel
               backlinks={backlinks}

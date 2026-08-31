@@ -85,6 +85,9 @@ src/
     tree.ts           Folder paths -> a tree, inferring missing parents
     tags.ts           Tag paths -> a tree, plus autocomplete. Unit tested.
     TagManager.tsx    Rename, merge and tidy tags across the vault
+    SourcesPanel.tsx  What a note draws on, with page and quote
+    SourceDetails.tsx A source note's paper, and what rests on it
+    SourcePicker.tsx  The vault first, then Zotero
     folderStore.ts    The open note's folder, for the slash menu's attach
     Sidebar.tsx       Rail: the vault, the folder tree, the tag list
     NoteList.tsx      Middle column: rows and the search field
@@ -92,6 +95,7 @@ src/
     BacklinksPanel.tsx
     VaultPicker.tsx   Shown until a vault is chosen
     ConflictPrompt.tsx
+  editor/voices/      The three voices of a literature note. Unit tested.
   export/
     buildDocument.ts  Editor state -> a flat model Rust can write
     mathToImage.ts    Formulas rendered for export, and why via MathJax
@@ -171,6 +175,30 @@ so a merge can be undone exactly, which renaming back would not achieve.
 There is no such thing as an unused tag here. A tag exists exactly while some
 note carries it, so the brief's "unused-tag detection" has nothing to detect —
 worth saying rather than shipping a button that can never fire.
+
+## Sources and provenance
+
+A source is a note. Not a Zotero key, not a row in the index — a note of
+`type: source` in `Library/`, ordinary in every other way. Zotero is an import,
+not a dependency, and the item key comes along so a second import updates that
+note rather than making a duplicate.
+
+That is the whole argument. Citations used to store a Zotero key and resolve it
+live, which means a vault opened on another machine, or after Zotero is
+uninstalled, has citations that resolve to nothing — the brief's "source
+provenance is lost", reached by a route nobody would choose. Now a citation
+names a note in the vault, and the details live in exactly one place, so six
+notes citing one paper cannot drift into six different versions of it.
+
+A citation lives in the citing note's own frontmatter with a page, a quote and
+when it was captured. The quote is a field rather than prose because it is the
+one piece of text in the note that is not yours.
+
+`## Source says`, `## My interpretation` and `## My question` are rendered as
+three distinct voices. They are decorations on ordinary markdown headings, so
+nothing reaches the file and the separation survives export and every other
+editor. That makes it a convention the app can make obvious but cannot enforce —
+which is the price of a format worth keeping, and worth paying.
 
 ## Scope
 

@@ -53,6 +53,27 @@ impl NoteType {
         }
     }
 
+    /// Every kind, in the order the picker offers them.
+    ///
+    /// Exists only so a test can pin the list. The frontend declares the same union
+    /// by hand, and the two drifting apart is silent — a note saved as a kind
+    /// the UI has never heard of just renders as the default.
+    #[cfg(test)]
+    pub fn all() -> [Self; 10] {
+        [
+            Self::Standard,
+            Self::Literature,
+            Self::Idea,
+            Self::Question,
+            Self::Experiment,
+            Self::Project,
+            Self::Meeting,
+            Self::Task,
+            Self::Daily,
+            Self::Source,
+        ]
+    }
+
     /// Infallible on purpose. A hand-edited `type: litrature` should leave the
     /// note perfectly usable as a standard one, not make the file unreadable.
     pub fn parse(raw: &str) -> Self {
@@ -373,5 +394,32 @@ mod tests {
         let text = "---\nid: x\ntype: litrature\ntitle: T\ncreated: 2026-08-21T10:14:00Z\nupdated: 2026-08-21T10:14:00Z\n---\n\nb\n";
         let (parsed, _) = split(text).unwrap();
         assert_eq!(parsed.unwrap().note_type, NoteType::Standard);
+    }
+
+    #[test]
+    fn the_note_types_match_the_ones_the_frontend_declares() {
+        // src/vault/api.ts declares this union by hand. If you add a kind here
+        // and not there, a note saved as it renders as a plain note with no
+        // error anywhere — so the list is pinned in both places on purpose.
+        let names: Vec<&str> = NoteType::all().iter().map(|t| t.as_str()).collect();
+        assert_eq!(
+            names,
+            [
+                "standard",
+                "literature",
+                "idea",
+                "question",
+                "experiment",
+                "project",
+                "meeting",
+                "task",
+                "daily",
+                "source",
+            ]
+        );
+        // And every one of them survives being written and read back.
+        for kind in NoteType::all() {
+            assert_eq!(NoteType::parse(kind.as_str()), kind);
+        }
     }
 }
