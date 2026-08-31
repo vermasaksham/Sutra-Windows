@@ -42,6 +42,37 @@ pub struct Reference {
     pub year: Option<String>,
     pub item_type: String,
     pub doi: Option<String>,
+    /// Journal, book or proceedings — whatever it appeared in.
+    pub container: Option<String>,
+    pub url: Option<String>,
+}
+
+impl Reference {
+    /// What a source note in the vault records about this item.
+    ///
+    /// The import direction matters: details are copied into the vault once,
+    /// not looked up every time they are displayed. That is what makes a
+    /// citation survive Zotero being uninstalled, the vault being opened on
+    /// another machine, or the library being reorganised — the failure section
+    /// 31 calls "source provenance is lost".
+    ///
+    /// The Zotero key comes along so a later import updates the same note
+    /// rather than making a second one.
+    pub fn to_source(&self) -> crate::frontmatter::SourceMeta {
+        crate::frontmatter::SourceMeta {
+            authors: blank_to_none(&self.creators),
+            year: self.year.clone(),
+            container: self.container.clone(),
+            doi: self.doi.clone(),
+            url: self.url.clone(),
+            zotero: Some(self.key.clone()),
+        }
+    }
+}
+
+fn blank_to_none(value: &str) -> Option<String> {
+    let trimmed = value.trim();
+    (!trimmed.is_empty()).then(|| trimmed.to_string())
 }
 
 /// The subset of Zotero's item JSON we read.
@@ -62,6 +93,18 @@ struct ItemData {
     item_type: String,
     #[serde(rename = "DOI", default)]
     doi: Option<String>,
+    /// Zotero names the container differently per item type, and an item has
+    /// only the one its type uses. Reading all three and taking whichever is
+    /// present is simpler than switching on `itemType`, and does not break when
+    /// a type we did not think of turns up.
+    #[serde(rename = "publicationTitle", default)]
+    publication_title: Option<String>,
+    #[serde(rename = "bookTitle", default)]
+    book_title: Option<String>,
+    #[serde(rename = "proceedingsTitle", default)]
+    proceedings_title: Option<String>,
+    #[serde(default)]
+    url: Option<String>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -162,6 +205,16 @@ fn reference_from(item: ZoteroItem) -> Reference {
             .and_then(|d| d.get(..4).map(str::to_string)),
         item_type: item.data.item_type,
         doi: item.data.doi.filter(|d| !d.is_empty()),
+        // Whichever container field this item type happens to use.
+        container: [
+            item.data.publication_title,
+            item.data.book_title,
+            item.data.proceedings_title,
+        ]
+        .into_iter()
+        .flatten()
+        .find(|c| !c.trim().is_empty()),
+        url: item.data.url.filter(|u| !u.trim().is_empty()),
     }
 }
 
@@ -318,6 +371,8 @@ mod tests {
             year: Some("2019".into()),
             item_type: "journalArticle".into(),
             doi: None,
+            container: Some("Nature Energy".into()),
+            url: None,
         };
         let json = serde_json::to_value(&reference).unwrap();
         let mut keys: Vec<&str> = json
@@ -329,7 +384,16 @@ mod tests {
         keys.sort_unstable();
         assert_eq!(
             keys,
-            ["creators", "doi", "itemType", "key", "title", "year"]
+            [
+                "container",
+                "creators",
+                "doi",
+                "itemType",
+                "key",
+                "title",
+                "url",
+                "year"
+            ]
         );
     }
 
@@ -353,5 +417,42 @@ mod tests {
             error.contains("Allow other applications"),
             "unhelpful: {error}"
         );
+    }
+
+    #[test]
+    fn a_reference_becomes_a_source_the_vault_can_keep() {
+        // The point of the conversion: after this, nothing needs Zotero to be
+        // running, installed, or ever installed again.
+        let reference = Reference {
+            key: "ABCD1234".into(),
+            title: "Quasi-1D Sb2Se3 ribbons".into(),
+            creators: "Zhou et al.".into(),
+            year: Some("2019".into()),
+            item_type: "journalArticle".into(),
+            doi: Some("10.1000/xyz".into()),
+            container: Some("Nature Energy".into()),
+            url: Some("https://example.org/x".into()),
+        };
+        let source = reference.to_source();
+        assert_eq!(source.authors.as_deref(), Some("Zhou et al."));
+        assert_eq!(source.container.as_deref(), Some("Nature Energy"));
+        assert_eq!(source.doi.as_deref(), Some("10.1000/xyz"));
+        // The key comes along, so a later import updates rather than duplicates.
+        assert_eq!(source.zotero.as_deref(), Some("ABCD1234"));
+    }
+
+    #[test]
+    fn an_item_with_no_creators_has_no_authors_rather_than_an_empty_string() {
+        let reference = Reference {
+            key: "K".into(),
+            title: "T".into(),
+            creators: "   ".into(),
+            year: None,
+            item_type: "manuscript".into(),
+            doi: None,
+            container: None,
+            url: None,
+        };
+        assert_eq!(reference.to_source().authors, None);
     }
 }

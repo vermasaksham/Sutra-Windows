@@ -10,6 +10,8 @@
 use crate::error::{Result, SutraError};
 use crate::export::ExportDocument;
 use crate::frontmatter::NoteType;
+use crate::frontmatter::{Citation, SourceMeta};
+use crate::index::CitingNote;
 use crate::index::{Backlink, SearchHit};
 use crate::state::AppState;
 use crate::tags::Suggestion;
@@ -225,6 +227,83 @@ pub fn move_note(state: State<'_, AppState>, id: String, folder: String) -> Resu
         // The body has not changed, but the indexed row carries the folder, so
         // it has to be rewritten for folder filters to stay correct.
         let doc = vault.read_note(&id)?;
+        index.upsert(&summary, &doc.body)?;
+        Ok(summary)
+    })
+}
+
+/// Create a source note in the library.
+#[tauri::command]
+pub fn create_source(
+    state: State<'_, AppState>,
+    title: String,
+    meta: SourceMeta,
+) -> Result<NoteDoc> {
+    state.with_both(|vault, index| {
+        let doc = vault.create_source(&title, meta.clone())?;
+        index.upsert(&doc.summary, &doc.body)?;
+        Ok(doc)
+    })
+}
+
+/// Replace what a source note records about its paper.
+#[tauri::command]
+pub fn set_source_meta(
+    state: State<'_, AppState>,
+    id: String,
+    meta: SourceMeta,
+) -> Result<NoteSummary> {
+    state.with_both(|vault, index| {
+        let summary = vault.set_source_meta(&id, meta.clone())?;
+        let doc = vault.read_note(&id)?;
+        index.upsert(&summary, &doc.body)?;
+        Ok(summary)
+    })
+}
+
+/// Replace a note's citations. Send the complete desired list.
+#[tauri::command]
+pub fn set_citations(
+    state: State<'_, AppState>,
+    id: String,
+    citations: Vec<Citation>,
+) -> Result<NoteSummary> {
+    state.with_both(|vault, index| {
+        let summary = vault.set_citations(&id, citations.clone())?;
+        let doc = vault.read_note(&id)?;
+        index.upsert(&summary, &doc.body)?;
+        Ok(summary)
+    })
+}
+
+/// Every source note in the vault.
+#[tauri::command]
+pub fn list_sources(state: State<'_, AppState>) -> Result<Vec<NoteSummary>> {
+    state.with_vault(|vault| vault.list_sources())
+}
+
+/// Which notes cite a source, and where in it.
+#[tauri::command]
+pub fn citing_notes(state: State<'_, AppState>, id: String) -> Result<Vec<CitingNote>> {
+    state.with_index(|index| index.citing(&id))
+}
+
+/// Bring a Zotero item into the vault as a source note.
+///
+/// The details are copied in once rather than looked up every time they are
+/// shown. That is the difference between a citation that still means something
+/// in ten years and one that stops working when Zotero is uninstalled.
+#[tauri::command]
+pub fn import_zotero_source(state: State<'_, AppState>, key: String) -> Result<NoteSummary> {
+    let found = Zotero::default().by_keys(std::slice::from_ref(&key))?;
+    let reference = found
+        .into_iter()
+        .next()
+        .ok_or_else(|| SutraError::Zotero(format!("Zotero has no item {key}")))?;
+
+    state.with_both(|vault, index| {
+        let summary = vault.import_source(&reference.title, reference.to_source())?;
+        let doc = vault.read_note(&summary.id)?;
         index.upsert(&summary, &doc.body)?;
         Ok(summary)
     })

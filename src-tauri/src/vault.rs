@@ -7,7 +7,7 @@
 //! vault having to change.
 
 use crate::error::{Result, SutraError};
-use crate::frontmatter::{self, Frontmatter, NoteType};
+use crate::frontmatter::{self, Citation, Frontmatter, NoteType, SourceMeta};
 use crate::note;
 use crate::tags;
 use serde::{Deserialize, Serialize};
@@ -38,6 +38,12 @@ const LEGACY_ATTACHMENTS: &str = "attachments";
 /// dragged out of it by hand, and nothing breaks if someone deletes it.
 pub const INBOX: &str = "Inbox";
 
+/// Where source notes are kept, so the note explorer is not half papers.
+///
+/// A convention, not a rule: a source is an ordinary note and works from
+/// anywhere. This is only where new ones are put.
+pub const LIBRARY: &str = "Library";
+
 /// How deep a note may sit below the root. The brief asks for three or four
 /// levels; four is the cap. It is also roughly what keeps a Windows path under
 /// the 260-character default once a long title and a deep `Documents\...`
@@ -64,6 +70,19 @@ pub struct NoteSummary {
     pub tags: Vec<String>,
     pub icon: Option<String>,
     pub cover: Option<String>,
+    /// Present on a note of `type: source`. What the paper is.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source: Option<SourceMeta>,
+    /// The sources this note draws on.
+    ///
+    /// Carried on the summary rather than only the full note because the index
+    /// needs it to answer "what cites this source", and every path that
+    /// re-indexes a note already has a summary in hand. The cost is that a
+    /// vault listing carries the quotes too; at a few hundred literature notes
+    /// that is tens of kilobytes, and if it ever stops being negligible the fix
+    /// is to split the type rather than to duplicate the plumbing now.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub sources: Vec<Citation>,
     /// The opening prose, for the list to show beneath the title.
     pub excerpt: String,
     #[serde(with = "time::serde::rfc3339")]
@@ -627,6 +646,116 @@ impl Vault {
         Ok((out, skipped))
     }
 
+    // ---- sources -------------------------------------------------------------
+
+    /// Create a source note in the library.
+    ///
+    /// A source is a note like any other — it can be written in, linked to,
+    /// tagged and moved. That is the whole point: a citation that points at a
+    /// note keeps meaning something when Zotero is not installed, which a
+    /// citation pointing at a Zotero key does not.
+    pub fn create_source(&self, title: &str, meta: SourceMeta) -> Result<NoteDoc> {
+        let folder = self.checked_folder(LIBRARY)?;
+        fs::create_dir_all(self.root.join(&folder))?;
+
+        let id = Ulid::generate().to_string();
+        let title = if title.trim().is_empty() {
+            "Untitled source"
+        } else {
+            title.trim()
+        };
+        let mut fm = Frontmatter::new(id.clone(), title.to_string());
+        fm.note_type = NoteType::Source;
+        fm.source = Some(meta);
+
+        let relative = join_relative(&folder, &unique_name(&self.root.join(&folder), title, None));
+        note::write_atomic(&self.root.join(&relative), &frontmatter::join(&fm, "")?)?;
+        self.remember(&id, &relative);
+
+        Ok(NoteDoc {
+            summary: summary_of(&fm, "", folder),
+            body: String::new(),
+            adopted: false,
+        })
+    }
+
+    /// Replace what a source note records about its paper.
+    ///
+    /// Every note citing it shows the new details immediately, because none of
+    /// them holds a copy — they hold the source's id, and the details are read
+    /// from the one note that owns them.
+    pub fn set_source_meta(&self, id: &str, meta: SourceMeta) -> Result<NoteSummary> {
+        self.edit(id, |fm| {
+            fm.note_type = NoteType::Source;
+            fm.source = Some(meta);
+        })
+    }
+
+    /// Replace a note's citations. The caller sends the complete desired list,
+    /// for the same reason `set_meta` does.
+    pub fn set_citations(&self, id: &str, citations: Vec<Citation>) -> Result<NoteSummary> {
+        self.edit(id, |fm| {
+            fm.sources = citations;
+        })
+    }
+
+    /// Every source note in the vault.
+    pub fn list_sources(&self) -> Result<Vec<NoteSummary>> {
+        Ok(self
+            .list_notes()?
+            .into_iter()
+            .filter(|n| n.note_type == NoteType::Source)
+            .collect())
+    }
+
+    /// The source note already standing for this Zotero item, if there is one.
+    ///
+    /// Importing the same paper twice must update one note rather than making
+    /// a second, or the vault grows a duplicate every time a citation is added.
+    pub fn source_for_zotero(&self, key: &str) -> Result<Option<NoteSummary>> {
+        Ok(self.list_sources()?.into_iter().find(|n| {
+            n.source
+                .as_ref()
+                .and_then(|s| s.zotero.as_deref())
+                .is_some_and(|k| k == key)
+        }))
+    }
+
+    /// Take a source's details into the vault, updating rather than duplicating.
+    ///
+    /// Keyed on the Zotero item key, so importing the same paper on Monday and
+    /// again on Friday leaves one note with Friday's details. A source typed in
+    /// by hand has no key and is never matched by this — which is right: two
+    /// hand-written sources with the same title are the user's business.
+    pub fn import_source(&self, title: &str, meta: SourceMeta) -> Result<NoteSummary> {
+        let existing = match meta.zotero.as_deref() {
+            Some(key) => self.source_for_zotero(key)?,
+            None => None,
+        };
+        match existing {
+            Some(found) => self.set_source_meta(&found.id, meta),
+            None => Ok(self.create_source(title, meta)?.summary),
+        }
+    }
+
+    /// Read, change, write. Every metadata setter is this shape.
+    fn edit(&self, id: &str, change: impl FnOnce(&mut Frontmatter)) -> Result<NoteSummary> {
+        let relative = self.relative_for(id)?;
+        let path = self.root.join(&relative);
+        let contents = fs::read_to_string(&path)?;
+        let (parsed, body) = frontmatter::split(&contents)?;
+        let mut fm = parsed.unwrap_or_else(|| Self::synthesise(&relative));
+        if fm.id != id {
+            fm.id = id.to_string();
+        }
+        change(&mut fm);
+        fm.updated = frontmatter::now();
+
+        let body = body.to_string();
+        note::write_atomic(&path, &frontmatter::join(&fm, &body)?)?;
+        Ok(summary_of(&fm, &body, folder_of(&relative)))
+    }
+
     // ---- tags ----------------------------------------------------------------
 
     /// Every tag in the vault, exactly as written, with how many notes carry it.
@@ -1086,6 +1215,8 @@ fn summary_of(fm: &Frontmatter, body: &str, folder: String) -> NoteSummary {
         tags: fm.tags.clone(),
         icon: fm.icon.clone(),
         cover: fm.cover.clone(),
+        source: fm.source.clone(),
+        sources: fm.sources.clone(),
         excerpt: excerpt_of(body),
         updated: fm.updated,
     }
@@ -2292,5 +2423,133 @@ mod tests {
         assert_eq!(found[0].from, "thermalconductivity");
         assert_eq!(found[0].from_count, 1);
         assert_eq!(found[0].into_count, 2);
+    }
+    // ---- sources ---------------------------------------------------------------
+
+    fn paper(doi: &str) -> SourceMeta {
+        SourceMeta {
+            authors: Some("Zhou, Y.; Wang, L.".into()),
+            year: Some("2019".into()),
+            container: Some("Nature Energy".into()),
+            doi: Some(doi.into()),
+            url: None,
+            zotero: Some("ABCD1234".into()),
+        }
+    }
+
+    fn cite(id: &str, page: &str) -> Citation {
+        Citation {
+            id: id.to_string(),
+            page: Some(page.to_string()),
+            quote: Some(format!("what it says on {page}")),
+            captured: Some(frontmatter::now()),
+        }
+    }
+
+    #[test]
+    fn a_source_is_a_note_in_the_library() {
+        let vault = TempVault::new();
+        let doc = vault
+            .create_source("Quasi-1D Sb2Se3 ribbons", paper("10.1000/xyz"))
+            .unwrap();
+
+        assert_eq!(doc.summary.note_type, NoteType::Source);
+        assert_eq!(doc.summary.folder, LIBRARY);
+        assert!(
+            vault
+                .root()
+                .join("Library/Quasi-1D Sb2Se3 ribbons.md")
+                .is_file()
+        );
+        assert_eq!(
+            doc.summary.source.as_ref().unwrap().doi.as_deref(),
+            Some("10.1000/xyz")
+        );
+        // And it is an ordinary note: it can be moved, tagged and written in.
+        vault.move_note(&doc.summary.id, "Research").unwrap();
+        assert_eq!(
+            vault.read_note(&doc.summary.id).unwrap().summary.note_type,
+            NoteType::Source
+        );
+    }
+
+    #[test]
+    fn source_details_survive_a_round_trip_through_the_file() {
+        let vault = TempVault::new();
+        let doc = vault
+            .create_source("Zhou 2019", paper("10.1000/xyz"))
+            .unwrap();
+        // Read back from disk, not from the value we just built.
+        let read = vault.read_note(&doc.summary.id).unwrap();
+        let meta = read.summary.source.unwrap();
+        assert_eq!(meta.authors.as_deref(), Some("Zhou, Y.; Wang, L."));
+        assert_eq!(meta.container.as_deref(), Some("Nature Energy"));
+        assert_eq!(meta.zotero.as_deref(), Some("ABCD1234"));
+    }
+
+    #[test]
+    fn a_citation_records_page_and_quote_in_the_note_itself() {
+        let vault = TempVault::new();
+        let source = vault
+            .create_source("Zhou 2019", paper("10.1000/xyz"))
+            .unwrap();
+        let note = vault.create_note("Sb2Se3 Cp", folder("Research")).unwrap();
+
+        vault
+            .set_citations(&note.summary.id, vec![cite(&source.summary.id, "6")])
+            .unwrap();
+
+        // On disk, in the note's own frontmatter — which is what makes it
+        // readable in ten years with none of this software installed.
+        let raw = fs::read_to_string(vault.path_for(&note.summary.id).unwrap()).unwrap();
+        assert!(raw.contains("sources:"), "{raw}");
+        assert!(
+            raw.contains("page: '6'") || raw.contains("page: \"6\""),
+            "{raw}"
+        );
+
+        let read = vault.read_note(&note.summary.id).unwrap();
+        assert_eq!(read.summary.sources.len(), 1);
+        assert_eq!(read.summary.sources[0].id, source.summary.id);
+        assert_eq!(read.summary.sources[0].page.as_deref(), Some("6"));
+    }
+
+    #[test]
+    fn importing_the_same_zotero_item_twice_updates_one_note() {
+        let vault = TempVault::new();
+        let first = vault
+            .import_source("Zhou 2019", paper("10.1000/old"))
+            .unwrap();
+        let second = vault
+            .import_source("Zhou 2019 — corrected", paper("10.1000/new"))
+            .unwrap();
+
+        assert_eq!(first.id, second.id, "the same paper must be the same note");
+        assert_eq!(vault.list_sources().unwrap().len(), 1);
+        assert_eq!(
+            vault
+                .read_note(&first.id)
+                .unwrap()
+                .summary
+                .source
+                .unwrap()
+                .doi
+                .as_deref(),
+            Some("10.1000/new")
+        );
+    }
+
+    #[test]
+    fn a_hand_written_source_is_never_matched_by_an_import() {
+        let vault = TempVault::new();
+        let by_hand = SourceMeta {
+            authors: Some("Someone".into()),
+            ..SourceMeta::default()
+        };
+        vault.create_source("A paper", by_hand.clone()).unwrap();
+        vault.import_source("A paper", by_hand).unwrap();
+        // Two sources with no Zotero key are two sources. Guessing they are one
+        // would silently merge someone's notes.
+        assert_eq!(vault.list_sources().unwrap().len(), 2);
     }
 }

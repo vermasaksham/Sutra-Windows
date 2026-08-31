@@ -158,6 +158,9 @@ export type Reference = {
   year: string | null;
   itemType: string;
   doi: string | null;
+  /** Journal, book or proceedings — whatever it appeared in. */
+  container: string | null;
+  url: string | null;
 };
 
 export const exportApi = {

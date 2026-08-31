@@ -70,6 +70,12 @@ fn main() {
             commands::similar_tags,
             commands::retag,
             commands::undo_retag,
+            commands::create_source,
+            commands::set_source_meta,
+            commands::set_citations,
+            commands::list_sources,
+            commands::citing_notes,
+            commands::import_zotero_source,
         ])
         // `generate_context!` pulls in tauri.conf.json at compile time.
         .run(tauri::generate_context!())

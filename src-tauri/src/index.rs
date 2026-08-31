@@ -16,7 +16,7 @@ use std::sync::Mutex;
 /// Bumped whenever the schema changes. On mismatch the index is dropped and
 /// rebuilt rather than migrated — migrations are for data you cannot recreate,
 /// and this is not that.
-const SCHEMA_VERSION: i32 = 5;
+const SCHEMA_VERSION: i32 = 6;
 
 const SCHEMA: &str = r#"
 CREATE TABLE notes (
@@ -35,9 +35,25 @@ CREATE TABLE notes (
     -- Derived from the body, like everything else here. Kept so the note list
     -- can show a preview without re-reading every file in the vault.
     excerpt   TEXT NOT NULL DEFAULT '',
+    -- Both JSON, because the index is derived and its shape is nobody else's
+    -- business. `source` is what a source note records about its paper;
+    -- `sources` is what this note cites.
+    source    TEXT,
+    sources   TEXT NOT NULL DEFAULT '[]',
     updated   TEXT NOT NULL
 );
 CREATE INDEX notes_by_folder ON notes(folder, position);
+
+-- Which notes cite which sources, flattened so the reverse lookup is a query
+-- rather than a scan of every note's frontmatter. Rebuilt from the markdown
+-- like everything else here.
+CREATE TABLE note_sources (
+    source_id TEXT NOT NULL,
+    note_id   TEXT NOT NULL,
+    page      TEXT,
+    PRIMARY KEY (source_id, note_id, page)
+);
+CREATE INDEX note_sources_by_source ON note_sources(source_id);
 
 -- Contentless-adjacent: we store the text because the body is not otherwise in
 -- the database, and FTS5 needs something to tokenise.
@@ -60,6 +76,15 @@ CREATE TABLE links (
 );
 CREATE INDEX links_by_target ON links(target);
 "#;
+
+/// A note that cites a source, and where in it.
+#[derive(Debug, Clone, Serialize)]
+pub struct CitingNote {
+    pub id: String,
+    pub title: String,
+    /// Where in the source, if the citation said.
+    pub page: Option<String>,
+}
 
 /// One search hit.
 #[derive(Debug, Clone, Serialize)]
@@ -170,11 +195,34 @@ impl Index {
     pub fn all_notes(&self) -> Result<Vec<NoteSummary>> {
         let guard = self.conn.lock().unwrap_or_else(|e| e.into_inner());
         let mut stmt = guard.prepare(
-            "SELECT id, note_type, title, folder, position, tags, icon, cover, excerpt, updated
+            "SELECT id, note_type, title, folder, position, tags, icon, cover, excerpt, source, sources, updated
              FROM notes
              ORDER BY folder, position, title COLLATE NOCASE",
         )?;
         let rows = stmt.query_map([], row_to_summary)?;
+        Ok(rows.filter_map(std::result::Result::ok).collect())
+    }
+
+    /// Which notes cite a source, and where in it.
+    ///
+    /// The other half of provenance: a source note can show what has been built
+    /// on it, which is what makes an evidence trail walkable in both directions.
+    pub fn citing(&self, source_id: &str) -> Result<Vec<CitingNote>> {
+        let guard = self.conn.lock().unwrap_or_else(|e| e.into_inner());
+        let mut stmt = guard.prepare(
+            "SELECT n.id, n.title, s.page
+             FROM note_sources s
+             JOIN notes n ON n.id = s.note_id
+             WHERE s.source_id = ?1
+             ORDER BY n.title COLLATE NOCASE, s.page",
+        )?;
+        let rows = stmt.query_map([source_id], |row| {
+            Ok(CitingNote {
+                id: row.get(0)?,
+                title: row.get(1)?,
+                page: row.get(2)?,
+            })
+        })?;
         Ok(rows.filter_map(std::result::Result::ok).collect())
     }
 
@@ -245,8 +293,8 @@ fn create_schema(conn: &Connection) -> Result<()> {
 fn insert_note(tx: &rusqlite::Transaction<'_>, note: &NoteSummary, body: &str) -> Result<()> {
     let tags = serde_json::to_string(&note.tags).unwrap_or_else(|_| "[]".into());
     tx.execute(
-        "INSERT INTO notes (id, note_type, title, folder, position, tags, icon, cover, excerpt, updated)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+        "INSERT INTO notes (id, note_type, title, folder, position, tags, icon, cover, excerpt, source, sources, updated)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
         params![
             note.id,
             note.note_type.as_str(),
@@ -257,6 +305,10 @@ fn insert_note(tx: &rusqlite::Transaction<'_>, note: &NoteSummary, body: &str) -
             note.icon,
             note.cover,
             note.excerpt,
+            note.source
+                .as_ref()
+                .map(|s| serde_json::to_string(s).unwrap_or_else(|_| "null".into())),
+            serde_json::to_string(&note.sources).unwrap_or_else(|_| "[]".into()),
             note.updated
                 .format(&time::format_description::well_known::Rfc3339)
                 .unwrap_or_default(),
@@ -266,6 +318,15 @@ fn insert_note(tx: &rusqlite::Transaction<'_>, note: &NoteSummary, body: &str) -
         "INSERT INTO notes_fts (id, title, body, tags) VALUES (?1, ?2, ?3, ?4)",
         params![note.id, note.title, body, note.tags.join(" ")],
     )?;
+    for citation in &note.sources {
+        // A note citing one source at two pages is two rows; citing it twice at
+        // the same page is one, which the primary key enforces.
+        tx.execute(
+            "INSERT OR IGNORE INTO note_sources (source_id, note_id, page)
+             VALUES (?1, ?2, ?3)",
+            params![citation.id, note.id, citation.page],
+        )?;
+    }
     for target in links::extract(body) {
         // A note linking to itself is not a backlink worth showing.
         if target == note.id {
@@ -283,13 +344,16 @@ fn remove_note(tx: &rusqlite::Transaction<'_>, id: &str) -> Result<()> {
     tx.execute("DELETE FROM notes WHERE id = ?1", [id])?;
     tx.execute("DELETE FROM notes_fts WHERE id = ?1", [id])?;
     tx.execute("DELETE FROM links WHERE source = ?1", [id])?;
+    tx.execute("DELETE FROM note_sources WHERE note_id = ?1", [id])?;
     Ok(())
 }
 
 fn row_to_summary(row: &rusqlite::Row<'_>) -> rusqlite::Result<NoteSummary> {
     let note_type: String = row.get(1)?;
     let tags: String = row.get(5)?;
-    let updated: String = row.get(9)?;
+    let source: Option<String> = row.get(9)?;
+    let sources: String = row.get(10)?;
+    let updated: String = row.get(11)?;
     Ok(NoteSummary {
         id: row.get(0)?,
         note_type: crate::frontmatter::NoteType::parse(&note_type),
@@ -300,6 +364,8 @@ fn row_to_summary(row: &rusqlite::Row<'_>) -> rusqlite::Result<NoteSummary> {
         icon: row.get(6)?,
         cover: row.get(7)?,
         excerpt: row.get(8)?,
+        source: source.and_then(|s| serde_json::from_str(&s).ok()),
+        sources: serde_json::from_str(&sources).unwrap_or_default(),
         updated: time::OffsetDateTime::parse(
             &updated,
             &time::format_description::well_known::Rfc3339,
@@ -604,5 +670,149 @@ mod tests {
         let reopened = Index::open(&f.db).unwrap();
         assert!(reopened.all_notes().unwrap().is_empty());
         assert_eq!(reopened.rebuild(&f.vault).unwrap(), 1);
+    }
+    // ---- provenance --------------------------------------------------------
+
+    /// The proof from the plan: one source cited from six notes, each at a
+    /// different page. Changing the source's details updates every view of it
+    /// and duplicates nothing.
+    ///
+    /// This is the whole argument for a source being a note. The six notes hold
+    /// its id and nothing else — no copied title, no copied DOI — so there is
+    /// exactly one place the details live and no way for six copies to drift.
+    #[test]
+    fn one_source_cited_six_times_stays_one_source() {
+        let f = Fixture::new();
+        let source = f
+            .vault
+            .create_source(
+                "Quasi-1D Sb2Se3 ribbons",
+                crate::frontmatter::SourceMeta {
+                    authors: Some("Zhou, Y.".into()),
+                    year: Some("2019".into()),
+                    doi: Some("10.1000/before".into()),
+                    zotero: Some("ABCD1234".into()),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        f.index.upsert(&source.summary, &source.body).unwrap();
+
+        let pages = ["3", "6", "6-8", "S12", "iv", "114"];
+        let mut citing_ids = Vec::new();
+        for page in pages {
+            let note = f
+                .vault
+                .create_note(&format!("Reading note {page}"), Some("Research".into()))
+                .unwrap();
+            let summary = f
+                .vault
+                .set_citations(
+                    &note.summary.id,
+                    vec![crate::frontmatter::Citation {
+                        id: source.summary.id.clone(),
+                        page: Some(page.to_string()),
+                        quote: Some(format!("what it says on {page}")),
+                        captured: Some(crate::frontmatter::now()),
+                    }],
+                )
+                .unwrap();
+            f.index.upsert(&summary, "").unwrap();
+            citing_ids.push(note.summary.id);
+        }
+
+        // All six are reachable from the source, with their pages.
+        let citing = f.index.citing(&source.summary.id).unwrap();
+        assert_eq!(citing.len(), 6, "{citing:?}");
+        let mut seen: Vec<String> = citing.iter().filter_map(|c| c.page.clone()).collect();
+        seen.sort();
+        let mut expected: Vec<String> = pages.iter().map(|p| p.to_string()).collect();
+        expected.sort();
+        assert_eq!(seen, expected);
+
+        // ---- change the source's DOI ----
+        f.vault
+            .set_source_meta(
+                &source.summary.id,
+                crate::frontmatter::SourceMeta {
+                    authors: Some("Zhou, Y.".into()),
+                    year: Some("2019".into()),
+                    doi: Some("10.1000/after".into()),
+                    zotero: Some("ABCD1234".into()),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+
+        // Nothing duplicated: still one source note, still six citations.
+        assert_eq!(f.vault.list_sources().unwrap().len(), 1);
+        assert_eq!(f.index.citing(&source.summary.id).unwrap().len(), 6);
+
+        // And every citing note sees the new DOI, because none of them has a
+        // copy of it — they resolve through the one note that owns it.
+        for id in &citing_ids {
+            let note = f.vault.read_note(id).unwrap();
+            assert_eq!(note.summary.sources[0].id, source.summary.id);
+            let resolved = f.vault.read_note(&note.summary.sources[0].id).unwrap();
+            assert_eq!(
+                resolved.summary.source.unwrap().doi.as_deref(),
+                Some("10.1000/after")
+            );
+        }
+    }
+
+    #[test]
+    fn a_rebuild_reconstructs_the_source_relation_from_the_markdown() {
+        // The invariant that makes the index safe to delete has to hold for
+        // provenance too, or the evidence trail is really living in SQLite.
+        let f = Fixture::new();
+        let source = f
+            .vault
+            .create_source("Zhou 2019", Default::default())
+            .unwrap();
+        let note = f.vault.create_note("Citing", None).unwrap();
+        f.vault
+            .set_citations(
+                &note.summary.id,
+                vec![crate::frontmatter::Citation {
+                    id: source.summary.id.clone(),
+                    page: Some("6".into()),
+                    quote: None,
+                    captured: None,
+                }],
+            )
+            .unwrap();
+
+        f.index.rebuild(&f.vault).unwrap();
+
+        let citing = f.index.citing(&source.summary.id).unwrap();
+        assert_eq!(citing.len(), 1);
+        assert_eq!(citing[0].id, note.summary.id);
+        assert_eq!(citing[0].page.as_deref(), Some("6"));
+    }
+
+    #[test]
+    fn dropping_a_citation_drops_the_relation() {
+        let f = Fixture::new();
+        let source = f.vault.create_source("S", Default::default()).unwrap();
+        let note = f.vault.create_note("N", None).unwrap();
+        let with = f
+            .vault
+            .set_citations(
+                &note.summary.id,
+                vec![crate::frontmatter::Citation {
+                    id: source.summary.id.clone(),
+                    page: None,
+                    quote: None,
+                    captured: None,
+                }],
+            )
+            .unwrap();
+        f.index.upsert(&with, "").unwrap();
+        assert_eq!(f.index.citing(&source.summary.id).unwrap().len(), 1);
+
+        let without = f.vault.set_citations(&note.summary.id, vec![]).unwrap();
+        f.index.upsert(&without, "").unwrap();
+        assert!(f.index.citing(&source.summary.id).unwrap().is_empty());
     }
 }

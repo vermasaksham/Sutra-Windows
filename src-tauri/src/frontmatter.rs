@@ -32,6 +32,9 @@ pub enum NoteType {
     Meeting,
     Task,
     Daily,
+    /// A paper, book or dataset. Its own kind because a source is cited rather
+    /// than written, and mixing them into the note list would bury the notes.
+    Source,
 }
 
 impl NoteType {
@@ -46,6 +49,7 @@ impl NoteType {
             Self::Meeting => "meeting",
             Self::Task => "task",
             Self::Daily => "daily",
+            Self::Source => "source",
         }
     }
 
@@ -61,6 +65,7 @@ impl NoteType {
             "meeting" => Self::Meeting,
             "task" => Self::Task,
             "daily" => Self::Daily,
+            "source" => Self::Source,
             _ => Self::Standard,
         }
     }
@@ -72,6 +77,66 @@ impl<'de> Deserialize<'de> for NoteType {
     ) -> std::result::Result<Self, D::Error> {
         Ok(Self::parse(&String::deserialize(deserializer)?))
     }
+}
+
+/// What a source note records about the thing it stands for.
+///
+/// Grouped under one `source:` key rather than spread across the top level, so
+/// a glance at the file says which half is Sutra's bookkeeping and which half
+/// is the paper.
+///
+/// Every field is optional. A source captured from a scribbled reference with
+/// only a title is still a source, and refusing it would push people back to
+/// writing citations by hand in prose — which is exactly the loss of
+/// provenance this exists to prevent.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct SourceMeta {
+    /// "Zhou, Y.; Wang, L." — as written, not parsed. Author name parsing is a
+    /// famously bad idea and citation style is the exporter's problem.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub authors: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub year: Option<String>,
+    /// Journal, book, conference — whatever the thing appeared in.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub container: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub doi: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub url: Option<String>,
+    /// The Zotero item key this was imported from, so a re-import updates the
+    /// same note instead of making a second one. Absent for a source typed in
+    /// by hand, which must remain a perfectly ordinary thing to do.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub zotero: Option<String>,
+}
+
+/// One note citing one source, at one place in it.
+///
+/// This is the provenance record section 5 asks for, and it lives in the
+/// note's own frontmatter rather than in the index — so it survives being
+/// copied to another machine, opened in another editor, or read in ten years
+/// with none of this software installed.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Citation {
+    /// The source note's ULID. Not a Zotero key: a source is a note in the
+    /// vault, so a citation keeps working whether or not Zotero ever exists
+    /// again on this machine.
+    pub id: String,
+    /// A string, not a number: "S12", "6-8" and "iv" are all real page
+    /// references and none of them is an integer.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub page: Option<String>,
+    /// What the source actually says, in its own words. The heart of keeping
+    /// the author's claim separate from the reader's reading of it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub quote: Option<String>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        with = "time::serde::rfc3339::option"
+    )]
+    pub captured: Option<OffsetDateTime>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -104,6 +169,12 @@ pub struct Frontmatter {
     pub icon: Option<String>,
     #[serde(default)]
     pub cover: Option<String>,
+    /// Present on a note of `type: source`, and meaningless on any other.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source: Option<SourceMeta>,
+    /// The sources this note draws on, with where in them.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub sources: Vec<Citation>,
 }
 
 /// The current time, truncated to whole seconds.
@@ -133,6 +204,8 @@ impl Frontmatter {
             tags: Vec::new(),
             icon: None,
             cover: None,
+            source: None,
+            sources: Vec::new(),
         }
     }
 }
@@ -213,6 +286,8 @@ mod tests {
             tags: vec!["sb2se3".into(), "cvt".into()],
             icon: None,
             cover: None,
+            source: None,
+            sources: Vec::new(),
         }
     }
 
