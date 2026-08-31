@@ -2,14 +2,16 @@ import { useCallback, useEffect, useState } from "react";
 import Editor from "./editor/Editor";
 import Toast from "./components/Toast";
 import { setNavigate, setTitles } from "./editor/wikilink/titleStore";
+import { setSources } from "./editor/citation/citationStore";
 import BacklinksPanel from "./notes/BacklinksPanel";
-import Bibliography, { citationKeys } from "./notes/Bibliography";
 import SourcesPanel from "./notes/SourcesPanel";
+import { citedRefs } from "./notes/citedRefs";
 import SourceDetails from "./notes/SourceDetails";
 import ExportMenu from "./notes/ExportMenu";
 import FolderBar from "./notes/FolderBar";
 import ConflictPrompt from "./notes/ConflictPrompt";
 import MigrationPrompt from "./notes/MigrationPrompt";
+import CitationMigrationPrompt from "./notes/CitationMigrationPrompt";
 import CommandPalette from "./notes/CommandPalette";
 import TagManager from "./notes/TagManager";
 import NoteHeader from "./notes/NoteHeader";
@@ -29,6 +31,7 @@ import {
   exportApi,
   indexApi,
   foldersApi,
+  legacyCitationsApi,
   migrationApi,
   notesApi,
   sourcesApi,
@@ -65,11 +68,17 @@ export default function App() {
   const [activeFolder, setActiveFolder] = useState<string | null>(null);
   const [folders, setFolders] = useState<string[]>([]);
   /** Source notes, kept separately so a citation's id can be shown as a title. */
-  const [sources, setSources] = useState<NoteSummary[]>([]);
+  const [sources, setSourceNotes] = useState<NoteSummary[]>([]);
   /** Set once, when a vault still records its hierarchy in frontmatter. */
   const [migration, setMigration] = useState<MigrationPlan | null>(null);
   const [migrating, setMigrating] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
+  /** Zotero keys still in note bodies. Null until looked for. */
+  const [legacyCitations, setLegacyCitations] = useState<Record<
+    string,
+    number
+  > | null>(null);
+  const [citationPromptOpen, setCitationPromptOpen] = useState(false);
   const [tagsOpen, setTagsOpen] = useState(false);
   /** Bumped to move focus to the search field; the shortcut lives up here but
    *  the input is three components down. */
@@ -167,8 +176,16 @@ export default function App() {
     if (!vault) return;
     sourcesApi
       .list()
-      .then(setSources)
-      .catch(() => setSources([]));
+      .then((found) => {
+        setSourceNotes(found);
+        // The citation node views are mounted by ProseMirror, so they read the
+        // sources from a module store rather than from props.
+        setSources(found);
+      })
+      .catch(() => {
+        setSourceNotes([]);
+        setSources([]);
+      });
   }, [vault, notes]);
 
   // Asked once per vault, on open. A vault laid out the old way still works —
@@ -187,6 +204,19 @@ export default function App() {
       cancelled = true;
     };
   }, [vault]);
+
+  const findLegacyCitations = useCallback(() => {
+    legacyCitationsApi
+      .find()
+      .then((found) =>
+        setLegacyCitations(Object.keys(found).length > 0 ? found : null),
+      )
+      .catch(() => setLegacyCitations(null));
+  }, []);
+
+  useEffect(() => {
+    if (vault) findLegacyCitations();
+  }, [vault, findLegacyCitations]);
 
   const runMigration = useCallback(async () => {
     setMigrating(true);
@@ -375,7 +405,7 @@ export default function App() {
       const document = await buildDocument(
         note.doc.title,
         editor.getJSON(),
-        citationKeys(note.doc.body),
+        citedRefs(note.doc.body),
       );
       const saved = await exportApi.docx(document);
       if (saved) setError(`Exported ${saved}`);
@@ -559,12 +589,12 @@ export default function App() {
               <SourcesPanel
                 citations={note.doc.sources ?? []}
                 sources={sources}
+                inlineRefs={citedRefs(note.doc.body)}
                 onChange={(citations) => void setCitations(citations)}
                 onOpen={(id) => void select(id)}
                 onReport={report}
               />
             )}
-            <Bibliography body={note.doc.body} />
             <BacklinksPanel
               backlinks={backlinks}
               onSelect={(id) => void select(id)}
@@ -613,6 +643,10 @@ export default function App() {
           onExportDocx={() => void exportDocx()}
           onExportPdf={exportPdf}
           onManageTags={() => setTagsOpen(true)}
+          legacyCitations={
+            legacyCitations ? Object.keys(legacyCitations).length : 0
+          }
+          onMigrateCitations={() => setCitationPromptOpen(true)}
           onReindex={() => void indexApi.reindex().then(() => refresh())}
         />
       )}
@@ -621,6 +655,24 @@ export default function App() {
         <TagManager
           onClose={() => setTagsOpen(false)}
           onChanged={() => void refresh()}
+          onReport={report}
+        />
+      )}
+
+      {citationPromptOpen && legacyCitations && (
+        <CitationMigrationPrompt
+          counts={legacyCitations}
+          onClose={() => {
+            setCitationPromptOpen(false);
+            findLegacyCitations();
+          }}
+          onDone={() => {
+            // The migration rewrote note bodies on disk, so the open buffer is
+            // now behind the file. Re-read it before anything can write the
+            // stale version back.
+            void note.reload();
+            void refresh();
+          }}
           onReport={report}
         />
       )}

@@ -232,6 +232,77 @@ pub fn move_note(state: State<'_, AppState>, id: String, folder: String) -> Resu
     })
 }
 
+/// What migrating the legacy citations would involve.
+#[tauri::command]
+pub fn legacy_citations(state: State<'_, AppState>) -> Result<HashMap<String, usize>> {
+    state.with_vault(|vault| vault.legacy_citations())
+}
+
+/// What a citation migration did.
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CitationMigration {
+    /// Zotero key, and the source note it now points at.
+    pub migrated: Vec<(String, String)>,
+    /// Keys Zotero could not answer for. Left exactly as they were.
+    pub unresolved: Vec<String>,
+    pub notes_changed: usize,
+}
+
+/// Turn every `[@KEY]` into a citation of a source note in the vault.
+///
+/// Needs Zotero, once: the keys came from there and only it knows what they
+/// stand for. After this the vault does not need Zotero again — which is the
+/// entire point of doing it.
+#[tauri::command]
+pub fn migrate_citations(state: State<'_, AppState>) -> Result<CitationMigration> {
+    let counts = state.with_vault(|vault| vault.legacy_citations())?;
+    let mut keys: Vec<String> = counts.into_keys().collect();
+    keys.sort();
+    if keys.is_empty() {
+        return Ok(CitationMigration {
+            migrated: Vec::new(),
+            unresolved: Vec::new(),
+            notes_changed: 0,
+        });
+    }
+
+    let found = Zotero::default().by_keys(&keys)?;
+    let mut mapping = HashMap::new();
+    let mut migrated = Vec::new();
+
+    state.with_both(|vault, index| {
+        for reference in &found {
+            let summary = vault.import_source(&reference.title, reference.to_source())?;
+            let doc = vault.read_note(&summary.id)?;
+            index.upsert(&summary, &doc.body)?;
+            mapping.insert(reference.key.clone(), summary.id.clone());
+            migrated.push((reference.key.clone(), summary.id));
+        }
+        Ok(())
+    })?;
+
+    let notes_changed = state.with_both(|vault, index| {
+        let changed = vault.migrate_citations(&mapping)?;
+        // Bodies changed, so the links and full-text rows for those notes are
+        // stale. A rebuild is the simple, provably complete answer, and this
+        // runs once.
+        index.rebuild(vault)?;
+        Ok(changed)
+    })?;
+
+    let unresolved = keys
+        .into_iter()
+        .filter(|k| !mapping.contains_key(k))
+        .collect();
+
+    Ok(CitationMigration {
+        migrated,
+        unresolved,
+        notes_changed,
+    })
+}
+
 /// Create a source note in the library.
 #[tauri::command]
 pub fn create_source(

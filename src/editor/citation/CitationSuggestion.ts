@@ -5,19 +5,26 @@ import type { SuggestionProps } from "@tiptap/suggestion";
 import { PluginKey } from "@tiptap/pm/state";
 import { computePosition, flip, offset, shift } from "@floating-ui/dom";
 import type { ComponentProps } from "react";
-import CitationMenu, { type CitationMenuHandle } from "./CitationMenu";
-import { remember } from "./citationStore";
-import { zoteroApi, type Reference } from "../../vault/api";
+import CitationMenu, {
+  type Candidate,
+  type CitationMenuHandle,
+} from "./CitationMenu";
+import { remember, vaultCandidates } from "./citationStore";
+import { sourcesApi, zoteroApi, type Reference } from "../../vault/api";
 
 type MenuProps = ComponentProps<typeof CitationMenu>;
 
 /**
- * Typing `@` searches Zotero and inserts the chosen reference as `[@KEY]`.
+ * Typing `@` cites a source, and always ends up citing a note in the vault.
  *
- * Unlike the slash menu and the `[[` picker, the candidate list is not in
- * memory — every keystroke is a request to another program. So results are
- * debounced, and a request that returns after a newer one started is dropped
- * rather than allowed to overwrite it.
+ * Two places to look. Sources already here are matched from memory, so they
+ * appear on the first keystroke and work with nothing else installed — and
+ * they come first, because a paper is read once and cited a dozen times.
+ * Zotero is asked as well, debounced, and a response that arrives after a
+ * newer request started is dropped rather than allowed to overwrite it.
+ *
+ * Picking a Zotero item copies it into the vault before the citation is
+ * inserted. Nothing ever writes a Zotero key into a note again.
  */
 export const CitationSuggestion = Extension.create({
   name: "citationSuggestion",
@@ -40,7 +47,7 @@ export const CitationSuggestion = Extension.create({
           let timer: ReturnType<typeof setTimeout> | null = null;
           /** Increments per search; a stale response carries an old number. */
           let generation = 0;
-          let results: Reference[] = [];
+          let results: Candidate[] = [];
           let state: "idle" | "loading" | "error" = "idle";
           let error: string | null = null;
 
@@ -66,20 +73,47 @@ export const CitationSuggestion = Extension.create({
             });
           };
 
-          const select = (reference: Reference) => {
+          const insert = (id: string) => {
             if (!latest) return;
-            // Cache it so the node renders its label immediately rather than
-            // asking Zotero again for something we just received.
-            remember(reference);
             latest.editor
               .chain()
               .focus()
               .deleteRange(latest.range)
               .insertContent([
-                { type: "citation", attrs: { itemKey: reference.key } },
+                { type: "citation", attrs: { ref: id } },
                 { type: "text", text: " " },
               ])
               .run();
+          };
+
+          const select = (candidate: Candidate) => {
+            if (candidate.kind === "source") return insert(candidate.id);
+
+            // A Zotero item has to become a note first. Remember the reference
+            // meanwhile so nothing flashes as unresolved, and take the range
+            // now because the menu closes before the import returns.
+            remember(candidate.reference);
+            const range = latest?.range;
+            const editor = latest?.editor;
+            void sourcesApi
+              .importZotero(candidate.reference.key)
+              .then((source) => {
+                if (!editor || !range) return;
+                editor
+                  .chain()
+                  .focus()
+                  .deleteRange(range)
+                  .insertContent([
+                    { type: "citation", attrs: { ref: source.id } },
+                    { type: "text", text: " " },
+                  ])
+                  .run();
+              })
+              .catch(() => {
+                // The import failed — Zotero went away mid-pick, or the vault
+                // refused. Leaving the typed text alone is better than
+                // inserting a citation of nothing.
+              });
           };
 
           const props = (): MenuProps => ({
@@ -93,13 +127,18 @@ export const CitationSuggestion = Extension.create({
 
           const runSearch = (query: string) => {
             if (timer) clearTimeout(timer);
+            // Sources in the vault are in memory, so they can be shown at once
+            // rather than waiting on a debounce for another program.
+            const local = vaultCandidates(query);
             if (query.trim().length < 2) {
-              // One character matches most of a library; wait for a second.
-              results = [];
+              // One character matches most of a library; wait for a second
+              // before asking Zotero, but show what is already here.
+              results = local;
               state = "idle";
               rerender();
               return;
             }
+            results = local;
             state = "loading";
             rerender();
 
@@ -107,17 +146,42 @@ export const CitationSuggestion = Extension.create({
             timer = setTimeout(() => {
               zoteroApi
                 .search(query)
-                .then((found) => {
+                .then((found: Reference[]) => {
                   if (mine !== generation) return; // A newer search won.
-                  results = found;
+                  // Anything already in the vault is offered from there, not
+                  // twice: importing a second copy is the thing to avoid.
+                  const here = new Set(
+                    vaultCandidates("")
+                      .map((c) => (c.kind === "source" ? c.zotero : null))
+                      .filter(Boolean),
+                  );
+                  results = [
+                    ...vaultCandidates(query),
+                    ...found
+                      .filter((reference) => !here.has(reference.key))
+                      .map<Candidate>((reference) => ({
+                        kind: "zotero",
+                        reference,
+                        title: reference.title,
+                        detail: [
+                          reference.creators,
+                          reference.year,
+                          reference.container,
+                        ]
+                          .filter(Boolean)
+                          .join(" · "),
+                      })),
+                  ];
                   state = "idle";
                   error = null;
                   rerender();
                 })
                 .catch((cause: unknown) => {
                   if (mine !== generation) return;
-                  results = [];
-                  state = "error";
+                  // Zotero being off is not a failure of the whole menu: the
+                  // vault's own sources are still perfectly citable.
+                  results = vaultCandidates(query);
+                  state = results.length > 0 ? "idle" : "error";
                   error =
                     cause instanceof Error ? cause.message : String(cause);
                   rerender();

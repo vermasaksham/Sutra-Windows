@@ -1,5 +1,5 @@
 import type { JSONContent } from "@tiptap/core";
-import { label, resolved } from "../editor/citation/citationStore";
+import { resolved } from "../editor/citation/citationStore";
 import { mathToImage } from "./mathToImage";
 import { encodeSvg, rasterise } from "./rasterise";
 import { attachmentUrl } from "../editor/image/attachmentUrl";
@@ -81,9 +81,11 @@ function runsFrom(nodes: JSONContent[] | undefined): Run[] {
       // as the target's title — the same thing it shows on screen.
       runs.push({ text: String(node.attrs?.targetId ?? ""), italic: true });
     } else if (node.type === "citation") {
-      const key = String(node.attrs?.itemKey ?? "");
-      const [reference] = resolved([key]);
-      runs.push({ text: reference ? `(${label(reference)})` : `(${key})` });
+      const ref = String(node.attrs?.ref ?? "");
+      const [cited] = resolved([ref]);
+      // An unresolved citation exports as its ref rather than vanishing: the
+      // reference is in the file, and a silently dropped one is worse.
+      runs.push({ text: cited ? `(${cited.label})` : `(${ref})` });
     } else if (node.type === "hardBreak") {
       runs.push({ text: "\n" });
     }
@@ -316,16 +318,12 @@ function intrinsicSize(
 export async function buildDocument(
   title: string,
   doc: JSONContent,
-  citationKeys: string[],
+  citedRefs: string[],
 ): Promise<ExportDocument> {
   const blocks: Block[] = [];
   await walk(doc, blocks);
 
-  const references = resolved(citationKeys).map((r) =>
-    [r.creators, r.year && `(${r.year})`, r.title, r.doi && `doi:${r.doi}`]
-      .filter(Boolean)
-      .join(" "),
-  );
+  const references = resolved(citedRefs).map((cited) => cited.detail);
 
   return { title, blocks, references };
 }

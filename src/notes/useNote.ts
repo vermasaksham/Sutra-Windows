@@ -137,6 +137,24 @@ export function useNote(id: string | null, onSaved: () => void) {
   }, []);
 
   /**
+   * Re-read the open note from disk, discarding the buffer.
+   *
+   * For when something other than the editor rewrote the file — the citation
+   * migration does, and without this the buffer would keep showing the old
+   * body and write it back on the next keystroke. Deliberately not merging:
+   * the file is the truth in exactly this case.
+   */
+  const reload = useCallback(async () => {
+    const noteId = currentId.current;
+    if (!noteId) return;
+    try {
+      adopt(await notesApi.read(noteId));
+    } catch {
+      setSaveState("error");
+    }
+  }, [adopt]);
+
+  /**
    * Throw away a pending autosave without writing it.
    *
    * Needed when the open note is being deleted: the queued timer would
@@ -243,6 +261,7 @@ export function useNote(id: string | null, onSaved: () => void) {
     setBody,
     setTitle,
     flush,
+    reload,
     discard,
     applyMeta,
     resolveConflict,

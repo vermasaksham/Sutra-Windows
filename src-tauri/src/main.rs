@@ -3,6 +3,7 @@
 // target ignores it.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod citations;
 mod commands;
 mod error;
 mod export;
@@ -76,6 +77,8 @@ fn main() {
             commands::list_sources,
             commands::citing_notes,
             commands::import_zotero_source,
+            commands::legacy_citations,
+            commands::migrate_citations,
         ])
         // `generate_context!` pulls in tauri.conf.json at compile time.
         .run(tauri::generate_context!())

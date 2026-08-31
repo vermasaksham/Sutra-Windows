@@ -1,5 +1,6 @@
 import { useState } from "react";
 import SourcePicker, { describe } from "./SourcePicker";
+import { useCitation } from "../editor/citation/citationStore";
 import type { Citation, NoteSummary } from "../vault/api";
 
 /**
@@ -14,10 +15,16 @@ import type { Citation, NoteSummary } from "../vault/api";
  * the one piece of text in the note that is not the author's, and keeping it
  * structurally separate is the same argument as the three voices, applied to
  * the part a reader is most likely to paraphrase without meaning to.
+ *
+ * One list, not two. Anything cited in the prose but not recorded here appears
+ * below with an invitation to record it — a reference list and a provenance
+ * record that disagree are worse than either alone, and the disagreement is
+ * exactly the thing worth showing.
  */
 export default function SourcesPanel({
   citations,
   sources,
+  inlineRefs,
   onChange,
   onOpen,
   onReport,
@@ -25,12 +32,16 @@ export default function SourcesPanel({
   citations: Citation[];
   /** Every source note in the vault, for resolving ids to titles. */
   sources: NoteSummary[];
+  /** Every `[@ref]` in the body, so the prose and this list can be compared. */
+  inlineRefs: string[];
   onChange: (citations: Citation[]) => void;
   onOpen: (id: string) => void;
   onReport: (message: string, cause: unknown) => void;
 }) {
   const [picking, setPicking] = useState(false);
   const byId = new Map(sources.map((s) => [s.id, s]));
+  const recorded = new Set(citations.map((c) => c.id));
+  const onlyInProse = inlineRefs.filter((ref) => !recorded.has(ref));
 
   const update = (index: number, patch: Partial<Citation>) =>
     onChange(citations.map((c, i) => (i === index ? { ...c, ...patch } : c)));
@@ -127,6 +138,34 @@ export default function SourcesPanel({
         </ul>
       )}
 
+      {onlyInProse.length > 0 && (
+        <div className="mt-3 rounded-lg border border-border px-3 py-2">
+          <p className="text-xs text-ink-muted">
+            Cited in the text but not recorded here, so there is no page or
+            quote to trace the claim back to:
+          </p>
+          <ul className="mt-1 flex flex-col gap-1">
+            {onlyInProse.map((ref) => (
+              <InlineOnly
+                key={ref}
+                reference={ref}
+                onRecord={() =>
+                  onChange([
+                    ...citations,
+                    {
+                      id: ref,
+                      page: null,
+                      quote: null,
+                      captured: new Date().toISOString(),
+                    },
+                  ])
+                }
+              />
+            ))}
+          </ul>
+        </div>
+      )}
+
       {picking && (
         <SourcePicker
           onClose={() => setPicking(false)}
@@ -148,5 +187,52 @@ export default function SourcesPanel({
         />
       )}
     </section>
+  );
+}
+
+/**
+ * A work cited in the prose but absent from the provenance record.
+ *
+ * Recording it is offered, never done: adding a row the user did not ask for
+ * would be the app deciding what their evidence is.
+ *
+ * A legacy Zotero reference cannot be recorded at all — a citation must name a
+ * source note, and this one names an item in another program. It says so, and
+ * points at the migration.
+ */
+function InlineOnly({
+  reference,
+  onRecord,
+}: {
+  reference: string;
+  onRecord: () => void;
+}) {
+  const state = useCitation(reference);
+  const legacy =
+    state.status === "found"
+      ? state.cited.legacy
+      : state.status === "missing" && state.legacy;
+  const name =
+    state.status === "found" ? state.cited.title : `Reference ${reference}`;
+
+  return (
+    <li className="flex items-center justify-between gap-2">
+      <span className="min-w-0 flex-1 truncate text-sm text-ink-soft">
+        {name}
+      </span>
+      {legacy ? (
+        <span className="shrink-0 text-xs text-highlight">
+          a Zotero reference — migrate it first
+        </span>
+      ) : (
+        <button
+          type="button"
+          onClick={onRecord}
+          className="sutra-no-print shrink-0 text-xs text-ink-muted transition-colors duration-150 ease-out hover:text-accent"
+        >
+          record it
+        </button>
+      )}
+    </li>
   );
 }

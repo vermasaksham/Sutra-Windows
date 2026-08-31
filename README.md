@@ -82,6 +82,7 @@ src/
     CommandPalette.tsx  Every action behind Ctrl/Cmd K
     TypePicker.tsx    What kind of note this is, changeable at any time
     MigrationPrompt.tsx  Offered once to a vault laid out the old way
+    CitationMigrationPrompt.tsx  Zotero keys -> source notes, once
     tree.ts           Folder paths -> a tree, inferring missing parents
     tags.ts           Tag paths -> a tree, plus autocomplete. Unit tested.
     TagManager.tsx    Rename, merge and tidy tags across the vault
@@ -127,6 +128,7 @@ src-tauri/
     export.rs         .docx writing
     zotero.rs         Reading references from a running Zotero
     links.rs          Finding [[id]] references in markdown
+    citations.rs      Finding and rewriting [@ref] in markdown. Unit tested.
     frontmatter.rs    The YAML block, parsing and serialising
     note.rs           Filenames, slugging, atomic writes
     watcher.rs        Debounced filesystem watching
@@ -194,6 +196,16 @@ A citation lives in the citing note's own frontmatter with a page, a quote and
 when it was captured. The quote is a field rather than prose because it is the
 one piece of text in the note that is not yours.
 
+`[@...]` in the body names a source note by its id, and that is the only
+identifier a citation ever needs. Vaults written before this still hold
+eight-character Zotero keys; those keep parsing, and render greyed as
+`(not in Zotero: ABCD1234)` rather than vanishing, so nothing in a note is lost
+by opening it. **Turn Zotero citations into sources** in the command palette
+resolves each key once against a running Zotero, writes the source note, and
+rewrites the body — a key Zotero no longer knows is left exactly as it was and
+can be migrated later, and no note's `updated` is touched, because rewriting a
+reference into the form that means the same thing is not an edit.
+
 `## Source says`, `## My interpretation` and `## My question` are rendered as
 three distinct voices. They are decorations on ordinary markdown headings, so
 nothing reaches the file and the separation survives export and every other
@@ -210,9 +222,11 @@ Deliberately out, and not up for discussion: database views, kanban boards,
 relations, filtered tables. Sutra is a writing tool, not a database with a UI.
 Also out: real-time collaboration, cloud sync, mobile apps, plugin systems.
 
-Citations come from a running Zotero over its local API on 127.0.0.1, so
-nothing leaves the machine. It must be enabled in Zotero → Settings → Advanced
-→ "Allow other applications on this computer to communicate with Zotero".
+Importing a source from Zotero reads its local API on 127.0.0.1, so nothing
+leaves the machine. It must be enabled in Zotero → Settings → Advanced → "Allow
+other applications on this computer to communicate with Zotero". Only importing
+and migrating need it; once a source is a note, citing and reading it never ask
+Zotero anything.
 
 Export writes `.docx` directly. PDF goes through the system print dialog —
 choose "Save as PDF" — with a print stylesheet doing the layout, so a PDF is

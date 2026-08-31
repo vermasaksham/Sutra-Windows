@@ -1,19 +1,31 @@
 import { useSyncExternalStore } from "react";
-import { zoteroApi, type Reference } from "../../vault/api";
+import { zoteroApi, type NoteSummary, type Reference } from "../../vault/api";
+import { sourceLabel } from "../../notes/sourceLabel";
 
 /**
- * Zotero item key → reference, for rendering `[@KEY]` as a label.
+ * What a `[@ref]` in the text should read as.
  *
  * The same shape as the wikilink title store, and for the same reason: a node
  * view is mounted by ProseMirror, not by our component tree, so props and
  * context do not reach it.
  *
- * The difference is where the data comes from. Note titles are already in
- * memory; references live in Zotero, so a key that has not been seen is
- * fetched. Requests are batched into one call per tick, because a document
- * with thirty citations should not make thirty round trips.
+ * Two kinds of reference share this syntax, and length tells them apart.
+ * Twenty-six characters is a source note in the vault, resolved from notes
+ * already in memory — instant, and it works whether or not Zotero was ever
+ * installed. Eight is a Zotero item key, which is how citations were written
+ * before a source became a note; those still resolve, by asking Zotero, and
+ * they are what the migration exists to remove.
  */
 
+/** A ULID is 26 characters; a Zotero item key is 8. */
+export function isSourceNote(ref: string): boolean {
+  return ref.length === 26;
+}
+
+/** Source notes by id, kept current by the app. */
+let sources = new Map<string, NoteSummary>();
+
+/** Zotero references by item key, fetched on demand. */
 const references = new Map<string, Reference>();
 /** Keys already looked up and genuinely absent, so we stop asking. */
 const missing = new Set<string>();
@@ -23,6 +35,11 @@ let scheduled = false;
 
 function emit() {
   for (const listener of listeners) listener();
+}
+
+export function setSources(all: NoteSummary[]) {
+  sources = new Map(all.map((source) => [source.id, source]));
+  emit();
 }
 
 function flush() {
@@ -65,43 +82,159 @@ export function remember(reference: Reference) {
   emit();
 }
 
-/** Every reference currently resolved, for the bibliography. */
-export function resolved(keys: string[]): Reference[] {
-  return keys
-    .map((key) => references.get(key))
-    .filter((r): r is Reference => r !== undefined);
-}
-
 function subscribe(listener: () => void) {
   listeners.add(listener);
   return () => listeners.delete(listener);
 }
 
+/**
+ * Sources in the vault matching what has been typed, newest-looking first.
+ *
+ * Matching on title and authors, and on the squashed forms of both, so a
+ * half-remembered "zhou2019" finds "Zhou, Y. (2019)". An empty query returns
+ * everything, which is what the `@` menu shows before a second character.
+ */
+export function vaultCandidates(query: string): VaultCandidate[] {
+  const needle = squash(query);
+  const all = [...sources.values()];
+  const matching = needle
+    ? all.filter((source) =>
+        squash(
+          `${source.title} ${source.source?.authors ?? ""} ${source.source?.year ?? ""}`,
+        ).includes(needle),
+      )
+    : all;
+
+  return matching.slice(0, 8).map((source) => ({
+    kind: "source" as const,
+    id: source.id,
+    title: source.title,
+    detail: fromSource(source).detail,
+    zotero: source.source?.zotero ?? null,
+  }));
+}
+
+type VaultCandidate = {
+  kind: "source";
+  id: string;
+  title: string;
+  detail: string;
+  /** So the Zotero half of the menu can avoid offering it twice. */
+  zotero: string | null;
+};
+
+/** Only letters and digits, so punctuation and spacing stop mattering. */
+function squash(text: string): string {
+  return text.toLowerCase().replace(/[^\p{L}\p{N}]/gu, "");
+}
+
+/** What a citation resolved to, whichever kind it was. */
+export type Cited = {
+  /** "Zhou et al., 2019" — what goes in the brackets. */
+  label: string;
+  /** The full title, for a tooltip. */
+  title: string;
+  /** A bibliography line: everything known about it. */
+  detail: string;
+  /** True for a Zotero key, which only resolves while Zotero is running. */
+  legacy: boolean;
+};
+
 export type CitationState =
   | { status: "loading" }
-  | { status: "missing" }
-  | { status: "found"; reference: Reference };
+  | { status: "missing"; legacy: boolean }
+  | { status: "found"; cited: Cited };
 
-export function useCitation(key: string): CitationState {
+/**
+ * Resolve one reference.
+ *
+ * All three subscriptions are unconditional: which one matters depends on the
+ * reference, but React requires the same hooks in the same order on every
+ * render, and a citation can change from one kind to the other under it — that
+ * is exactly what the migration does.
+ */
+export function useCitation(ref: string): CitationState {
+  const source = useSyncExternalStore(
+    subscribe,
+    () => sources.get(ref),
+    () => undefined,
+  );
   const reference = useSyncExternalStore(
     subscribe,
-    () => references.get(key),
+    () => references.get(ref),
     () => undefined,
   );
   const gone = useSyncExternalStore(
     subscribe,
-    () => missing.has(key),
+    () => missing.has(ref),
     () => false,
   );
 
-  if (reference) return { status: "found", reference };
-  if (gone) return { status: "missing" };
-  request(key);
+  if (isSourceNote(ref)) {
+    // Nothing to fetch: a source note either is in the vault or is not.
+    return source
+      ? { status: "found", cited: fromSource(source) }
+      : { status: "missing", legacy: false };
+  }
+
+  if (reference) return { status: "found", cited: fromReference(reference) };
+  if (gone) return { status: "missing", legacy: true };
+  request(ref);
   return { status: "loading" };
 }
 
-/** Format a reference the way it appears inline. */
-export function label(reference: Reference): string {
+/**
+ * Every reference that currently resolves, for a bibliography.
+ *
+ * Unresolved ones are simply absent rather than guessed at: a reference list
+ * that invents an entry is worse than one that is short.
+ */
+export function resolved(refs: string[]): Cited[] {
+  const out: Cited[] = [];
+  for (const ref of refs) {
+    if (isSourceNote(ref)) {
+      const source = sources.get(ref);
+      if (source) out.push(fromSource(source));
+    } else {
+      const reference = references.get(ref);
+      if (reference) out.push(fromReference(reference));
+    }
+  }
+  return out;
+}
+
+function fromSource(source: NoteSummary): Cited {
+  const meta = source.source;
+  return {
+    label: sourceLabel(source),
+    title: source.title,
+    detail: [
+      meta?.authors,
+      meta?.year && `(${meta.year})`,
+      source.title,
+      meta?.container,
+      meta?.doi && `doi:${meta.doi}`,
+    ]
+      .filter(Boolean)
+      .join(" "),
+    legacy: false,
+  };
+}
+
+function fromReference(reference: Reference): Cited {
   const who = reference.creators || "Unknown";
-  return reference.year ? `${who}, ${reference.year}` : who;
+  return {
+    label: reference.year ? `${who}, ${reference.year}` : who,
+    title: reference.title,
+    detail: [
+      reference.creators,
+      reference.year && `(${reference.year})`,
+      reference.title,
+      reference.container,
+      reference.doi && `doi:${reference.doi}`,
+    ]
+      .filter(Boolean)
+      .join(" "),
+    legacy: true,
+  };
 }

@@ -42,6 +42,9 @@ type Props = {
   onExportDocx: () => void;
   onExportPdf: () => void;
   onManageTags: () => void;
+  /** How many Zotero keys are still in note bodies. Zero hides the command. */
+  legacyCitations: number;
+  onMigrateCitations: () => void;
   onReindex: () => void;
   /** Null when no note is open, which disables the note-specific commands. */
   openNoteId: string | null;
@@ -58,6 +61,8 @@ export default function CommandPalette({
   onExportDocx,
   onExportPdf,
   onManageTags,
+  legacyCitations,
+  onMigrateCitations,
   onReindex,
   openNoteId,
 }: Props) {
@@ -118,6 +123,16 @@ export default function CommandPalette({
       run: onManageTags,
     });
 
+    if (legacyCitations > 0) {
+      out.push({
+        id: "migrate-citations",
+        label: "Turn Zotero citations into sources",
+        group: "Vault",
+        hint: `${legacyCitations} still pointing at Zotero`,
+        run: onMigrateCitations,
+      });
+    }
+
     out.push({
       id: "reindex",
       label: "Rebuild the search index",
@@ -134,6 +149,8 @@ export default function CommandPalette({
     onExportDocx,
     onExportPdf,
     onManageTags,
+    legacyCitations,
+    onMigrateCitations,
     onReindex,
     openNoteId,
   ]);

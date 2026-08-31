@@ -6,11 +6,23 @@ export type CitationMenuHandle = {
   onKeyDown: (event: KeyboardEvent) => boolean;
 };
 
+/**
+ * Something you can cite.
+ *
+ * Two kinds, and the difference matters to the reader: a source already in the
+ * vault is instant and permanent, while a Zotero item has to be copied in
+ * first. Both end up as the same thing — a citation of a source note — so the
+ * distinction disappears the moment one is chosen.
+ */
+export type Candidate =
+  | { kind: "source"; id: string; title: string; detail: string }
+  | { kind: "zotero"; reference: Reference; title: string; detail: string };
+
 type Props = {
-  items: Reference[];
+  items: Candidate[];
   state: "idle" | "loading" | "error";
   error: string | null;
-  onSelect: (reference: Reference) => void;
+  onSelect: (candidate: Candidate) => void;
   ref?: Ref<CitationMenuHandle>;
 };
 
@@ -65,14 +77,14 @@ export default function CitationMenu({
   if (state === "loading" && items.length === 0) {
     return (
       <div className={`${shell} px-3 py-2.5 text-sm text-ink-muted`}>
-        Searching Zotero…
+        Searching…
       </div>
     );
   }
   if (items.length === 0) {
     return (
       <div className={`${shell} px-3 py-2.5 text-sm text-ink-muted`}>
-        No matching reference
+        No matching source
       </div>
     );
   }
@@ -86,30 +98,44 @@ export default function CitationMenu({
     >
       {items.map((item, index) => {
         const isSelected = index === selected;
+        // The heading appears once, above the first item of each kind, so the
+        // list reads as two places rather than one undifferentiated pile.
+        const heading =
+          index === 0 || items[index - 1]!.kind !== item.kind
+            ? item.kind === "source"
+              ? "In this vault"
+              : "Zotero"
+            : null;
         return (
-          <button
-            key={item.key}
-            type="button"
-            role="option"
-            aria-selected={isSelected}
-            data-selected={isSelected}
-            onMouseEnter={() => setSelected(index)}
-            onMouseDown={(e) => e.preventDefault()}
-            onClick={() => onSelect(item)}
-            className={[
-              "block w-full rounded-lg px-2 py-1.5 text-left transition-colors duration-150 ease-out",
-              isSelected ? "bg-accent-bg" : "",
-            ].join(" ")}
-          >
-            <span
-              className={`block truncate text-sm ${isSelected ? "text-accent" : "text-ink"}`}
+          <div key={item.kind === "source" ? item.id : item.reference.key}>
+            {heading && (
+              <p className="px-2 pt-1.5 pb-1 text-[0.6875rem] font-semibold tracking-wide text-ink-muted uppercase">
+                {heading}
+              </p>
+            )}
+            <button
+              type="button"
+              role="option"
+              aria-selected={isSelected}
+              data-selected={isSelected}
+              onMouseEnter={() => setSelected(index)}
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => onSelect(item)}
+              className={[
+                "block w-full rounded-lg px-2 py-1.5 text-left transition-colors duration-150 ease-out",
+                isSelected ? "bg-accent-bg" : "",
+              ].join(" ")}
             >
-              {item.title}
-            </span>
-            <span className="block truncate text-xs text-ink-muted">
-              {[item.creators, item.year].filter(Boolean).join(", ")}
-            </span>
-          </button>
+              <span
+                className={`block truncate text-sm ${isSelected ? "text-accent" : "text-ink"}`}
+              >
+                {item.title}
+              </span>
+              <span className="block truncate text-xs text-ink-muted">
+                {item.detail}
+              </span>
+            </button>
+          </div>
         );
       })}
     </div>

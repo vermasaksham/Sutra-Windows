@@ -436,6 +436,13 @@
   background-color: var(--surface);
 }
 
+/* A citation still pointing at a Zotero item rather than a source note. It
+   works only while Zotero is running, so it is marked — not as an error, but
+   as something with a shelf life. */
+.sutra-citation.is-legacy {
+  border-block-end: 1px dotted var(--highlight);
+}
+
 /*
  * The three voices of a literature note.
  *

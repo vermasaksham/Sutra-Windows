@@ -177,6 +177,22 @@ export const sourcesApi = {
     invoke<NoteSummary>("import_zotero_source", { key }),
 };
 
+/** What migrating the legacy citations did. */
+export type CitationMigration = {
+  /** Zotero key, and the source note it now points at. */
+  migrated: Array<[string, string]>;
+  /** Keys Zotero could not answer for. Left exactly as they were. */
+  unresolved: string[];
+  notesChanged: number;
+};
+
+export const legacyCitationsApi = {
+  /** Zotero keys still in note bodies, with how many notes use each. */
+  find: () => invoke<Record<string, number>>("legacy_citations"),
+  /** Needs Zotero, once. After this the vault does not need it again. */
+  migrate: () => invoke<CitationMigration>("migrate_citations"),
+};
+
 export const tagsApi = {
   /** Every tag as written, with how many notes carry it. */
   list: () => invoke<Record<string, number>>("list_tags"),

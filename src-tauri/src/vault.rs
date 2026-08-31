@@ -6,6 +6,7 @@
 //! renamed and moved freely without a single `[[id]]` link anywhere in the
 //! vault having to change.
 
+use crate::citations;
 use crate::error::{Result, SutraError};
 use crate::frontmatter::{self, Citation, Frontmatter, NoteType, SourceMeta};
 use crate::note;
@@ -719,6 +720,69 @@ impl Vault {
                 .and_then(|s| s.zotero.as_deref())
                 .is_some_and(|k| k == key)
         }))
+    }
+
+    /// Every legacy `[@KEY]` citation in the vault, with how many notes use it.
+    ///
+    /// These only mean something while Zotero is running. Finding them is the
+    /// first half of getting rid of them.
+    pub fn legacy_citations(&self) -> Result<HashMap<String, usize>> {
+        let mut counts: HashMap<String, usize> = HashMap::new();
+        let mut files = Vec::new();
+        collect(&self.root, &self.root, 0, &mut files)?;
+
+        for relative in files {
+            let Ok(contents) = fs::read_to_string(self.root.join(&relative)) else {
+                continue;
+            };
+            let Ok((_, body)) = frontmatter::split(&contents) else {
+                continue;
+            };
+            for key in citations::legacy_keys(body) {
+                *counts.entry(key).or_insert(0) += 1;
+            }
+        }
+        Ok(counts)
+    }
+
+    /// Point every `[@KEY]` at the source note that now stands for it.
+    ///
+    /// `mapping` is Zotero key to source note id, built by the caller because
+    /// producing it needs the network and this does not. Keys absent from the
+    /// mapping are left exactly as they are: a citation nobody can resolve is
+    /// still better than one silently deleted, and the migration can be run
+    /// again once Zotero can answer for them.
+    ///
+    /// Timestamps are untouched. Rewriting a reference into the form that
+    /// means the same thing is not an edit, and stamping `updated` across a
+    /// whole vault would destroy the one signal telling you what you were
+    /// actually working on.
+    pub fn migrate_citations(&self, mapping: &HashMap<String, String>) -> Result<usize> {
+        let mut changed = 0;
+        let mut files = Vec::new();
+        collect(&self.root, &self.root, 0, &mut files)?;
+
+        for relative in files {
+            let path = self.root.join(&relative);
+            let Ok(contents) = fs::read_to_string(&path) else {
+                continue;
+            };
+            let Ok((Some(fm), body)) = frontmatter::split(&contents) else {
+                continue;
+            };
+
+            let mut rewritten = body.to_string();
+            for (key, id) in mapping {
+                rewritten = citations::rewrite(&rewritten, key, id);
+            }
+            if rewritten == body {
+                continue;
+            }
+
+            note::write_atomic(&path, &frontmatter::join(&fm, &rewritten)?)?;
+            changed += 1;
+        }
+        Ok(changed)
     }
 
     /// Take a source's details into the vault, updating rather than duplicating.
@@ -2551,5 +2615,102 @@ mod tests {
         // Two sources with no Zotero key are two sources. Guessing they are one
         // would silently merge someone's notes.
         assert_eq!(vault.list_sources().unwrap().len(), 2);
+    }
+    // ---- legacy citations --------------------------------------------------
+
+    #[test]
+    fn legacy_citations_are_found_across_the_vault() {
+        let vault = TempVault::new();
+        let a = vault.create_note("A", folder("Research")).unwrap();
+        let b = vault.create_note("B", None).unwrap();
+        vault
+            .save_note(&a.summary.id, "A", "As [@ABCD1234] shows, and [@ZZZZ9999].")
+            .unwrap();
+        vault
+            .save_note(&b.summary.id, "B", "Also [@ABCD1234].")
+            .unwrap();
+
+        let counts = vault.legacy_citations().unwrap();
+        assert_eq!(counts.get("ABCD1234"), Some(&2));
+        assert_eq!(counts.get("ZZZZ9999"), Some(&1));
+        assert_eq!(counts.len(), 2);
+    }
+
+    #[test]
+    fn migrating_points_citations_at_source_notes_and_leaves_the_rest() {
+        let vault = TempVault::new();
+        let source = vault
+            .create_source("Zhou 2019", paper("10.1000/xyz"))
+            .unwrap();
+        let note = vault.create_note("Citing", folder("Research")).unwrap();
+        vault
+            .save_note(
+                &note.summary.id,
+                "Citing",
+                "As [@ABCD1234] shows, unlike [@ZZZZ9999].",
+            )
+            .unwrap();
+
+        let mut mapping = HashMap::new();
+        mapping.insert("ABCD1234".to_string(), source.summary.id.clone());
+        let changed = vault.migrate_citations(&mapping).unwrap();
+        assert_eq!(changed, 1);
+
+        let body = vault.read_note(&note.summary.id).unwrap().body;
+        assert!(body.contains(&format!("[@{}]", source.summary.id)));
+        assert!(
+            body.contains("[@ZZZZ9999]"),
+            "a key Zotero could not answer for is left alone, not deleted: {body}"
+        );
+    }
+
+    #[test]
+    fn migrating_does_not_stamp_updated_across_the_vault() {
+        // Rewriting a reference into the form that means the same thing is not
+        // an edit. Stamping every note would destroy the one signal saying
+        // what you were actually working on.
+        let vault = TempVault::new();
+        let source = vault.create_source("S", paper("10.1000/x")).unwrap();
+        let note = vault.create_note("Citing", None).unwrap();
+        vault
+            .save_note(&note.summary.id, "Citing", "See [@ABCD1234].")
+            .unwrap();
+
+        let before = frontmatter::split(
+            &fs::read_to_string(vault.path_for(&note.summary.id).unwrap()).unwrap(),
+        )
+        .unwrap()
+        .0
+        .unwrap();
+
+        let mut mapping = HashMap::new();
+        mapping.insert("ABCD1234".to_string(), source.summary.id.clone());
+        vault.migrate_citations(&mapping).unwrap();
+
+        let after = frontmatter::split(
+            &fs::read_to_string(vault.path_for(&note.summary.id).unwrap()).unwrap(),
+        )
+        .unwrap()
+        .0
+        .unwrap();
+        assert_eq!(before.updated, after.updated);
+        assert_eq!(before.created, after.created);
+    }
+
+    #[test]
+    fn migrating_twice_is_harmless() {
+        let vault = TempVault::new();
+        let source = vault.create_source("S", paper("10.1000/x")).unwrap();
+        let note = vault.create_note("Citing", None).unwrap();
+        vault
+            .save_note(&note.summary.id, "Citing", "See [@ABCD1234].")
+            .unwrap();
+
+        let mut mapping = HashMap::new();
+        mapping.insert("ABCD1234".to_string(), source.summary.id.clone());
+        assert_eq!(vault.migrate_citations(&mapping).unwrap(), 1);
+        // Nothing left to do, so nothing is written.
+        assert_eq!(vault.migrate_citations(&mapping).unwrap(), 0);
+        assert!(vault.legacy_citations().unwrap().is_empty());
     }
 }
