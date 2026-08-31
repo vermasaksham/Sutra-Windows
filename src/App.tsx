@@ -3,8 +3,7 @@ import Editor from "./editor/Editor";
 import Toast from "./components/Toast";
 import { setNavigate, setTitles } from "./editor/wikilink/titleStore";
 import { setSources } from "./editor/citation/citationStore";
-import BacklinksPanel from "./notes/BacklinksPanel";
-import SourcesPanel from "./notes/SourcesPanel";
+import ContextPanel from "./notes/ContextPanel";
 import { citedRefs } from "./notes/citedRefs";
 import SourceDetails from "./notes/SourceDetails";
 import ExportMenu from "./notes/ExportMenu";
@@ -21,6 +20,7 @@ import Sidebar from "./notes/Sidebar";
 import VaultPicker from "./notes/VaultPicker";
 import { buildDocument } from "./export/buildDocument";
 import { useShortcuts } from "./notes/shortcuts";
+import { useWideEnough } from "./notes/useWideEnough";
 import { notesUnder } from "./notes/tree";
 import { taggedWith } from "./notes/tags";
 import { LITERATURE_TEMPLATE } from "./editor/voices/voiceRules";
@@ -35,6 +35,7 @@ import {
   legacyCitationsApi,
   migrationApi,
   notesApi,
+  contextApi,
   sourcesApi,
   vaultApi,
   viewsApi,
@@ -46,6 +47,7 @@ import {
   type NoteType,
   type SearchHit,
   type VaultInfo,
+  type RelatedNote,
   type ViewQuery,
   type ViewResult,
 } from "./vault/api";
@@ -84,6 +86,19 @@ export default function App() {
   > | null>(null);
   const [citationPromptOpen, setCitationPromptOpen] = useState(false);
   const [tagsOpen, setTagsOpen] = useState(false);
+  /** Notes near the open one, with the reason each is near. */
+  const [related, setRelated] = useState<RelatedNote[]>([]);
+  const [siblings, setSiblings] = useState<NoteSummary[]>([]);
+  /**
+   * Whether the fourth column is showing.
+   *
+   * Remembered across sessions: it is a working preference, like the theme,
+   * and re-closing it every launch would be the app forgetting something the
+   * reader has already told it.
+   */
+  const [contextOpen, setContextOpen] = useState(
+    () => localStorage.getItem("sutra.context") !== "closed",
+  );
   /** Every view note, for the rail. */
   const [views, setViews] = useState<NoteSummary[]>([]);
   /** The view the list is showing, if any. Exclusive with a folder or a tag. */
@@ -125,6 +140,13 @@ export default function App() {
   }, [report]);
 
   const note = useNote(selectedId, refresh);
+  // Unconditionally, because it is a hook: `contextOpen && useWideEnough()`
+  // would skip the call whenever the panel is closed, which is exactly the
+  // rule-of-hooks violation that breaks on the next render.
+  const wideEnough = useWideEnough();
+  // Shown only when both the reader wants it and the window can afford it, so
+  // `contextOpen` stays the preference rather than the state.
+  const showContext = contextOpen && wideEnough;
 
   useEffect(() => {
     vaultApi
@@ -190,6 +212,53 @@ export default function App() {
   }, []);
 
   useEffect(refreshFolders, [refreshFolders, notes]);
+
+  useEffect(() => {
+    localStorage.setItem("sutra.context", contextOpen ? "open" : "closed");
+  }, [contextOpen]);
+
+  /**
+   * Load what is near the open note.
+   *
+   * Keyed on the body as well as the id, so typing about a subject brings its
+   * neighbours up rather than waiting for a save. Debounced, because the query
+   * is cheap but not free and nobody needs it to keep pace with a keystroke —
+   * and because a panel that reshuffles mid-sentence is a distraction from the
+   * sentence.
+   */
+  useEffect(() => {
+    const noteId = note.doc?.id;
+    const body = note.doc?.body;
+    if (!noteId || body === undefined || !showContext) {
+      setRelated([]);
+      setSiblings([]);
+      return;
+    }
+    let cancelled = false;
+    const timer = setTimeout(() => {
+      contextApi
+        .related(noteId, body)
+        .then((found) => {
+          if (!cancelled) setRelated(found);
+        })
+        .catch(() => {
+          if (!cancelled) setRelated([]);
+        });
+      contextApi
+        .siblings(noteId)
+        .then((found) => {
+          if (!cancelled) setSiblings(found);
+        })
+        .catch(() => {
+          if (!cancelled) setSiblings([]);
+        });
+    }, 400);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+    // `notes` is in here so writing elsewhere in the vault updates the panel.
+  }, [note.doc?.id, note.doc?.body, showContext, notes]);
 
   const refreshViews = useCallback(() => {
     viewsApi
@@ -466,6 +535,7 @@ export default function App() {
     palette: () => setPaletteOpen(true),
     search: () => setFocusSearch((n) => n + 1),
     capture: () => void capture(),
+    context: () => setContextOpen((open) => !open),
     save: () => void note.flush(),
   });
 
@@ -672,6 +742,21 @@ export default function App() {
           >
             {SAVE_LABEL[note.saveState]}
           </span>
+          {!contextOpen && wideEnough && (
+            // The only way back to a hidden panel other than the shortcut. A
+            // keystroke nobody has been told about is not an affordance.
+            //
+            // Not offered when the window is too narrow to show the panel:
+            // a button that does nothing is worse than no button.
+            <button
+              type="button"
+              onClick={() => setContextOpen(true)}
+              title={`Show what is near this note (${shortcut(MOD, "\\")})`}
+              className="text-xs text-ink-muted transition-colors duration-150 ease-out hover:text-accent"
+            >
+              Context
+            </button>
+          )}
           <ExportMenu
             onDocx={() => void exportDocx()}
             onPdf={exportPdf}
@@ -749,20 +834,6 @@ export default function App() {
               onChange={note.setBody}
               onReady={setEditor}
             />
-            {note.doc.type !== "source" && (
-              <SourcesPanel
-                citations={note.doc.sources ?? []}
-                sources={sources}
-                inlineRefs={citedRefs(note.doc.body)}
-                onChange={(citations) => void setCitations(citations)}
-                onOpen={(id) => void select(id)}
-                onReport={report}
-              />
-            )}
-            <BacklinksPanel
-              backlinks={backlinks}
-              onSelect={(id) => void select(id)}
-            />
           </div>
         ) : (
           <div className="grid h-full place-items-center px-6">
@@ -790,6 +861,25 @@ export default function App() {
           </div>
         )}
       </main>
+
+      {note.doc && showContext && (
+        <ContextPanel
+          citations={note.doc.sources ?? []}
+          sources={sources}
+          inlineRefs={citedRefs(note.doc.body)}
+          // A source note shows its paper above the editor instead; a list of
+          // what it draws on would be asking the wrong question of it.
+          showSources={note.doc.type !== "source"}
+          backlinks={backlinks}
+          related={related}
+          siblings={siblings}
+          folder={note.doc.folder}
+          onChangeCitations={(citations) => void setCitations(citations)}
+          onOpen={(id) => void select(id)}
+          onClose={() => setContextOpen(false)}
+          onReport={report}
+        />
+      )}
 
       {paletteOpen && (
         <CommandPalette

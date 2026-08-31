@@ -12,6 +12,7 @@ mod index;
 mod links;
 mod note;
 mod protocol;
+mod related;
 mod state;
 mod tags;
 mod vault;
@@ -85,6 +86,8 @@ fn main() {
             commands::run_view,
             commands::create_view,
             commands::save_view,
+            commands::related_notes,
+            commands::folder_neighbours,
         ])
         // `generate_context!` pulls in tauri.conf.json at compile time.
         .run(tauri::generate_context!())

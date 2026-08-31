@@ -413,3 +413,37 @@ export function conditionValue(condition: Condition): string {
 export function condition(kind: ConditionKind, value: string): Condition {
   return { [kind]: value } as Condition;
 }
+
+// ---- the context panel -------------------------------------------------------
+
+/** A note near the open one, and the line saying why. */
+export type RelatedNote = {
+  id: string;
+  title: string;
+  folder: string;
+  /**
+   * Why this is here, in one lowercase fragment: "cites Zhou 2019 too",
+   * "shares #sb2se3 and 4 distinctive words".
+   *
+   * Written in Rust from the same reasons that produced the ranking, so the
+   * explanation cannot drift from the thing it explains. Never empty.
+   */
+  reason: string;
+  /** The sum of those reasons. Not shown; useful when tuning. */
+  score: number;
+};
+
+export const contextApi = {
+  /**
+   * Notes near this one.
+   *
+   * The body is sent rather than re-read in Rust, so the panel reflects what
+   * is on screen — including edits autosave has not written yet. Asking what
+   * is near the open note must not depend on whether it has been saved.
+   */
+  related: (id: string, body: string, limit = 5) =>
+    invoke<RelatedNote[]>("related_notes", { id, body, limit }),
+  /** The other notes in this note's folder. */
+  siblings: (id: string, limit = 8) =>
+    invoke<NoteSummary[]>("folder_neighbours", { id, limit }),
+};

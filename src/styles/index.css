@@ -49,6 +49,7 @@
   --shadow-pane: var(--shadow);
   --spacing-rail: var(--rail-width);
   --spacing-list: var(--list-width);
+  --spacing-context: var(--context-width);
 }
 
 @layer base {

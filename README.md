@@ -95,6 +95,8 @@ src/
     NoteList.tsx      Middle column: rows and the search field
     FolderBar.tsx     Where the note lives, and the only way to move it
     BacklinksPanel.tsx
+    ContextPanel.tsx  The fourth column: sources, backlinks, related, siblings
+    useWideEnough.ts  Whether the window can afford four columns
     VaultPicker.tsx   Shown until a vault is chosen
     ConflictPrompt.tsx
   editor/voices/      The three voices of a literature note. Unit tested.
@@ -131,6 +133,7 @@ src-tauri/
     links.rs          Finding [[id]] references in markdown
     citations.rs      Finding and rewriting [@ref] in markdown. Unit tested.
     views.rs          The typed query, and its compiler. Unit tested.
+    related.rs        Why one note is near another, and how near. Unit tested.
     frontmatter.rs    The YAML block, parsing and serialising
     note.rs           Filenames, slugging, atomic writes
     watcher.rs        Debounced filesystem watching
@@ -160,15 +163,20 @@ It replaces the indigo-and-saffron pair the original brief named — a deliberat
 change, recorded at the top of `tokens.css` along with what to do to get the old
 one back.
 
-The window is three panes, after Bear: a rail naming what to look at, a list
-choosing which note, and the page itself. Each sits on its own ground, darkest
-to lightest, so the stack reads as depth rather than as three boxes. There is no
-toolbar — the only chrome is a save state and an export menu floating over the
-top-right of the page. Search lives at the head of the list rather than in an
-overlay. Ctrl+K opens the command palette, Ctrl+Shift+F focuses search, and
-Ctrl+N captures to the Inbox — on macOS the same bindings read ⌘K, ⌘⇧F and ⌘N,
-because Windows is the primary target and macOS is the special case, not the
-other way round.
+The window is four panes: a rail naming what to look at, a list choosing which
+note, the page itself, and a context panel saying what is near it. The first
+three are Bear's, and each sits on its own ground, darkest to lightest, so the
+stack reads as depth rather than as boxes; the fourth is closable and stands
+down on its own when the window is too narrow for it, so the ordinary case is
+still Bear's three.
+
+There is no toolbar — the only chrome is a save state and an export menu
+floating over the top-right of the page. Search lives at the head of the list
+rather than in an overlay. Ctrl+K opens the command palette, Ctrl+Shift+F
+focuses search, Ctrl+N captures to the Inbox, and Ctrl+\ shows or hides the
+context panel. On macOS the same bindings read ⌘K, ⌘⇧F, ⌘N and ⌘\, because
+Windows is the primary target and macOS is the special case, not the other way
+round.
 
 Tags nest on slashes — `#research/materials/sb2se3` — and selecting a parent
 finds everything beneath it. Renaming a tag brings its children with it, and
@@ -213,6 +221,62 @@ three distinct voices. They are decorations on ordinary markdown headings, so
 nothing reaches the file and the separation survives export and every other
 editor. That makes it a convention the app can make obvious but cannot enforce —
 which is the price of a format worth keeping, and worth paying.
+
+## The context panel
+
+The fourth column, on `Ctrl+\`. Four lists, in order of how directly each is a
+fact about the open note: what it draws on, what points at it, what resembles
+it, and what it sits beside. Hidden automatically when the window cannot afford
+four columns, and remembered otherwise.
+
+**Every related note carries a line saying why.** That is the design, not a
+nicety. A ranked list of neighbours with no reasons is one the reader cannot
+check, so the first time it is wrong they have no way to tell — and after that
+they stop looking at the panel entirely. So relatedness here is never a single
+opaque number: it is a set of reasons, each a fact about the two notes that can
+be verified at a glance, and the score is their sum. The sentence under a
+result is the same data the ranking used, not an explanation written afterwards
+to sound plausible.
+
+Five signals feed it:
+
+| Signal | Reads as | Why it is weighted where it is |
+| --- | --- | --- |
+| Shared source | `cites Zhou 2019 too` | The strongest ordinary signal. Two notes citing one paper is a deliberate act by one person about one paper; it cannot happen by accident. |
+| Shared tag | `shares #sb2se3` | Weighted by inverse document frequency, so a tag on three notes says far more than one on half the vault — and scaled, or two ordinary tags would outrank a citation. |
+| Shared project | `both in PhD Thesis` | A project is a note and belonging to one is linking to it, so this falls out of the link table with no project field anywhere in the data model. |
+| Shared link | `both link to Phonon transport` | Co-citation, in the bibliometric sense. |
+| Shared prose | `shares 7 distinctive words` | The weakest and noisiest, so it is scaled down and capped — a long note shares words with everything, and without a ceiling length alone would decide the ranking. |
+
+"Distinctive" is read from FTS5's own term dictionary rather than guessed at: a
+word in no other note finds nothing, a word in a quarter of them says nothing,
+and the window between moves with the vault instead of being a constant someone
+picked once. That window is what stops a shared lab preamble — same instrument,
+same standard, same corrections — from making every run a neighbour of every
+other.
+
+The folder is a tiebreak and never a reason given: `same folder` beside a shared
+source reads as though the folder were the point, and a folder of forty notes
+would otherwise make forty neighbours. Notes already shown elsewhere in the
+panel are left out — a backlink is a backlink, and a source this note cites is
+in Sources with its page and quote. And nothing appears below a floor, because
+a panel padded with weak rows is one the reader learns to ignore, which costs
+more than an empty panel ever could.
+
+**Asking what is near a note changes nothing.** No cached results, no
+`lastViewed`, no stamped `updated` — the same rule as a saved view, tested the
+same way. The panel is also given the body from the editor rather than
+re-reading the file, so typing about a subject brings its neighbours up before
+autosave has run.
+
+The weights are calibrated against one realistic vault, which is evidence and
+not proof. `cargo test judge_the_panel_on_a_realistic_vault -- --ignored
+--nocapture` prints what the panel would say for every note in it; that test is
+ignored because its output is for a person to judge, and a number standing in
+for that judgement would be measuring something else.
+
+Not built, and deliberately: "recently edited", which the note list already
+orders by, and would be the same rows in a second place.
 
 ## Saved views
 
@@ -271,8 +335,8 @@ In: block editor, slash menu, drag handles, real folders, wikilinks, backlinks,
 full-text search, tags, note types, an Inbox, a command palette, KaTeX + mhchem,
 light/dark, autosave, keyboard shortcuts.
 
-In too, since Phase 7: hierarchical tags, note types, sources as notes, and
-saved views.
+In too, since Phase 7: hierarchical tags, note types, sources as notes, saved
+views, and the context panel.
 
 Deliberately out, and not up for discussion: database views, kanban boards,
 relations, filtered tables. Sutra is a writing tool, not a database with a UI.

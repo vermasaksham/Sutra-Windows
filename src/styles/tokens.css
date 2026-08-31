@@ -99,6 +99,10 @@
   --content-width: 700px;
   --rail-width: 13rem;
   --list-width: 19rem;
+  /* Wider than the rail: it holds sentences, not labels. A citation with a
+     page and a reason for a related note both need room to be read rather
+     than truncated. */
+  --context-width: 20rem;
 
   /* Motion — snappy, never floaty. */
   --ease-out: cubic-bezier(0.2, 0, 0, 1);

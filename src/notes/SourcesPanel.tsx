@@ -47,7 +47,7 @@ export default function SourcesPanel({
     onChange(citations.map((c, i) => (i === index ? { ...c, ...patch } : c)));
 
   return (
-    <section className="mt-10">
+    <section>
       <div className="flex items-baseline justify-between">
         <h2 className="text-xs font-semibold tracking-wide text-ink-muted uppercase">
           Sources {citations.length > 0 && `(${citations.length})`}

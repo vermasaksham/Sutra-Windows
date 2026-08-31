@@ -7,6 +7,8 @@ export type Shortcuts = {
   search: () => void;
   /** Capture to the Inbox, with no decisions to make. */
   capture: () => void;
+  /** Show or hide the context panel. */
+  context: () => void;
   save: () => void;
 };
 
@@ -17,14 +19,20 @@ export type Shortcuts = {
  * italic, lists, undo and the rest, and duplicating them here would fight it.
  *
  * The bindings follow section 21: Ctrl+K is the command palette, Ctrl+Shift+F
- * is search, Ctrl+N captures. Ctrl+K used to open search directly, so for a
+ * is search, Ctrl+N captures, Ctrl+\ shows or hides the context panel. Ctrl+K used to open search directly, so for a
  * while the wrong reflex will open the palette instead — which is why the
  * palette's first offer for any typed text is to search the vault for it.
  *
  * Every binding here uses a modifier, so none of them can steal a keystroke
  * from someone mid-sentence.
  */
-export function useShortcuts({ palette, search, capture, save }: Shortcuts) {
+export function useShortcuts({
+  palette,
+  search,
+  capture,
+  context,
+  save,
+}: Shortcuts) {
   useEffect(() => {
     function onKey(event: KeyboardEvent) {
       // Ctrl on Windows and Linux, Cmd on macOS. Accepting either everywhere
@@ -42,6 +50,9 @@ export function useShortcuts({ palette, search, capture, save }: Shortcuts) {
       } else if (key === "n" && !event.shiftKey) {
         event.preventDefault();
         capture();
+      } else if (key === "\\") {
+        event.preventDefault();
+        context();
       } else if (key === "s") {
         // The app autosaves, so this exists for the muscle memory rather than
         // the need — and to stop the browser's own save dialog appearing.
@@ -51,5 +62,5 @@ export function useShortcuts({ palette, search, capture, save }: Shortcuts) {
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [palette, search, capture, save]);
+  }, [palette, search, capture, context, save]);
 }

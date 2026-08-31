@@ -7,16 +7,18 @@
 
 use crate::error::Result;
 use crate::links;
+use crate::related::{self, Candidate, Reason, Related};
 use crate::vault::{NoteSummary, Vault};
 use rusqlite::{Connection, params};
 use serde::Serialize;
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::sync::Mutex;
 
 /// Bumped whenever the schema changes. On mismatch the index is dropped and
 /// rebuilt rather than migrated — migrations are for data you cannot recreate,
 /// and this is not that.
-const SCHEMA_VERSION: i32 = 7;
+const SCHEMA_VERSION: i32 = 8;
 
 const SCHEMA: &str = r#"
 CREATE TABLE notes (
@@ -81,6 +83,12 @@ CREATE VIRTUAL TABLE notes_fts USING fts5(
     tags,
     tokenize = "unicode61 remove_diacritics 2"
 );
+
+-- FTS5's own term dictionary, exposed as a table: (term, doc, cnt). Not
+-- storage — a view over the index that already exists — and the only honest
+-- source of "how many notes use this word", which is what makes a shared word
+-- weighable rather than merely countable.
+CREATE VIRTUAL TABLE notes_vocab USING fts5vocab(notes_fts, 'row');
 
 CREATE TABLE links (
     source TEXT NOT NULL,
@@ -309,6 +317,176 @@ impl Index {
         })
     }
 
+    /// Notes near this one, and why.
+    ///
+    /// Five signals, gathered separately and merged: shared sources, shared
+    /// tags weighted by how rare they are, shared links (with a link to a
+    /// project note singled out), shared distinctive words, and the folder as
+    /// a tiebreak. Each contributes a [`Reason`] the panel can show, so the
+    /// ranking and the explanation are the same data rather than two things
+    /// that can disagree.
+    ///
+    /// Notes already shown elsewhere in the panel are left out: a note that
+    /// links to this one is a backlink, and repeating it here as "related"
+    /// would fill a short list with rows the reader has already seen.
+    pub fn related(&self, id: &str, body: &str, limit: usize) -> Result<Vec<Related>> {
+        let guard = self.conn.lock().unwrap_or_else(|e| e.into_inner());
+
+        let Some((folder, tags)) = note_facts(&guard, id)? else {
+            return Ok(Vec::new());
+        };
+        let total: usize =
+            guard.query_row("SELECT COUNT(*) FROM notes", [], |r| r.get::<_, i64>(0))? as usize;
+
+        // Everything already visible in the panel, plus the note itself.
+        let mut skip: HashSet<String> = HashSet::from([id.to_string()]);
+        skip.extend(neighbours(&guard, id)?);
+        skip.extend(cited(&guard, id)?);
+
+        let mut found: HashMap<String, Vec<Reason>> = HashMap::new();
+        let mut note = |id: String, reason: Reason, skip: &HashSet<String>| {
+            if !skip.contains(&id) {
+                found.entry(id).or_default().push(reason);
+            }
+        };
+
+        // ---- shared sources ----
+        let mut stmt = guard.prepare(
+            "SELECT other.note_id, COALESCE(source.title, '')
+               FROM note_sources mine
+               JOIN note_sources other ON other.source_id = mine.source_id
+               LEFT JOIN notes source ON source.id = mine.source_id
+              WHERE mine.note_id = ?1 AND other.note_id <> ?1",
+        )?;
+        for row in stmt.query_map([id], |r| {
+            Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
+        })? {
+            let (other, title) = row?;
+            note(other, Reason::Source { title }, &skip);
+        }
+
+        // ---- shared tags ----
+        for tag in &tags {
+            let carrying: usize = guard.query_row(
+                "SELECT COUNT(*) FROM note_tags WHERE tag = ?1",
+                [tag],
+                |r| r.get::<_, i64>(0),
+            )? as usize;
+            let idf = related::idf(total, carrying);
+            let mut stmt =
+                guard.prepare("SELECT note_id FROM note_tags WHERE tag = ?1 AND note_id <> ?2")?;
+            for row in stmt.query_map(params![tag, id], |r| r.get::<_, String>(0))? {
+                note(
+                    row?,
+                    Reason::Tag {
+                        tag: tag.clone(),
+                        idf,
+                    },
+                    &skip,
+                );
+            }
+        }
+
+        // ---- shared links ----
+        // Both pointing at a third note. A link to a project note is reported
+        // as membership, because "both in PhD Thesis" is what it means.
+        let mut stmt = guard.prepare(
+            "SELECT other.source, COALESCE(target.title, ''), COALESCE(target.note_type, '')
+               FROM links mine
+               JOIN links other ON other.target = mine.target
+               LEFT JOIN notes target ON target.id = mine.target
+              WHERE mine.source = ?1 AND other.source <> ?1",
+        )?;
+        for row in stmt.query_map([id], |r| {
+            Ok((
+                r.get::<_, String>(0)?,
+                r.get::<_, String>(1)?,
+                r.get::<_, String>(2)?,
+            ))
+        })? {
+            let (other, title, kind) = row?;
+            // A link to a note the index has never seen has no title to show,
+            // so it is a link that says nothing and is not a reason.
+            if title.is_empty() {
+                continue;
+            }
+            let reason = if kind == "project" {
+                Reason::Project { title }
+            } else {
+                Reason::CoLink { title }
+            };
+            note(other, reason, &skip);
+        }
+
+        // ---- shared distinctive words ----
+        let mut shared: HashMap<String, (usize, f64)> = HashMap::new();
+        for (term, idf) in distinctive(&guard, body, total)? {
+            let mut stmt = guard.prepare(
+                "SELECT id FROM notes_fts WHERE notes_fts MATCH ?1 ORDER BY rank LIMIT ?2",
+            )?;
+            let quoted = format!("\"{}\"", term.replace('"', "\"\""));
+            for row in
+                stmt.query_map(params![quoted, PER_TERM as i64], |r| r.get::<_, String>(0))?
+            {
+                let other = row?;
+                if other == id || skip.contains(&other) {
+                    continue;
+                }
+                let entry = shared.entry(other).or_insert((0, 0.0));
+                entry.0 += 1;
+                entry.1 += idf;
+            }
+        }
+        for (other, (count, idf)) in shared {
+            note(other, Reason::Terms { count, idf }, &skip);
+        }
+
+        // ---- the folder, as a tiebreak ----
+        for id in found.keys().cloned().collect::<Vec<_>>() {
+            let same: bool = guard.query_row(
+                "SELECT folder = ?2 FROM notes WHERE id = ?1",
+                params![id, folder],
+                |r| r.get(0),
+            )?;
+            if same {
+                found.entry(id).or_default().push(Reason::Folder);
+            }
+        }
+
+        // ---- rank ----
+        let mut candidates = Vec::with_capacity(found.len());
+        for (id, reasons) in found {
+            let Ok((title, folder)) = guard.query_row(
+                "SELECT title, folder FROM notes WHERE id = ?1",
+                [&id],
+                |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)),
+            ) else {
+                continue;
+            };
+            candidates.push(Candidate {
+                id,
+                title,
+                folder,
+                reasons,
+            });
+        }
+        Ok(related::rank(candidates, limit))
+    }
+
+    /// The other notes in this note's folder, most recently edited first.
+    pub fn folder_neighbours(&self, id: &str, limit: usize) -> Result<Vec<NoteSummary>> {
+        let guard = self.conn.lock().unwrap_or_else(|e| e.into_inner());
+        let mut stmt = guard.prepare(
+            "SELECT n.id, n.note_type, n.title, n.folder, n.position, n.tags, n.icon, n.cover, \
+                    n.excerpt, n.source, n.sources, n.updated \
+               FROM notes n \
+              WHERE n.folder = (SELECT folder FROM notes WHERE id = ?1) AND n.id <> ?1 \
+              ORDER BY n.updated DESC LIMIT ?2",
+        )?;
+        let rows = stmt.query_map(params![id, limit as i64], row_to_summary)?;
+        Ok(rows.filter_map(std::result::Result::ok).collect())
+    }
+
     /// Notes that link to `id`.
     pub fn backlinks(&self, id: &str) -> Result<Vec<Backlink>> {
         let guard = self.conn.lock().unwrap_or_else(|e| e.into_inner());
@@ -330,6 +508,104 @@ impl Index {
         })?;
         Ok(rows.filter_map(std::result::Result::ok).collect())
     }
+}
+
+/// How many notes one shared word may contribute.
+///
+/// Bounds the work: a dozen terms, each returning at most this many
+/// best-matching notes, is a few hundred rows however large the vault is. The
+/// rows are ordered by FTS5's own relevance, so the cap drops the weakest
+/// matches rather than an arbitrary slice.
+const PER_TERM: usize = 40;
+
+/// How many of a note's words are worth asking about.
+const TERM_BUDGET: usize = 12;
+
+/// A note's folder and tags, or `None` if the index has never seen it.
+fn note_facts(conn: &Connection, id: &str) -> Result<Option<(String, Vec<String>)>> {
+    let mut stmt = conn.prepare("SELECT folder FROM notes WHERE id = ?1")?;
+    let Ok(folder) = stmt.query_row([id], |r| r.get::<_, String>(0)) else {
+        return Ok(None);
+    };
+    let mut stmt = conn.prepare("SELECT tag FROM note_tags WHERE note_id = ?1")?;
+    let tags = stmt
+        .query_map([id], |r| r.get::<_, String>(0))?
+        .filter_map(std::result::Result::ok)
+        .collect();
+    Ok(Some((folder, tags)))
+}
+
+/// Every note directly linked to or from `id`.
+///
+/// These are already in the panel as backlinks, or visible in the prose as
+/// links. Repeating them under "related" would spend a short list on rows the
+/// reader has seen.
+fn neighbours(conn: &Connection, id: &str) -> Result<Vec<String>> {
+    let mut stmt = conn.prepare(
+        "SELECT target FROM links WHERE source = ?1
+         UNION SELECT source FROM links WHERE target = ?1",
+    )?;
+    Ok(stmt
+        .query_map([id], |r| r.get::<_, String>(0))?
+        .filter_map(std::result::Result::ok)
+        .collect())
+}
+
+/// The sources `id` cites.
+///
+/// Already listed in the panel's own Sources section, with the page and the
+/// quote. A source note reappearing under "related" because its title happens
+/// to share a word is the same row twice.
+fn cited(conn: &Connection, id: &str) -> Result<Vec<String>> {
+    let mut stmt = conn.prepare("SELECT source_id FROM note_sources WHERE note_id = ?1")?;
+    Ok(stmt
+        .query_map([id], |r| r.get::<_, String>(0))?
+        .filter_map(std::result::Result::ok)
+        .collect())
+}
+
+/// The words in `body` worth looking for elsewhere, with what each is worth.
+///
+/// Distinctive means "used here and in a few other notes". A word in no other
+/// note finds nothing; a word in most of them says nothing about either note.
+/// The window between is where the useful signal lives, and it is read from
+/// FTS5's own term dictionary rather than guessed at, so it moves with the
+/// vault instead of being a constant someone picked once.
+fn distinctive(conn: &Connection, body: &str, total: usize) -> Result<Vec<(String, f64)>> {
+    // Above this share of the vault a word is furniture, not a subject.
+    let ceiling = (total / 4).max(2);
+    let mut scored: Vec<(usize, String, f64)> = Vec::new();
+    let mut stmt = conn.prepare("SELECT doc FROM notes_vocab WHERE term = ?1")?;
+    for term in related::terms(body) {
+        let carrying = stmt
+            .query_row([&term], |r| r.get::<_, i64>(0))
+            .unwrap_or(0)
+            .max(0) as usize;
+        if carrying == 0 || carrying > ceiling {
+            continue;
+        }
+        // Two buckets, and the first is spent before the second is touched.
+        //
+        // A word in two or more notes is certainly in one other than this
+        // one. A word in exactly one note usually *is* this one — worth
+        // nothing — but not always: while a note is being typed its edits are
+        // not in the index, so a word it now shares with one other note counts
+        // only that other note. Preferring the first bucket means the common
+        // case never spends its budget on words that match nothing, and the
+        // unsaved case is still served by what is left.
+        let bucket = usize::from(carrying < 2);
+        scored.push((bucket, term, related::idf(total, carrying)));
+    }
+    scored.sort_by(|a, b| {
+        a.0.cmp(&b.0)
+            .then_with(|| b.2.partial_cmp(&a.2).unwrap_or(std::cmp::Ordering::Equal))
+            .then_with(|| a.1.cmp(&b.1))
+    });
+    scored.truncate(TERM_BUDGET);
+    Ok(scored
+        .into_iter()
+        .map(|(_, term, idf)| (term, idf))
+        .collect())
 }
 
 fn schema_matches(conn: &Connection) -> bool {
@@ -896,6 +1172,35 @@ mod tests {
             .collect()
     }
 
+    /// Every markdown file in the vault: what it says and when it was last
+    /// written. The index database is deliberately not included — it is
+    /// derived, and SQLite may touch it freely.
+    ///
+    /// Shared by the tests that prove reading the vault does not change it.
+    fn snapshot(
+        root: &std::path::Path,
+    ) -> Vec<(std::path::PathBuf, Vec<u8>, std::time::SystemTime)> {
+        let mut out = Vec::new();
+        let mut stack = vec![root.to_path_buf()];
+        while let Some(dir) = stack.pop() {
+            for entry in std::fs::read_dir(&dir).unwrap().flatten() {
+                let path = entry.path();
+                if path.is_dir() {
+                    stack.push(path);
+                } else if path.extension().is_some_and(|e| e == "md") {
+                    let meta = std::fs::metadata(&path).unwrap();
+                    out.push((
+                        path.clone(),
+                        std::fs::read(&path).unwrap(),
+                        meta.modified().unwrap(),
+                    ));
+                }
+            }
+        }
+        out.sort_by(|a, b| a.0.cmp(&b.0));
+        out
+    }
+
     /// A note at a folder, with tags, indexed.
     fn note(f: &Fixture, folder: &str, title: &str, tags: &[&str], body: &str) -> String {
         let doc = f
@@ -1097,33 +1402,6 @@ mod tests {
             )
             .unwrap();
 
-        /// Every markdown file in the vault: what it says and when it was last
-        /// written. The index database is deliberately not included — it is
-        /// derived, and SQLite may touch it freely.
-        fn snapshot(
-            root: &std::path::Path,
-        ) -> Vec<(std::path::PathBuf, Vec<u8>, std::time::SystemTime)> {
-            let mut out = Vec::new();
-            let mut stack = vec![root.to_path_buf()];
-            while let Some(dir) = stack.pop() {
-                for entry in std::fs::read_dir(&dir).unwrap().flatten() {
-                    let path = entry.path();
-                    if path.is_dir() {
-                        stack.push(path);
-                    } else if path.extension().is_some_and(|e| e == "md") {
-                        let meta = std::fs::metadata(&path).unwrap();
-                        out.push((
-                            path.clone(),
-                            std::fs::read(&path).unwrap(),
-                            meta.modified().unwrap(),
-                        ));
-                    }
-                }
-            }
-            out.sort_by(|a, b| a.0.cmp(&b.0));
-            out
-        }
-
         f.index.rebuild(&f.vault).unwrap();
         let before = snapshot(&f.root);
         assert_eq!(before.len(), 4, "three notes and the view itself");
@@ -1243,5 +1521,581 @@ mod tests {
             plan.contains("note_tags_by_tag"),
             "the tag term should seek the tag index this step added:\n{plan}"
         );
+    }
+    // ---- the context panel ---------------------------------------------------
+
+    /// The reasons given for each neighbour of `id`, best first.
+    fn near(f: &Fixture, id: &str) -> Vec<(String, String)> {
+        let body = f.vault.read_note(id).unwrap().body;
+        f.index
+            .related(id, &body, 5)
+            .unwrap()
+            .into_iter()
+            .map(|r| (r.title, r.reason))
+            .collect()
+    }
+
+    #[test]
+    fn a_shared_source_makes_two_notes_related_and_says_so() {
+        let f = Fixture::new();
+        let source = f
+            .vault
+            .create_source(
+                "Zhou 2019",
+                crate::frontmatter::SourceMeta {
+                    year: Some("2019".into()),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+
+        let cites = |title: &str| {
+            let id = note(&f, "Research", title, &[], "Some prose.");
+            f.vault
+                .set_citations(
+                    &id,
+                    vec![crate::frontmatter::Citation {
+                        id: source.summary.id.clone(),
+                        page: None,
+                        quote: None,
+                        captured: None,
+                    }],
+                )
+                .unwrap();
+            id
+        };
+        let a = cites("Phonon transport");
+        cites("Seebeck coefficient");
+        note(
+            &f,
+            "Research",
+            "Nothing to do with it",
+            &[],
+            "Unrelated prose.",
+        );
+        f.index.rebuild(&f.vault).unwrap();
+
+        let found = near(&f, &a);
+        assert_eq!(
+            found.len(),
+            1,
+            "the unrelated note should not be near: {found:?}"
+        );
+        assert_eq!(found[0].0, "Seebeck coefficient");
+        assert!(
+            found[0].1.starts_with("cites Zhou 2019 too"),
+            "the reason should name the paper: {:?}",
+            found[0].1
+        );
+    }
+
+    #[test]
+    fn a_rare_tag_beats_a_common_one_in_the_panel() {
+        // The ordering that makes the panel worth reading. Both notes share a
+        // tag with the open one; only one of those tags says anything.
+        let f = Fixture::new();
+        // `#note` is on everything, `#sbsei` on two.
+        for i in 0..12 {
+            note(&f, "Research", &format!("Filler {i}"), &["note"], "Filler.");
+        }
+        let open = note(&f, "Research", "Open note", &["note", "sbsei"], "Open.");
+        let rare = note(
+            &f,
+            "Research",
+            "The rare neighbour",
+            &["note", "sbsei"],
+            "Other.",
+        );
+        let common = note(&f, "Research", "A common neighbour", &["note"], "Other.");
+        let _ = (rare, common);
+        f.index.rebuild(&f.vault).unwrap();
+
+        let found = near(&f, &open);
+        assert_eq!(found[0].0, "The rare neighbour");
+        assert_eq!(found[0].1, "shares #sbsei");
+        // And the notes sharing only `#note` are below the floor entirely.
+        assert!(
+            !found.iter().any(|(title, _)| title == "A common neighbour"),
+            "a tag on every note is not a reason: {found:?}"
+        );
+    }
+
+    #[test]
+    fn a_backlink_is_not_repeated_as_a_related_note() {
+        // It is already in the panel one section up. A short list spent on
+        // rows the reader has just seen is a list that stops being read.
+        let f = Fixture::new();
+        // Filler, so `#sb2se3` is a rare tag rather than one the whole vault
+        // carries — which would say nothing, as
+        // `a_word_in_every_note_is_not_a_reason` pins.
+        for i in 0..12 {
+            note(&f, "Filler", &format!("Filler {i}"), &[], "Filler prose.");
+        }
+        let open = note(&f, "Research", "Open note", &["sb2se3"], "Open.");
+        let linking = note(
+            &f,
+            "Research",
+            "Links here",
+            &["sb2se3"],
+            &format!("As in [[{open}]]."),
+        );
+        note(&f, "Research", "Merely tagged", &["sb2se3"], "Other.");
+        f.index.rebuild(&f.vault).unwrap();
+
+        let found = near(&f, &open);
+        let titles: Vec<&str> = found.iter().map(|(t, _)| t.as_str()).collect();
+        assert!(titles.contains(&"Merely tagged"), "{found:?}");
+        assert!(!titles.contains(&"Links here"), "{found:?}");
+        // But it *is* a backlink, so it has not been lost.
+        assert_eq!(f.index.backlinks(&open).unwrap()[0].id, linking);
+    }
+
+    #[test]
+    fn two_notes_in_the_same_project_are_related_by_it() {
+        // A project is a note, and belonging to one is linking to it. That
+        // gives the panel "both in PhD Thesis" with no project field anywhere
+        // in the data model.
+        let f = Fixture::new();
+        let project = f.vault.create_note("PhD Thesis", None).unwrap().summary.id;
+        f.vault
+            .set_type(&project, crate::frontmatter::NoteType::Project)
+            .unwrap();
+
+        let a = note(
+            &f,
+            "Research",
+            "Chapter 2 work",
+            &[],
+            &format!("Part of [[{project}]]."),
+        );
+        note(
+            &f,
+            "Elsewhere",
+            "Chapter 3 work",
+            &[],
+            &format!("Part of [[{project}]]."),
+        );
+        f.index.rebuild(&f.vault).unwrap();
+
+        let found = near(&f, &a);
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].0, "Chapter 3 work");
+        // Leading, because it is the strongest reason. A second clause about
+        // shared words is legitimate and not what this test is about.
+        assert!(
+            found[0].1.starts_with("both in PhD Thesis"),
+            "{:?}",
+            found[0].1
+        );
+    }
+
+    #[test]
+    fn a_plain_shared_link_says_what_they_both_point_at() {
+        let f = Fixture::new();
+        let target = note(&f, "Research", "Phonon transport", &[], "Phonons.");
+        let a = note(&f, "Research", "One", &[], &format!("See [[{target}]]."));
+        note(&f, "Research", "Two", &[], &format!("Also [[{target}]]."));
+        f.index.rebuild(&f.vault).unwrap();
+
+        let found = near(&f, &a);
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].0, "Two");
+        assert!(
+            found[0].1.starts_with("both link to Phonon transport"),
+            "{:?}",
+            found[0].1
+        );
+    }
+
+    #[test]
+    fn shared_prose_finds_a_neighbour_nothing_else_connects() {
+        // The signal that earns the panel its keep: two notes in different
+        // folders, no shared tag, no shared source, no link between them —
+        // found because they are about the same thing.
+        let f = Fixture::new();
+        for i in 0..10 {
+            note(
+                &f,
+                "Filler",
+                &format!("Filler {i}"),
+                &[],
+                "Ordinary prose about ordinary things.",
+            );
+        }
+        let a = note(
+            &f,
+            "Research",
+            "Ribbon anisotropy",
+            &[],
+            "Quasi-1D ribbons align along the crystallographic axis, so boundary scattering dominates.",
+        );
+        note(
+            &f,
+            "Elsewhere",
+            "Scattering regimes",
+            &[],
+            "Boundary scattering dominates below the Debye temperature in quasi-1D ribbons.",
+        );
+        f.index.rebuild(&f.vault).unwrap();
+
+        let found = near(&f, &a);
+        assert_eq!(found[0].0, "Scattering regimes");
+        assert!(found[0].1.contains("distinctive word"), "{found:?}");
+    }
+
+    #[test]
+    fn a_word_in_every_note_is_not_a_reason() {
+        // Without the document-frequency window, the panel would find a
+        // neighbour for every note and every one of them would be the same
+        // four notes with the longest bodies.
+        let f = Fixture::new();
+        for i in 0..12 {
+            note(
+                &f,
+                "Research",
+                &format!("Sample {i}"),
+                &[],
+                "Measurement recorded during the experiment.",
+            );
+        }
+        let a = note(
+            &f,
+            "Research",
+            "Open note",
+            &[],
+            "Measurement recorded during the experiment.",
+        );
+        f.index.rebuild(&f.vault).unwrap();
+        assert!(
+            near(&f, &a).is_empty(),
+            "words shared by the whole vault say nothing: {:?}",
+            near(&f, &a)
+        );
+    }
+
+    #[test]
+    fn a_boilerplate_preamble_does_not_make_every_note_a_neighbour() {
+        // The document-frequency ceiling's real job. Lab notes carry a shared
+        // preamble — the same instrument, the same standard, the same
+        // corrections — and it is long enough that its words add up past the
+        // floor if nothing stops them. Every note would then be "related" to
+        // every other by a paragraph none of them is about.
+        let f = Fixture::new();
+        let preamble = "Instrument calibrated against the sapphire standard before each \
+                        measurement, baseline correction applied, argon purge maintained \
+                        throughout, ambient humidity logged separately";
+        for i in 0..8 {
+            note(&f, "Research", &format!("Run {i}"), &[], preamble);
+        }
+        for i in 0..16 {
+            note(
+                &f,
+                "Admin",
+                &format!("Other {i}"),
+                &[],
+                "Nothing in common.",
+            );
+        }
+        let open = note(&f, "Research", "Today's run", &[], preamble);
+        f.index.rebuild(&f.vault).unwrap();
+
+        let found = near(&f, &open);
+        assert!(
+            found.is_empty(),
+            "a shared preamble is not a shared subject: {found:?}"
+        );
+    }
+
+    #[test]
+    fn the_panel_reads_the_body_it_is_given_rather_than_the_saved_file() {
+        // Typing about a subject should surface neighbours before autosave
+        // has run. Asking a question about the open note must not depend on
+        // whether it has been written to disk yet.
+        let f = Fixture::new();
+        for i in 0..10 {
+            note(
+                &f,
+                "Filler",
+                &format!("Filler {i}"),
+                &[],
+                "Ordinary prose here.",
+            );
+        }
+        note(
+            &f,
+            "Elsewhere",
+            "Neumann-Kopp rule",
+            &[],
+            "Additivity of heat capacities across constituent binaries.",
+        );
+        let a = note(&f, "Research", "Empty so far", &[], "");
+        f.index.rebuild(&f.vault).unwrap();
+
+        assert!(near(&f, &a).is_empty(), "nothing typed yet");
+        let unsaved = "Additivity of heat capacities, per the constituent binaries.";
+        let found = f.index.related(&a, unsaved, 5).unwrap();
+        assert_eq!(found[0].title, "Neumann-Kopp rule");
+    }
+
+    #[test]
+    fn asking_what_is_near_a_note_changes_nothing() {
+        // The same rule as a saved view, for the same reason. A panel that
+        // recorded what it had computed would make reading a note edit it.
+        let f = Fixture::new();
+        let a = note(&f, "Research", "Alpha", &["sb2se3"], "Selenide ribbons.");
+        note(&f, "Research", "Beta", &["sb2se3"], "Selenide chains.");
+        f.index.rebuild(&f.vault).unwrap();
+
+        let before = snapshot(&f.root);
+        for _ in 0..10 {
+            f.index.related(&a, "Selenide ribbons.", 5).unwrap();
+            f.index.folder_neighbours(&a, 5).unwrap();
+        }
+        assert_eq!(
+            before,
+            snapshot(&f.root),
+            "the context panel rewrote a note"
+        );
+    }
+
+    #[test]
+    fn the_folder_list_is_siblings_and_never_the_note_itself() {
+        let f = Fixture::new();
+        let a = note(&f, "Research/Sb2Se3", "Open note", &[], "");
+        note(&f, "Research/Sb2Se3", "A sibling", &[], "");
+        note(&f, "Research", "A parent's note", &[], "");
+        f.index.rebuild(&f.vault).unwrap();
+
+        let titles: Vec<String> = f
+            .index
+            .folder_neighbours(&a, 10)
+            .unwrap()
+            .into_iter()
+            .map(|n| n.title)
+            .collect();
+        assert_eq!(titles, ["A sibling"]);
+    }
+
+    #[test]
+    fn a_note_the_index_has_never_seen_has_no_neighbours_rather_than_an_error() {
+        let f = Fixture::new();
+        assert!(
+            f.index
+                .related("01HQNOTAREALID", "prose", 5)
+                .unwrap()
+                .is_empty()
+        );
+        assert!(
+            f.index
+                .folder_neighbours("01HQNOTAREALID", 5)
+                .unwrap()
+                .is_empty()
+        );
+    }
+    /// A vault shaped like real work, for judging the panel rather than
+    /// asserting about it.
+    ///
+    /// Thirty-odd notes across four strands of a materials-chemistry project,
+    /// with the overlaps a real vault has: the same paper cited from three
+    /// places, a method tag spanning strands, prose that repeats vocabulary
+    /// without repeating tags. The `#[ignore]`d test below prints what the
+    /// panel would say for each, which is the only way to answer "is at least
+    /// one of these genuinely useful" — that is a judgement, and a number
+    /// asserting it would be a number pretending to be one.
+    fn realistic_vault(f: &Fixture) {
+        let paper = |title: &str, year: &str| {
+            f.vault
+                .create_source(
+                    title,
+                    crate::frontmatter::SourceMeta {
+                        year: Some(year.into()),
+                        ..Default::default()
+                    },
+                )
+                .unwrap()
+                .summary
+                .id
+        };
+        let zhou = paper("Zhou 2019 — quasi-1D Sb2Se3 ribbons", "2019");
+        let chen = paper("Chen 2021 — Seebeck in selenides", "2021");
+        let liu = paper("Liu 2018 — DSC of antimony chalcogenides", "2018");
+
+        let cite = |id: &str, source: &str, page: &str| {
+            f.vault
+                .set_citations(
+                    id,
+                    vec![crate::frontmatter::Citation {
+                        id: source.to_string(),
+                        page: Some(page.into()),
+                        quote: None,
+                        captured: None,
+                    }],
+                )
+                .unwrap();
+        };
+
+        let thesis = f.vault.create_note("PhD Thesis", None).unwrap().summary.id;
+        f.vault
+            .set_type(&thesis, crate::frontmatter::NoteType::Project)
+            .unwrap();
+
+        // ---- thermodynamics ----
+        let cp = note(
+            f,
+            "Research/Sb2Se3/Thermodynamics",
+            "Sb2Se3 heat capacity",
+            &["sb2se3", "method/dsc"],
+            "Cp fitted as a + bT + cT^2 + dT^-2 over 300-800 K. The Neumann-Kopp \
+             estimate from the constituent binaries sits 4% low at the top of the range.",
+        );
+        cite(&cp, &liu, "112");
+        note(
+            f,
+            "Research/Thermodynamics",
+            "Neumann-Kopp rule",
+            &["method/dsc"],
+            "Additivity of heat capacities across the constituent binaries. Reliable to \
+             a few percent for chalcogenides; worse where a phase transition intervenes.",
+        );
+        let dsc = note(
+            f,
+            "Research/Sb2Se3/Thermodynamics",
+            "DSC run 2026-08-27",
+            &["sb2se3", "method/dsc"],
+            "Ramped 300-800 K at 10 K/min under argon. Baseline drift corrected against \
+             the sapphire standard. Cp agrees with the fitted polynomial.",
+        );
+        cite(&dsc, &liu, "108");
+
+        // ---- transport ----
+        let phonon = note(
+            f,
+            "Research/Sb2Se3/Transport",
+            "Phonon transport in ribbons",
+            &["sb2se3", "method/ppms"],
+            &format!(
+                "Quasi-1D ribbons align along the crystallographic axis, so boundary \
+                 scattering dominates over Umklapp below the Debye temperature. Part of [[{thesis}]]."
+            ),
+        );
+        cite(&phonon, &zhou, "6");
+        let seebeck = note(
+            f,
+            "Research/Sb2Se3/Transport",
+            "Seebeck coefficient",
+            &["sb2se3", "method/ppms"],
+            &format!(
+                "Seebeck rises with the ribbon axis alignment. Boundary scattering again, \
+                 read through the carrier concentration. Part of [[{thesis}]]."
+            ),
+        );
+        cite(&seebeck, &chen, "3");
+        note(
+            f,
+            "Research/Sb2Se3/Transport",
+            "Carrier concentration",
+            &["sb2se3", "method/hall"],
+            "Hall measurements put the carrier concentration near 10^17 per cubic centimetre, \
+             which is what the Seebeck reading assumes.",
+        );
+
+        // ---- a different material, same methods ----
+        note(
+            f,
+            "Research/SbSeI",
+            "SbSeI heat capacity",
+            &["sbsei", "method/dsc"],
+            "Cp measured the same way as the selenide. Neumann-Kopp from the constituent \
+             binaries again, and again a few percent low.",
+        );
+        note(
+            f,
+            "Research/SbSeI",
+            "SbSeI ribbons",
+            &["sbsei", "method/xrd"],
+            "Quasi-1D ribbons here too, along a different crystallographic axis. Boundary \
+             scattering should follow.",
+        );
+
+        // ---- reading ----
+        let reading = note(
+            f,
+            "Research/Reading",
+            "Reading — Zhou 2019",
+            &["sb2se3", "unread"],
+            "Source says the ribbon axis sets the thermal conductivity. My question: does \
+             that survive at the grain sizes we actually get?",
+        );
+        cite(&reading, &zhou, "6");
+
+        // ---- filler, so the common words are common ----
+        for i in 0..20 {
+            note(
+                f,
+                "Admin",
+                &format!("Group meeting {i}"),
+                &["meeting"],
+                "Discussed progress and next steps. Actions recorded for the week.",
+            );
+        }
+        f.index.rebuild(&f.vault).unwrap();
+    }
+
+    /// Run with `cargo test judge -- --ignored --nocapture` to read the panel.
+    ///
+    /// Ignored because its output is for a person, not an assertion. The
+    /// step's proof — "at least one genuinely useful neighbour in the top
+    /// five" — is a judgement, and writing a number that stands in for one
+    /// would be measuring something else and calling it the same thing.
+    #[test]
+    #[ignore = "prints the panel for a person to judge"]
+    fn judge_the_panel_on_a_realistic_vault() {
+        let f = Fixture::new();
+        realistic_vault(&f);
+        for summary in f.index.all_notes().unwrap() {
+            if summary.folder.starts_with("Admin") || summary.folder == "Library" {
+                continue;
+            }
+            let body = f.vault.read_note(&summary.id).unwrap().body;
+            let found = f.index.related(&summary.id, &body, 5).unwrap();
+            println!("\n{}  ({})", summary.title, summary.folder);
+            if found.is_empty() {
+                println!("    (nothing near it)");
+            }
+            for r in found {
+                println!("    {:5.2}  {}  —  {}", r.score, r.title, r.reason);
+            }
+        }
+    }
+
+    #[test]
+    fn a_realistic_vault_puts_something_useful_near_every_working_note() {
+        // Not the judgement — that is the ignored test above — but the floor
+        // under it: a panel that is empty on a vault this connected would be
+        // broken, and one that fires on the meeting notes would be noise.
+        let f = Fixture::new();
+        realistic_vault(&f);
+        for summary in f.index.all_notes().unwrap() {
+            let body = f.vault.read_note(&summary.id).unwrap().body;
+            let found = f.index.related(&summary.id, &body, 5).unwrap();
+            if summary.folder == "Admin" {
+                assert!(
+                    found.is_empty(),
+                    "twenty identical meeting notes should say nothing about each other, \
+                     but {} got {found:?}",
+                    summary.title
+                );
+            } else if summary.folder.starts_with("Research") {
+                assert!(
+                    !found.is_empty(),
+                    "{} has no neighbours at all",
+                    summary.title
+                );
+                for r in &found {
+                    assert!(!r.reason.is_empty(), "{} gave no reason", r.title);
+                    assert_ne!(r.id, summary.id, "a note is not near itself");
+                }
+            }
+        }
     }
 }

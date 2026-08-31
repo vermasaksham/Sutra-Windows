@@ -13,6 +13,7 @@ use crate::frontmatter::NoteType;
 use crate::frontmatter::{Citation, SourceMeta};
 use crate::index::CitingNote;
 use crate::index::{Backlink, SearchHit, ViewResult};
+use crate::related::Related;
 use crate::state::AppState;
 use crate::tags::Suggestion;
 use crate::vault::{MigrationPlan, NoteDoc, NoteSummary, Retag, TagChange};
@@ -538,4 +539,35 @@ pub fn save_view(state: State<'_, AppState>, id: String, query: Query) -> Result
         index.upsert(&summary, &doc.body)?;
         Ok(summary)
     })
+}
+
+// ---- context -----------------------------------------------------------------
+
+/// Notes near this one, each with a line saying why.
+///
+/// The body comes from the frontend rather than being re-read here, so the
+/// panel reflects what is on screen — including edits not yet saved. Asking a
+/// question about the open note must not depend on whether autosave has run.
+#[tauri::command]
+pub fn related_notes(
+    state: State<'_, AppState>,
+    id: String,
+    body: String,
+    limit: usize,
+) -> Result<Vec<Related>> {
+    state.with_index(|index| index.related(&id, &body, limit))
+}
+
+/// The other notes in a note's folder.
+///
+/// Its own list rather than a relatedness signal: sitting in the same folder
+/// is a fact about filing, not about subject, and mixing it into a ranking
+/// would let a folder of forty notes crowd out everything computed.
+#[tauri::command]
+pub fn folder_neighbours(
+    state: State<'_, AppState>,
+    id: String,
+    limit: usize,
+) -> Result<Vec<NoteSummary>> {
+    state.with_index(|index| index.folder_neighbours(&id, limit))
 }
