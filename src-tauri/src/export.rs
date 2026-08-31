@@ -667,11 +667,17 @@ mod tests {
     }
 
     /// Leaves a file behind on purpose, so tools other than our own can judge
-    /// it. Run with `cargo test --bins -- --ignored emit_for_inspection`.
+    /// it. Run with `cargo test --bins -- --ignored --nocapture emit_for_inspection`.
+    ///
+    /// The temp directory rather than `/tmp`: Windows is the primary target and
+    /// has no such path, so the hardcoded version was a developer convenience
+    /// that only worked for developers on the other platform.
     #[test]
-    #[ignore]
+    #[ignore = "writes a file for a person to open"]
     fn emit_for_inspection() {
-        write_docx(&sample(), std::path::Path::new("/tmp/sutra-check.docx")).unwrap();
+        let path = std::env::temp_dir().join("sutra-check.docx");
+        write_docx(&sample(), &path).unwrap();
+        println!("wrote {}", path.display());
     }
 
     #[test]

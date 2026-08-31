@@ -1,0 +1,113 @@
+# Windows is the primary target, and until this ran, nothing had ever compiled
+# the Rust side for MSVC or executed a test on Windows. Development happens on
+# Linux, where `#[cfg(windows)]` code is not even parsed for types and every
+# path assumption is generous — so this is not a formality, it is the first
+# time most of the platform-specific surface is exercised at all.
+name: Windows
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+  workflow_dispatch:
+
+# Only what building needs. Nothing here writes to the repository.
+permissions:
+  contents: read
+
+# A new push supersedes the run in flight for the same branch. Installer builds
+# are slow, and a queue of them for commits nobody is waiting on helps no one.
+concurrency:
+  group: windows-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  check:
+    name: Checks
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      # Keyed on the lockfile, so a dependency change is the only thing that
+      # costs a cold build.
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      # The frontend first: it is seconds, and a type error found before a
+      # cold Rust build is a much shorter round trip.
+      - name: Types
+        run: npx tsc --noEmit
+
+      - name: Formatting
+        run: npx prettier --check src
+
+      - name: Frontend tests
+        run: npm test
+
+      - name: Rust formatting
+        run: cargo fmt --check
+        working-directory: src-tauri
+
+      - name: Clippy
+        run: cargo clippy --all-targets -- -D warnings
+        working-directory: src-tauri
+
+      # The reason this workflow exists. Every test that touches the
+      # filesystem — paths, separators, hidden attributes, the trash, atomic
+      # renames — has only ever run on Linux until now.
+      - name: Rust tests
+        run: cargo test
+        working-directory: src-tauri
+
+  installer:
+    name: Installer
+    needs: check
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      # `--bundles` overrides tauri.conf.json, which also lists the macOS
+      # targets. Naming the two Windows ones here means this cannot fail over a
+      # `.dmg` nobody asked for.
+      - name: Build
+        run: npm run tauri:build -- --bundles msi,nsis
+
+      # Unsigned, and said so rather than left to be discovered: Windows
+      # SmartScreen will warn on first run. Signing needs a certificate, which
+      # is a decision about money and identity rather than a build step.
+      - name: Collect the installers
+        uses: actions/upload-artifact@v4
+        with:
+          name: sutra-windows-unsigned
+          path: |
+            src-tauri/target/release/bundle/msi/*.msi
+            src-tauri/target/release/bundle/nsis/*.exe
+          if-no-files-found: error

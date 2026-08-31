@@ -1,0 +1,16 @@
+# LF in the repository and LF in the working tree, on every platform.
+#
+# Git for Windows checks out CRLF by default, which would make
+# `prettier --check` and `cargo fmt --check` fail on Windows for files that
+# are correct in the repository — a CI failure about line endings nobody
+# introduced. Notes written by the app are LF too, so a vault copied between
+# machines diffs cleanly.
+* text=auto eol=lf
+
+# Binary, and not to be touched.
+*.png binary
+*.jpg binary
+*.ico binary
+*.icns binary
+*.pdf binary
+*.woff2 binary
