@@ -203,6 +203,14 @@ pub struct Frontmatter {
     /// The sources this note draws on, with where in them.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub sources: Vec<Citation>,
+    /// Notes a person has said are *not* duplicates of this one.
+    ///
+    /// In the file rather than the index, because the index is disposable and
+    /// deleting it must not resurrect a suggestion someone has already looked
+    /// at and dismissed. Written on both notes of a pair, so either can filter
+    /// without consulting the other.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub not_duplicates: Vec<String>,
     /// Present on a note of `type: view`: the query it stands for.
     ///
     /// In the note's own frontmatter rather than in a settings file, so a view
@@ -241,6 +249,7 @@ impl Frontmatter {
             cover: None,
             source: None,
             sources: Vec::new(),
+            not_duplicates: Vec::new(),
             view: None,
         }
     }
@@ -324,6 +333,7 @@ mod tests {
             cover: None,
             source: None,
             sources: Vec::new(),
+            not_duplicates: Vec::new(),
             view: None,
         }
     }

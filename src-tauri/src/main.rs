@@ -4,7 +4,9 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod citations;
+mod claims;
 mod commands;
+mod duplicates;
 mod error;
 mod export;
 mod frontmatter;
@@ -88,6 +90,11 @@ fn main() {
             commands::save_view,
             commands::related_notes,
             commands::folder_neighbours,
+            commands::duplicates_of,
+            commands::duplicate_pairs,
+            commands::not_duplicates,
+            commands::merge_notes,
+            commands::disagreements,
         ])
         // `generate_context!` pulls in tauri.conf.json at compile time.
         .run(tauri::generate_context!())

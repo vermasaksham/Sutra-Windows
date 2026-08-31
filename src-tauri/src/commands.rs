@@ -7,12 +7,14 @@
 //! 2. The body is markdown text, passed through untouched. Rust is responsible
 //!    for the file and its frontmatter, not for interpreting the prose.
 
+use crate::claims::Disagreement;
+use crate::duplicates::Duplicate;
 use crate::error::{Result, SutraError};
 use crate::export::ExportDocument;
 use crate::frontmatter::NoteType;
 use crate::frontmatter::{Citation, SourceMeta};
 use crate::index::CitingNote;
-use crate::index::{Backlink, SearchHit, ViewResult};
+use crate::index::{Backlink, DuplicatePair, SearchHit, ViewResult};
 use crate::related::Related;
 use crate::state::AppState;
 use crate::tags::Suggestion;
@@ -570,4 +572,68 @@ pub fn folder_neighbours(
     limit: usize,
 ) -> Result<Vec<NoteSummary>> {
     state.with_index(|index| index.folder_neighbours(&id, limit))
+}
+
+// ---- duplicates and disagreements --------------------------------------------
+
+/// Notes that may be this one written twice.
+///
+/// Never acted on here: this returns candidates and a sentence about each, and
+/// every consequence is a button somebody presses.
+#[tauri::command]
+pub fn duplicates_of(
+    state: State<'_, AppState>,
+    id: String,
+    title: String,
+    body: String,
+    limit: usize,
+) -> Result<Vec<Duplicate>> {
+    state.with_both(|vault, index| {
+        let dismissed = vault.dismissed_duplicates(&id).unwrap_or_default();
+        index.duplicates(&id, &title, &body, &dismissed, limit)
+    })
+}
+
+/// Every pair in the vault that may be duplicates. The tidying pass.
+#[tauri::command]
+pub fn duplicate_pairs(state: State<'_, AppState>, limit: usize) -> Result<Vec<DuplicatePair>> {
+    state.with_index(|index| index.duplicate_pairs(limit))
+}
+
+/// Record that two notes are not duplicates, so neither is offered again.
+#[tauri::command]
+pub fn not_duplicates(state: State<'_, AppState>, a: String, b: String) -> Result<()> {
+    state.with_vault(|vault| vault.not_duplicates(&a, &b))
+}
+
+/// Fold one note into another and send the absorbed one to the trash.
+///
+/// The index is rebuilt rather than patched: a merge rewrites links across the
+/// vault, and reconstructing from the markdown afterwards is both simpler than
+/// tracking what changed and the thing that proves the index is derived.
+#[tauri::command]
+pub fn merge_notes(
+    state: State<'_, AppState>,
+    keep: String,
+    absorb: String,
+) -> Result<NoteSummary> {
+    state.with_both(|vault, index| {
+        let summary = vault.merge_notes(&keep, &absorb)?;
+        index.rebuild(vault)?;
+        Ok(summary)
+    })
+}
+
+/// Numeric claims in this note that differ from one in a connected note.
+///
+/// "Differ", not "contradict". Which is right, or whether they are even about
+/// the same measurement, is not knowable from the text and is not claimed.
+#[tauri::command]
+pub fn disagreements(
+    state: State<'_, AppState>,
+    id: String,
+    body: String,
+    limit: usize,
+) -> Result<Vec<Disagreement>> {
+    state.with_index(|index| index.disagreements(&id, &body, limit))
 }

@@ -5,6 +5,8 @@
 //! exist in a note on disk. That is the rule the whole storage design rests on,
 //! and it is what makes the database disposable rather than precious.
 
+use crate::claims::{self, Disagreement};
+use crate::duplicates::{self, Duplicate};
 use crate::error::Result;
 use crate::links;
 use crate::related::{self, Candidate, Reason, Related};
@@ -473,6 +475,204 @@ impl Index {
         Ok(related::rank(candidates, limit))
     }
 
+    /// Notes that may be this note written twice.
+    ///
+    /// Candidates come from FTS on the title's words — cheap, indexed, and
+    /// generous — and are then compared properly. Nothing is decided here: the
+    /// result is a list with a sentence attached, and merging is a button a
+    /// person presses.
+    pub fn duplicates(
+        &self,
+        id: &str,
+        title: &str,
+        body: &str,
+        dismissed: &[String],
+        limit: usize,
+    ) -> Result<Vec<Duplicate>> {
+        let query = title_query(title);
+        if query.is_empty() {
+            return Ok(Vec::new());
+        }
+        let skip: HashSet<&str> = dismissed.iter().map(String::as_str).collect();
+
+        let guard = self.conn.lock().unwrap_or_else(|e| e.into_inner());
+        let mut stmt = guard.prepare(
+            "SELECT f.id, f.title, f.body, COALESCE(n.folder, '') \
+               FROM notes_fts f LEFT JOIN notes n ON n.id = f.id \
+              WHERE notes_fts MATCH ?1 ORDER BY rank LIMIT ?2",
+        )?;
+        let rows = stmt.query_map(params![query, CANDIDATES as i64], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, String>(3)?,
+            ))
+        })?;
+
+        let mut found = Vec::new();
+        for row in rows {
+            let (other, other_title, other_body, folder) = row?;
+            if other == id || skip.contains(other.as_str()) {
+                continue;
+            }
+            let alike = duplicates::compare(title, body, &other_title, &other_body);
+            found.push(Duplicate {
+                id: other,
+                title: other_title,
+                folder,
+                reason: alike.explain(),
+                score: alike.score(),
+            });
+        }
+        Ok(duplicates::rank(found, limit))
+    }
+
+    /// Numeric claims in this note that disagree with one in a note it is
+    /// connected to.
+    ///
+    /// Connected means sharing a tag or a source, linking to each other, or
+    /// both pointing at a third note. Two notes with nothing between them are
+    /// not in conversation, and comparing their numbers would flag every pair
+    /// of measurements in the vault against every other.
+    pub fn disagreements(&self, id: &str, body: &str, limit: usize) -> Result<Vec<Disagreement>> {
+        let mine = claims::claims(body);
+        if mine.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let guard = self.conn.lock().unwrap_or_else(|e| e.into_inner());
+        let mut stmt = guard.prepare(
+            "SELECT n.id, n.title, f.body FROM notes n JOIN notes_fts f ON f.id = n.id \
+              WHERE n.id <> ?1 AND ( \
+                n.id IN (SELECT b.note_id FROM note_tags a JOIN note_tags b ON b.tag = a.tag \
+                          WHERE a.note_id = ?1) \
+                OR n.id IN (SELECT b.note_id FROM note_sources a JOIN note_sources b \
+                             ON b.source_id = a.source_id WHERE a.note_id = ?1) \
+                OR n.id IN (SELECT target FROM links WHERE source = ?1) \
+                OR n.id IN (SELECT source FROM links WHERE target = ?1) \
+                OR n.id IN (SELECT b.source FROM links a JOIN links b ON b.target = a.target \
+                             WHERE a.source = ?1)) \
+              LIMIT ?2",
+        )?;
+        let rows = stmt.query_map(params![id, CONNECTED as i64], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+            ))
+        })?;
+
+        let mut out = Vec::new();
+        for row in rows {
+            let (other, title, other_body) = row?;
+            for theirs in claims::claims(&other_body) {
+                for ours in &mine {
+                    if !claims::disagree(ours, &theirs) {
+                        continue;
+                    }
+                    out.push(Disagreement {
+                        label: ours.label.clone(),
+                        here: ours.text.clone(),
+                        id: other.clone(),
+                        title: title.clone(),
+                        there: theirs.text.clone(),
+                        factor: claims::factor(ours.value, theirs.value).unwrap_or(0.0),
+                    });
+                }
+            }
+        }
+        // Widest apart first: a value out by a thousand is a unit error worth
+        // seeing before one out by three.
+        out.sort_by(|a, b| {
+            b.factor
+                .partial_cmp(&a.factor)
+                .unwrap_or(std::cmp::Ordering::Equal)
+                .then_with(|| a.title.cmp(&b.title))
+        });
+        out.truncate(limit);
+        Ok(out)
+    }
+
+    /// Every pair of notes in the vault that may be duplicates.
+    ///
+    /// The tidying pass, run on request rather than in the background. Each
+    /// pair is reported once, from whichever side comes first.
+    pub fn duplicate_pairs(&self, limit: usize) -> Result<Vec<DuplicatePair>> {
+        let notes: Vec<(String, String, String, String)> = {
+            let guard = self.conn.lock().unwrap_or_else(|e| e.into_inner());
+            let mut stmt = guard.prepare(
+                "SELECT n.id, n.title, f.body, n.folder FROM notes n \
+                   JOIN notes_fts f ON f.id = n.id ORDER BY n.title",
+            )?;
+            let rows = stmt.query_map([], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, String>(3)?,
+                ))
+            })?;
+            rows.filter_map(std::result::Result::ok).collect()
+        };
+
+        // Bucketed by normalised title before anything is compared. Two notes
+        // whose titles share no word cannot reach the floor, so comparing them
+        // is work with a known answer — and without the buckets this is every
+        // note against every other.
+        let mut by_word: HashMap<&str, Vec<usize>> = HashMap::new();
+        let mut words: Vec<Vec<String>> = Vec::with_capacity(notes.len());
+        for (_, title, _, _) in &notes {
+            words.push(
+                duplicates::normalise_title(title)
+                    .split(' ')
+                    .filter(|w| !w.is_empty())
+                    .map(str::to_string)
+                    .collect(),
+            );
+        }
+        for (i, note_words) in words.iter().enumerate() {
+            for word in note_words {
+                by_word.entry(word.as_str()).or_default().push(i);
+            }
+        }
+
+        let mut seen: HashSet<(usize, usize)> = HashSet::new();
+        let mut found = Vec::new();
+        for (i, note_words) in words.iter().enumerate() {
+            for word in note_words {
+                for &j in by_word.get(word.as_str()).into_iter().flatten() {
+                    if j <= i || !seen.insert((i, j)) {
+                        continue;
+                    }
+                    let alike =
+                        duplicates::compare(&notes[i].1, &notes[i].2, &notes[j].1, &notes[j].2);
+                    if alike.score() < duplicates::FLOOR {
+                        continue;
+                    }
+                    found.push(DuplicatePair {
+                        left: notes[i].0.clone(),
+                        left_title: notes[i].1.clone(),
+                        left_folder: notes[i].3.clone(),
+                        right: notes[j].0.clone(),
+                        right_title: notes[j].1.clone(),
+                        right_folder: notes[j].3.clone(),
+                        reason: alike.explain(),
+                        score: alike.score(),
+                    });
+                }
+            }
+        }
+        found.sort_by(|a, b| {
+            b.score
+                .partial_cmp(&a.score)
+                .unwrap_or(std::cmp::Ordering::Equal)
+                .then_with(|| a.left_title.cmp(&b.left_title))
+        });
+        found.truncate(limit);
+        Ok(found)
+    }
+
     /// The other notes in this note's folder, most recently edited first.
     pub fn folder_neighbours(&self, id: &str, limit: usize) -> Result<Vec<NoteSummary>> {
         let guard = self.conn.lock().unwrap_or_else(|e| e.into_inner());
@@ -606,6 +806,43 @@ fn distinctive(conn: &Connection, body: &str, total: usize) -> Result<Vec<(Strin
         .into_iter()
         .map(|(_, term, idf)| (term, idf))
         .collect())
+}
+
+/// How many FTS hits to compare properly when looking for a duplicate.
+const CANDIDATES: usize = 30;
+
+/// How many connected notes to read claims from.
+///
+/// A cap, because a common tag can connect a note to hundreds and reading
+/// every one of their bodies to compare arithmetic is not worth the wait.
+const CONNECTED: usize = 200;
+
+/// An FTS query matching any of a title's words.
+///
+/// Deliberately generous: this only produces candidates, and the comparison
+/// afterwards is what decides. Missing a duplicate here cannot be recovered
+/// later, whereas an extra candidate costs one comparison.
+fn title_query(title: &str) -> String {
+    let terms: Vec<String> = title
+        .split(|c: char| !c.is_alphanumeric())
+        .filter(|w| w.chars().count() >= 2)
+        .map(|w| format!("\"{}\"", w.replace('"', "\"\"")))
+        .collect();
+    terms.join(" OR ")
+}
+
+/// A pair of notes that may be duplicates, for the vault-wide list.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DuplicatePair {
+    pub left: String,
+    pub left_title: String,
+    pub left_folder: String,
+    pub right: String,
+    pub right_title: String,
+    pub right_folder: String,
+    pub reason: String,
+    pub score: f64,
 }
 
 fn schema_matches(conn: &Connection) -> bool {
@@ -2097,5 +2334,381 @@ mod tests {
                 }
             }
         }
+    }
+    // ---- duplicates and disagreements ----------------------------------------
+
+    fn dupes(f: &Fixture, id: &str) -> Vec<(String, String)> {
+        let doc = f.vault.read_note(id).unwrap();
+        f.index
+            .duplicates(
+                id,
+                &doc.summary.title,
+                &doc.body,
+                &f.vault.dismissed_duplicates(id).unwrap(),
+                5,
+            )
+            .unwrap()
+            .into_iter()
+            .map(|d| (d.title, d.reason))
+            .collect()
+    }
+
+    #[test]
+    fn the_same_title_in_a_different_order_is_found() {
+        // The step's first proof, end to end through FTS and the index.
+        let f = Fixture::new();
+        let a = note(
+            &f,
+            "Research",
+            "Thermal conductivity Sb2Se3",
+            &[],
+            "Boundary scattering dominates below the Debye temperature.",
+        );
+        note(
+            &f,
+            "Research/Sb2Se3",
+            "Sb2Se3 thermal conductivity",
+            &[],
+            "Boundary scattering dominates below the Debye temperature, so the ribbon axis matters.",
+        );
+        note(
+            &f,
+            "Admin",
+            "Group meeting",
+            &[],
+            "Progress and next steps.",
+        );
+        f.index.rebuild(&f.vault).unwrap();
+
+        let found = dupes(&f, &a);
+        assert_eq!(found.len(), 1, "{found:?}");
+        assert_eq!(found[0].0, "Sb2Se3 thermal conductivity");
+        assert!(found[0].1.contains("same title"), "{:?}", found[0].1);
+    }
+
+    #[test]
+    fn a_dismissed_pair_is_never_offered_again_from_either_side() {
+        let f = Fixture::new();
+        let a = note(
+            &f,
+            "Research",
+            "DSC run 27 August",
+            &[],
+            "Ramped under argon.",
+        );
+        let b = note(&f, "Research", "DSC run 27 Aug", &[], "Ramped under argon.");
+        f.index.rebuild(&f.vault).unwrap();
+        assert_eq!(dupes(&f, &a).len(), 1);
+
+        f.vault.not_duplicates(&a, &b).unwrap();
+        assert!(
+            dupes(&f, &a).is_empty(),
+            "dismissed from the side that asked"
+        );
+        assert!(dupes(&f, &b).is_empty(), "and from the other side too");
+    }
+
+    #[test]
+    fn dismissing_a_pair_does_not_stamp_either_note_as_edited() {
+        // Saying "these are two different notes" is a statement about a
+        // suggestion, not a change to either note. A vault whose timestamps
+        // move when someone dismisses a prompt has lost real information about
+        // when the work happened.
+        //
+        // The timestamps are written into the past deliberately. Sutra records
+        // whole seconds, so a note created and dismissed in the same second
+        // has the same `updated` either way — a version of this test that made
+        // its own notes passed even when dismissal did stamp them, which is to
+        // say it tested nothing.
+        let f = Fixture::new();
+        let write = |id: &str, title: &str| {
+            std::fs::write(
+                f.root.join(format!("{title}.md")),
+                format!(
+                    "---\nid: {id}\ntitle: {title}\nposition: 0\n\
+                     created: 2026-01-02T03:04:05Z\nupdated: 2026-01-02T03:04:05Z\n---\n\nProse.\n"
+                ),
+            )
+            .unwrap();
+        };
+        let a = "01HQ3M8K2P0000000000000NA1";
+        let b = "01HQ3M8K2P0000000000000NB2";
+        write(a, "Alpha");
+        write(b, "Beta");
+        let stamped = time::macros::datetime!(2026-01-02 03:04:05 UTC);
+        assert_eq!(f.vault.read_note(a).unwrap().summary.updated, stamped);
+
+        f.vault.not_duplicates(a, b).unwrap();
+        assert_eq!(f.vault.read_note(a).unwrap().summary.updated, stamped);
+        assert_eq!(f.vault.read_note(b).unwrap().summary.updated, stamped);
+
+        // And the fact is in the markdown, not only in the index.
+        assert_eq!(f.vault.dismissed_duplicates(a).unwrap(), [b.to_string()]);
+        assert_eq!(f.vault.dismissed_duplicates(b).unwrap(), [a.to_string()]);
+    }
+
+    #[test]
+    fn dismissing_the_same_pair_twice_records_it_once() {
+        let f = Fixture::new();
+        let a = note(&f, "Research", "Alpha", &[], "One.");
+        let b = note(&f, "Research", "Beta", &[], "Two.");
+        f.vault.not_duplicates(&a, &b).unwrap();
+        f.vault.not_duplicates(&b, &a).unwrap();
+        assert_eq!(f.vault.dismissed_duplicates(&a).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn merging_keeps_everything_and_leaves_no_dead_link() {
+        // The whole safety argument for merge, in one test. Nothing thrown
+        // away, no note left pointing at something that is gone, and the
+        // absorbed note recoverable from the trash.
+        let f = Fixture::new();
+        let source = f
+            .vault
+            .create_source("Zhou 2019", crate::frontmatter::SourceMeta::default())
+            .unwrap()
+            .summary
+            .id;
+
+        let keep = note(
+            &f,
+            "Research",
+            "Sb2Se3 Cp",
+            &["sb2se3"],
+            "The fitted polynomial.",
+        );
+        let absorb = note(
+            &f,
+            "Research",
+            "Cp Sb2Se3",
+            &["method/dsc"],
+            "The measured points.",
+        );
+        f.vault
+            .set_citations(
+                &absorb,
+                vec![crate::frontmatter::Citation {
+                    id: source.clone(),
+                    page: Some("112".into()),
+                    quote: None,
+                    captured: None,
+                }],
+            )
+            .unwrap();
+        let pointer = note(
+            &f,
+            "Research",
+            "Points at the absorbed one",
+            &[],
+            &format!("See [[{absorb}]] for the raw data."),
+        );
+        f.index.rebuild(&f.vault).unwrap();
+
+        let merged = f.vault.merge_notes(&keep, &absorb).unwrap();
+
+        // Both bodies survive, and which was which is still legible.
+        let body = f.vault.read_note(&keep).unwrap().body;
+        assert!(body.contains("The fitted polynomial."), "{body}");
+        assert!(body.contains("The measured points."), "{body}");
+        assert!(body.contains("## Merged from Cp Sb2Se3"), "{body}");
+
+        // Tags and provenance are unioned, not replaced.
+        assert!(merged.tags.contains(&"sb2se3".to_string()));
+        assert!(merged.tags.contains(&"method/dsc".to_string()));
+        assert_eq!(merged.sources.len(), 1);
+        assert_eq!(merged.sources[0].page.as_deref(), Some("112"));
+
+        // Nothing is left pointing at a note that no longer exists.
+        let pointing = f.vault.read_note(&pointer).unwrap().body;
+        assert!(pointing.contains(&format!("[[{keep}]]")), "{pointing}");
+        assert!(!pointing.contains(&absorb), "{pointing}");
+
+        // And the absorbed note is recoverable rather than gone.
+        assert!(f.vault.read_note(&absorb).is_err());
+        let trash: Vec<_> = std::fs::read_dir(f.root.join(".sutra").join("trash"))
+            .unwrap()
+            .flatten()
+            .collect();
+        assert_eq!(trash.len(), 1, "the absorbed note should be in the trash");
+    }
+
+    #[test]
+    fn merging_an_empty_note_adds_no_empty_heading() {
+        let f = Fixture::new();
+        let keep = note(&f, "Research", "Kept", &[], "The only prose.");
+        let absorb = note(&f, "Research", "Kept as well", &[], "");
+        f.index.rebuild(&f.vault).unwrap();
+
+        f.vault.merge_notes(&keep, &absorb).unwrap();
+        let body = f.vault.read_note(&keep).unwrap().body;
+        assert!(!body.contains("Merged from"), "{body}");
+        assert_eq!(body.trim(), "The only prose.");
+    }
+
+    #[test]
+    fn a_note_cannot_be_merged_into_itself() {
+        let f = Fixture::new();
+        let a = note(&f, "Research", "Alone", &[], "Prose.");
+        assert!(f.vault.merge_notes(&a, &a).is_err());
+        assert_eq!(f.vault.read_note(&a).unwrap().body.trim(), "Prose.");
+    }
+
+    #[test]
+    fn the_vault_wide_pass_reports_each_pair_once() {
+        let f = Fixture::new();
+        note(
+            &f,
+            "Research",
+            "Thermal conductivity Sb2Se3",
+            &[],
+            "Boundary scattering.",
+        );
+        note(
+            &f,
+            "Research",
+            "Sb2Se3 thermal conductivity",
+            &[],
+            "Boundary scattering.",
+        );
+        note(
+            &f,
+            "Research",
+            "Seebeck coefficient",
+            &[],
+            "Carrier concentration.",
+        );
+        f.index.rebuild(&f.vault).unwrap();
+
+        let pairs = f.index.duplicate_pairs(20).unwrap();
+        assert_eq!(pairs.len(), 1, "{pairs:?}");
+        let titles = [pairs[0].left_title.as_str(), pairs[0].right_title.as_str()];
+        assert!(
+            titles.contains(&"Thermal conductivity Sb2Se3"),
+            "{titles:?}"
+        );
+        assert!(
+            titles.contains(&"Sb2Se3 thermal conductivity"),
+            "{titles:?}"
+        );
+    }
+
+    // ---- numeric claims that differ ------------------------------------------
+
+    fn differs(f: &Fixture, id: &str) -> Vec<(String, String, String, f64)> {
+        let body = f.vault.read_note(id).unwrap().body;
+        f.index
+            .disagreements(id, &body, 5)
+            .unwrap()
+            .into_iter()
+            .map(|d| (d.label, d.here, d.there, d.factor.round()))
+            .collect()
+    }
+
+    #[test]
+    fn two_values_of_the_same_quantity_a_factor_apart_are_flagged() {
+        // The step's second proof. Neither is declared correct — the result
+        // carries both claims and the ratio, and says nothing else.
+        let f = Fixture::new();
+        let here = note(
+            &f,
+            "Research/Sb2Se3",
+            "Sb2Se3 Cp",
+            &["sb2se3"],
+            "κ = 0.037 W m⁻¹ K⁻¹ at 300 K, from the fitted polynomial.",
+        );
+        note(
+            &f,
+            "Research/Sb2Se3",
+            "DSC run 2026-08-27",
+            &["sb2se3"],
+            "Ramped 300-800 K at 10 K/min. κ = 0.37 W/mK from the same sample.",
+        );
+        f.index.rebuild(&f.vault).unwrap();
+
+        let found = differs(&f, &here);
+        assert_eq!(found.len(), 1, "{found:?}");
+        let (label, here_text, there_text, factor) = &found[0];
+        assert_eq!(label, "κ");
+        assert_eq!(factor, &10.0);
+        // Both claims come back as written. Nothing says which is right,
+        // because nothing here knows.
+        assert!(here_text.contains("0.037"), "{here_text}");
+        assert!(there_text.contains("0.37"), "{there_text}");
+    }
+
+    #[test]
+    fn unconnected_notes_are_not_compared() {
+        // Without this, every measurement in the vault is flagged against
+        // every other and the panel is noise from the first week.
+        let f = Fixture::new();
+        let here = note(&f, "Research", "Mine", &["sb2se3"], "κ = 0.037 W/mK");
+        note(
+            &f,
+            "Elsewhere",
+            "Nothing in common",
+            &["unrelated"],
+            "κ = 0.37 W/mK",
+        );
+        f.index.rebuild(&f.vault).unwrap();
+        assert!(differs(&f, &here).is_empty());
+    }
+
+    #[test]
+    fn a_shared_source_or_link_is_enough_of_a_connection() {
+        let f = Fixture::new();
+        let target = note(&f, "Research", "Phonons", &[], "Prose.");
+        let here = note(
+            &f,
+            "Research",
+            "Mine",
+            &[],
+            &format!("κ = 0.037 W/mK. See [[{target}]]."),
+        );
+        note(
+            &f,
+            "Elsewhere",
+            "Linked, not tagged",
+            &[],
+            &format!("κ = 0.37 W/mK. Also [[{target}]]."),
+        );
+        f.index.rebuild(&f.vault).unwrap();
+        assert_eq!(differs(&f, &here).len(), 1);
+    }
+
+    #[test]
+    fn a_note_with_no_claims_is_not_compared_at_all() {
+        let f = Fixture::new();
+        let here = note(
+            &f,
+            "Research",
+            "Prose only",
+            &["sb2se3"],
+            "No numbers here.",
+        );
+        note(&f, "Research", "Has one", &["sb2se3"], "κ = 0.37 W/mK");
+        f.index.rebuild(&f.vault).unwrap();
+        assert!(differs(&f, &here).is_empty());
+    }
+
+    #[test]
+    fn the_widest_disagreement_comes_first() {
+        // A value out by a thousand is a unit error and is worth seeing before
+        // one out by three.
+        let f = Fixture::new();
+        let here = note(&f, "Research", "Mine", &["sb2se3"], "κ = 0.037 W/mK");
+        note(&f, "Research", "Out by three", &["sb2se3"], "κ = 0.11 W/mK");
+        note(
+            &f,
+            "Research",
+            "Out by a thousand",
+            &["sb2se3"],
+            "κ = 37 W/mK",
+        );
+        f.index.rebuild(&f.vault).unwrap();
+
+        let found = differs(&f, &here);
+        assert_eq!(found.len(), 2, "{found:?}");
+        assert_eq!(found[0].3, 1000.0);
+        assert_eq!(found[1].3, 3.0);
     }
 }

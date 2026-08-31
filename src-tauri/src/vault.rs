@@ -887,6 +887,157 @@ impl Vault {
         Ok(summary_of(&fm, &body, folder_of(&relative)))
     }
 
+    // ---- duplicates ----------------------------------------------------------
+
+    /// Record that two notes are not duplicates of each other.
+    ///
+    /// Written on both, so either can filter its own suggestions without
+    /// consulting the other, and so the fact survives in the markdown rather
+    /// than only in a database that is meant to be disposable.
+    ///
+    /// `updated` is deliberately left alone. Saying "these two are different
+    /// notes" is a statement about a suggestion, not an edit to either note,
+    /// and a vault whose timestamps move when someone dismisses a prompt has
+    /// lost real information about when the work happened.
+    pub fn not_duplicates(&self, a: &str, b: &str) -> Result<()> {
+        for (note, other) in [(a, b), (b, a)] {
+            self.amend(note, |fm| {
+                if !fm.not_duplicates.iter().any(|id| id == other) {
+                    fm.not_duplicates.push(other.to_string());
+                }
+            })?;
+        }
+        Ok(())
+    }
+
+    /// The notes this one has been said not to duplicate.
+    pub fn dismissed_duplicates(&self, id: &str) -> Result<Vec<String>> {
+        let relative = self.relative_for(id)?;
+        let contents = fs::read_to_string(self.root.join(&relative))?;
+        let (parsed, _) = frontmatter::split(&contents)?;
+        Ok(parsed.map(|fm| fm.not_duplicates).unwrap_or_default())
+    }
+
+    /// Fold `absorb` into `keep`, then delete it.
+    ///
+    /// What "merge" has to mean if it is to be safe:
+    ///
+    /// - Nothing is thrown away. The absorbed body is appended under a heading
+    ///   naming where it came from, rather than interleaved, because a person
+    ///   has to be able to see afterwards which half was which.
+    /// - Tags and citations are unioned, so provenance the absorbed note
+    ///   carried is not lost with it.
+    /// - Every `[[link]]` pointing at the absorbed note is rewritten to point
+    ///   at the kept one, so no note in the vault is left holding a dead
+    ///   reference.
+    /// - The absorbed note goes to the trash rather than being unlinked, so
+    ///   the whole operation is recoverable by hand.
+    ///
+    /// Returns the kept note.
+    pub fn merge_notes(&self, keep: &str, absorb: &str) -> Result<NoteSummary> {
+        if keep == absorb {
+            return Err(SutraError::NoteNotFound(absorb.to_string()));
+        }
+        let taken = self.read_note(absorb)?;
+        let kept = self.read_note(keep)?;
+
+        let mut body = kept.body.trim_end().to_string();
+        let addition = taken.body.trim();
+        if !addition.is_empty() {
+            if !body.is_empty() {
+                body.push_str("\n\n");
+            }
+            body.push_str(&format!(
+                "## Merged from {}\n\n{addition}\n",
+                taken.summary.title
+            ));
+        }
+
+        let mut tags = kept.summary.tags.clone();
+        for tag in taken.summary.tags {
+            if !tags.contains(&tag) {
+                tags.push(tag);
+            }
+        }
+        let mut citations = kept.summary.sources.clone();
+        for citation in taken.summary.sources {
+            if !citations.iter().any(|c| {
+                c.id == citation.id && c.page == citation.page && c.quote == citation.quote
+            }) {
+                citations.push(citation);
+            }
+        }
+
+        self.edit(keep, |fm| {
+            fm.tags = tags;
+            fm.sources = citations;
+            // The pair cannot be offered again: one of them is gone.
+            fm.not_duplicates.retain(|id| id != absorb);
+        })?;
+        self.save_note(keep, &kept.summary.title, &body)?;
+        self.repoint_links(absorb, keep)?;
+        self.delete_note(absorb)?;
+        Ok(self.read_note(keep)?.summary)
+    }
+
+    /// Point every `[[from]]` in the vault at `to`.
+    ///
+    /// Only reached by a merge, where the target is about to stop existing.
+    /// Ordinary moves and renames never need this — that is the whole point of
+    /// the id living in frontmatter — and it is written here rather than
+    /// offered generally so it stays that way.
+    fn repoint_links(&self, from: &str, to: &str) -> Result<usize> {
+        let needle = format!("[[{from}]]");
+        let replacement = format!("[[{to}]]");
+        let mut changed = 0;
+        let mut files = Vec::new();
+        collect(&self.root, &self.root, 0, &mut files)?;
+
+        for relative in files {
+            let path = self.root.join(&relative);
+            let Ok(contents) = fs::read_to_string(&path) else {
+                continue;
+            };
+            if !contents.contains(&needle) {
+                continue;
+            }
+            // A file whose frontmatter will not parse is left exactly as it
+            // is. Rewriting it would mean writing back a block we could not
+            // read, and a dangling link is a smaller loss than that.
+            let Ok((Some(fm), body)) = frontmatter::split(&contents) else {
+                continue;
+            };
+            if fm.id == from {
+                continue;
+            }
+            let body = body.replace(&needle, &replacement);
+            // Rewriting a link into the one that means the same thing is not
+            // an edit, for the same reason migrating a citation is not.
+            note::write_atomic(&path, &frontmatter::join(&fm, &body)?)?;
+            changed += 1;
+        }
+        Ok(changed)
+    }
+
+    /// Read, change, write, without touching `updated`.
+    ///
+    /// The bookkeeping twin of [`Vault::edit`]. Used where what is being
+    /// written is a fact about a suggestion rather than a change to the note.
+    fn amend(&self, id: &str, change: impl FnOnce(&mut Frontmatter)) -> Result<()> {
+        let relative = self.relative_for(id)?;
+        let path = self.root.join(&relative);
+        let contents = fs::read_to_string(&path)?;
+        let (parsed, body) = frontmatter::split(&contents)?;
+        let mut fm = parsed.unwrap_or_else(|| Self::synthesise(&relative));
+        if fm.id != id {
+            fm.id = id.to_string();
+        }
+        change(&mut fm);
+        let body = body.to_string();
+        note::write_atomic(&path, &frontmatter::join(&fm, &body)?)?;
+        Ok(())
+    }
+
     // ---- tags ----------------------------------------------------------------
 
     /// Every tag in the vault, exactly as written, with how many notes carry it.

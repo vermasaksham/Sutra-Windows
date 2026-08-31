@@ -96,6 +96,8 @@ src/
     FolderBar.tsx     Where the note lives, and the only way to move it
     BacklinksPanel.tsx
     ContextPanel.tsx  The fourth column: sources, backlinks, related, siblings
+    DuplicateReview.tsx  Two notes side by side, and the three real answers
+    DuplicateList.tsx  The vault-wide pass, run from the palette
     useWideEnough.ts  Whether the window can afford four columns
     VaultPicker.tsx   Shown until a vault is chosen
     ConflictPrompt.tsx
@@ -134,6 +136,8 @@ src-tauri/
     citations.rs      Finding and rewriting [@ref] in markdown. Unit tested.
     views.rs          The typed query, and its compiler. Unit tested.
     related.rs        Why one note is near another, and how near. Unit tested.
+    duplicates.rs     Whether two notes are the same note. Unit tested.
+    claims.rs         Numeric claims in prose, and when two differ. Unit tested.
     frontmatter.rs    The YAML block, parsing and serialising
     note.rs           Filenames, slugging, atomic writes
     watcher.rs        Debounced filesystem watching
@@ -278,6 +282,75 @@ for that judgement would be measuring something else.
 Not built, and deliberately: "recently edited", which the note list already
 orders by, and would be the same rows in a second place.
 
+## Duplicates, and numbers that differ
+
+Two suggestions that could each be obnoxious, scoped so they are not.
+
+### Notes written twice
+
+Candidates come from FTS on the title's words and are then compared on three
+dull measures: the **normalised title** — lowercased, punctuation dropped,
+words sorted, so "Thermal conductivity Sb2Se3" and "Sb2Se3 thermal
+conductivity" collapse to the same string — plus title overlap and body
+overlap. Neither overlap counts alone: a shared title with nothing else is two
+notes called "Meeting", and a shared body under a different title is usually a
+quotation, so the two are multiplied rather than added.
+
+The floor is high on purpose. A false duplicate costs attention and, acted on
+carelessly, a note; a missed one costs nothing, because the vault goes on
+working exactly as it did.
+
+A pair opens a **comparison with three buttons**, and both notes are shown in
+full — deciding whether two notes are the same note is precisely the decision
+an excerpt cannot support:
+
+- **They are different notes** writes the pair into both files' frontmatter, so
+  it is never offered again and the fact survives the index being deleted. It
+  does not touch either note's `updated`: dismissing a suggestion is not an
+  edit.
+- **Merge** appends one body to the other under a `## Merged from …` heading
+  rather than interleaving them, unions the tags and citations, repoints every
+  `[[link]]` that pointed at the absorbed note, and puts it in the vault's
+  trash. Nothing is deleted outright and which half was which stays legible.
+  Which note survives is the reader's choice, made in the dialog.
+- **Not now** does nothing, because "I will decide later" has to be available
+  or the dialog becomes a thing to escape rather than to use.
+
+`Find notes written twice` in the palette runs the same comparison across the
+vault. It is a command and never a background nag.
+
+### Numbers that differ
+
+**Not contradiction detection.** Deciding that two passages of prose disagree
+is a research problem; deciding that two numbers written as the same quantity
+in the same unit differ by a factor is arithmetic. Only the arithmetic ships,
+and the panel says only that: *two numeric claims differ*, with both quoted as
+written and the ratio between them. Which is right — or whether they are even
+about the same measurement — is not knowable from the text and is not claimed.
+
+A claim is `label = value unit`: `κ = 0.037 W m⁻¹ K⁻¹`. The separator is
+required, and that restriction is what makes the feature usable. Prose is full
+of numbers — "ramped to 800 K", "the third run", "see page 6" — and a number
+nobody wrote as an assertion is a number nobody was asserting; picking those up
+would flag a ramp's start against its end and teach the reader to ignore the
+panel by the second note. The label is required for the same reason: two
+temperatures in kelvin are not in disagreement for being different
+temperatures.
+
+Units are canonicalised structurally — superscripts expanded, everything after
+a solidus inverted, factors split and sorted — so `W m⁻¹ K⁻¹`, `W/mK` and
+`W/(m·K)` all compare, while `m` and `M`, `s` and `S` stay distinct. Two
+claims are only compared when both the label and the canonical unit match, and
+only between notes that share a tag, a source or a link. Ranges are not claims,
+`==` and `:=` are code, and a bare number only ever compares with another bare
+number.
+
+What it will miss: anything not written as an assignment, and any unit spelled
+in a way the canonicaliser cannot line up with the other spelling — `mK` is
+read as metre-kelvin, so a millikelvin claim only compares with another. Those
+are false negatives, which cost nothing. The false positive is the one that
+costs attention on every note, and every choice above errs away from it.
+
 ## Saved views
 
 A view is a note. `type: view` in `Views/`, with the query in its own
@@ -336,7 +409,8 @@ full-text search, tags, note types, an Inbox, a command palette, KaTeX + mhchem,
 light/dark, autosave, keyboard shortcuts.
 
 In too, since Phase 7: hierarchical tags, note types, sources as notes, saved
-views, and the context panel.
+views, the context panel, duplicate candidates, and numeric claims that
+differ.
 
 Deliberately out, and not up for discussion: database views, kanban boards,
 relations, filtered tables. Sutra is a writing tool, not a database with a UI.

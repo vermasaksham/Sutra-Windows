@@ -4,6 +4,8 @@ import BacklinksPanel from "./BacklinksPanel";
 import type {
   Backlink,
   Citation,
+  Disagreement,
+  Duplicate,
   NoteSummary,
   RelatedNote,
 } from "../vault/api";
@@ -12,9 +14,10 @@ import type {
  * The fourth column: what is near this note, and why.
  *
  * The brief's question for this space is "why am I looking at this, and what
- * else is near it". Four answers, in order of how directly each is a fact
- * about the note: what it draws on, what points at it, what resembles it, and
- * what it sits beside.
+ * else is near it". The answers run in order of how directly each is a fact
+ * about the note: what it draws on, what points at it, what may be it written
+ * twice, what disagrees with it arithmetically, what resembles it, and what it
+ * sits beside.
  *
  * Every row in RELATED carries a line saying why it is there. That is the
  * whole design and not a nicety — a ranked list of neighbours with no reasons
@@ -31,11 +34,14 @@ export default function ContextPanel({
   inlineRefs,
   showSources,
   backlinks,
+  duplicates,
+  disagreements,
   related,
   siblings,
   folder,
   onChangeCitations,
   onOpen,
+  onCompare,
   onClose,
   onReport,
 }: {
@@ -45,11 +51,15 @@ export default function ContextPanel({
   /** False for a source note, which shows its own paper above the editor. */
   showSources: boolean;
   backlinks: Backlink[];
+  duplicates: Duplicate[];
+  disagreements: Disagreement[];
   related: RelatedNote[];
   siblings: NoteSummary[];
   folder: string;
   onChangeCitations: (citations: Citation[]) => void;
   onOpen: (id: string) => void;
+  /** Open the side-by-side comparison for a candidate duplicate. */
+  onCompare: (id: string, reason: string) => void;
   onClose: () => void;
   onReport: (message: string, cause: unknown) => void;
 }) {
@@ -85,6 +95,71 @@ export default function ContextPanel({
         )}
 
         <BacklinksPanel backlinks={backlinks} onSelect={onOpen} />
+
+        {duplicates.length > 0 && (
+          <section>
+            <h2 className="mb-2 text-xs font-semibold tracking-wide text-highlight uppercase">
+              Possibly the same note
+            </h2>
+            <ul className="flex flex-col gap-1">
+              {duplicates.map((note) => (
+                <li key={note.id}>
+                  <button
+                    type="button"
+                    onClick={() => onCompare(note.id, note.reason)}
+                    className="w-full rounded-lg border border-highlight/40 bg-highlight-bg px-3 py-2 text-left transition-colors duration-150 ease-out hover:border-highlight"
+                  >
+                    <span className="block truncate text-sm text-ink">
+                      {note.title}
+                    </span>
+                    <span className="block truncate text-xs text-ink-muted">
+                      {note.reason} — compare them
+                    </span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </section>
+        )}
+
+        {disagreements.length > 0 && (
+          <section>
+            {/*
+              "Differ", not "contradict". Detecting that two passages of prose
+              disagree is a research problem; detecting that two numbers
+              written as the same quantity in the same unit differ is
+              arithmetic, and only the arithmetic is shipped. Which is right —
+              or whether they are even about the same measurement — is not
+              knowable from the text and is not claimed.
+            */}
+            <h2 className="mb-2 text-xs font-semibold tracking-wide text-highlight uppercase">
+              Numbers that differ
+            </h2>
+            <ul className="flex flex-col gap-1">
+              {disagreements.map((note, i) => (
+                // A note can differ from another on more than one quantity, so
+                // the id alone is not a key.
+                <li key={`${note.id}:${note.label}:${i}`}>
+                  <button
+                    type="button"
+                    onClick={() => onOpen(note.id)}
+                    className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-left transition-colors duration-150 ease-out hover:border-accent"
+                  >
+                    <span className="block truncate font-mono text-xs text-ink">
+                      {note.here}
+                    </span>
+                    <span className="block truncate font-mono text-xs text-ink">
+                      {note.there}
+                    </span>
+                    <span className="block truncate text-xs text-ink-muted">
+                      {round(note.factor)}× apart, in {note.title}
+                    </span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </section>
+        )}
 
         <Section
           title="Related"
@@ -169,4 +244,17 @@ function Section({
       )}
     </section>
   );
+}
+
+/**
+ * A ratio, said the way a person would say it.
+ *
+ * "10×" rather than "10.0×", and "1.5×" rather than "2×" — rounding a factor
+ * to a whole number would make a claim about how far apart two values are that
+ * the arithmetic does not support.
+ */
+function round(factor: number): string {
+  return factor >= 10
+    ? String(Math.round(factor))
+    : factor.toFixed(1).replace(/\.0$/, "");
 }

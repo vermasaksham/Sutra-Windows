@@ -4,6 +4,8 @@ import Toast from "./components/Toast";
 import { setNavigate, setTitles } from "./editor/wikilink/titleStore";
 import { setSources } from "./editor/citation/citationStore";
 import ContextPanel from "./notes/ContextPanel";
+import DuplicateReview from "./notes/DuplicateReview";
+import DuplicateList from "./notes/DuplicateList";
 import { citedRefs } from "./notes/citedRefs";
 import SourceDetails from "./notes/SourceDetails";
 import ExportMenu from "./notes/ExportMenu";
@@ -36,6 +38,8 @@ import {
   migrationApi,
   notesApi,
   contextApi,
+  disagreementsApi,
+  duplicatesApi,
   sourcesApi,
   vaultApi,
   viewsApi,
@@ -47,6 +51,8 @@ import {
   type NoteType,
   type SearchHit,
   type VaultInfo,
+  type Disagreement,
+  type Duplicate,
   type RelatedNote,
   type ViewQuery,
   type ViewResult,
@@ -89,6 +95,16 @@ export default function App() {
   /** Notes near the open one, with the reason each is near. */
   const [related, setRelated] = useState<RelatedNote[]>([]);
   const [siblings, setSiblings] = useState<NoteSummary[]>([]);
+  /** Candidate duplicates of the open note, and its numeric disagreements. */
+  const [duplicates, setDuplicates] = useState<Duplicate[]>([]);
+  const [disagreements, setDisagreements] = useState<Disagreement[]>([]);
+  /** The pair being compared side by side, if any. */
+  const [duplicatesOpen, setDuplicatesOpen] = useState(false);
+  const [comparing, setComparing] = useState<{
+    left: string;
+    right: string;
+    reason: string;
+  } | null>(null);
   /**
    * Whether the fourth column is showing.
    *
@@ -229,9 +245,12 @@ export default function App() {
   useEffect(() => {
     const noteId = note.doc?.id;
     const body = note.doc?.body;
-    if (!noteId || body === undefined || !showContext) {
+    const title = note.doc?.title;
+    if (!noteId || body === undefined || title === undefined || !showContext) {
       setRelated([]);
       setSiblings([]);
+      setDuplicates([]);
+      setDisagreements([]);
       return;
     }
     let cancelled = false;
@@ -252,13 +271,29 @@ export default function App() {
         .catch(() => {
           if (!cancelled) setSiblings([]);
         });
+      duplicatesApi
+        .of(noteId, title, body)
+        .then((found) => {
+          if (!cancelled) setDuplicates(found);
+        })
+        .catch(() => {
+          if (!cancelled) setDuplicates([]);
+        });
+      disagreementsApi
+        .of(noteId, body)
+        .then((found) => {
+          if (!cancelled) setDisagreements(found);
+        })
+        .catch(() => {
+          if (!cancelled) setDisagreements([]);
+        });
     }, 400);
     return () => {
       cancelled = true;
       clearTimeout(timer);
     };
     // `notes` is in here so writing elsewhere in the vault updates the panel.
-  }, [note.doc?.id, note.doc?.body, showContext, notes]);
+  }, [note.doc?.id, note.doc?.body, note.doc?.title, showContext, notes]);
 
   const refreshViews = useCallback(() => {
     viewsApi
@@ -871,12 +906,53 @@ export default function App() {
           // what it draws on would be asking the wrong question of it.
           showSources={note.doc.type !== "source"}
           backlinks={backlinks}
+          duplicates={duplicates}
+          disagreements={disagreements}
           related={related}
           siblings={siblings}
           folder={note.doc.folder}
           onChangeCitations={(citations) => void setCitations(citations)}
           onOpen={(id) => void select(id)}
+          onCompare={(id, reason) => {
+            if (selectedId)
+              setComparing({ left: selectedId, right: id, reason });
+          }}
           onClose={() => setContextOpen(false)}
+          onReport={report}
+        />
+      )}
+
+      {duplicatesOpen && !comparing && (
+        <DuplicateList
+          onCompare={(left, right, reason) =>
+            setComparing({ left, right, reason })
+          }
+          onClose={() => setDuplicatesOpen(false)}
+          onReport={report}
+        />
+      )}
+
+      {comparing && (
+        <DuplicateReview
+          left={comparing.left}
+          right={comparing.right}
+          reason={comparing.reason}
+          onClose={() => setComparing(null)}
+          onMerged={(kept) => {
+            setComparing(null);
+            setDuplicatesOpen(false);
+            // The merge rewrote the kept note's body on disk and moved the
+            // other to the trash, so the open buffer is behind the file.
+            // Re-read before anything can write the stale version back.
+            void select(kept).then(() => note.reload());
+            void refresh();
+          }}
+          onDismissed={() => {
+            setComparing(null);
+            // Both files now record the pair as different, so re-running the
+            // check is what makes the suggestion go away.
+            void refresh();
+          }}
           onReport={report}
         />
       )}
@@ -898,6 +974,7 @@ export default function App() {
           onExportPdf={exportPdf}
           onManageTags={() => setTagsOpen(true)}
           onNewView={() => void editView(null)}
+          onFindDuplicates={() => setDuplicatesOpen(true)}
           currentSearch={query}
           onSaveSearchAsView={() =>
             setEditingView({

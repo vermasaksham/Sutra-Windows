@@ -43,6 +43,7 @@ type Props = {
   onExportPdf: () => void;
   onManageTags: () => void;
   onNewView: () => void;
+  onFindDuplicates: () => void;
   /** What the list's search field holds, so it can be saved as a view. */
   currentSearch: string;
   onSaveSearchAsView: () => void;
@@ -66,6 +67,7 @@ export default function CommandPalette({
   onExportPdf,
   onManageTags,
   onNewView,
+  onFindDuplicates,
   currentSearch,
   onSaveSearchAsView,
   legacyCitations,
@@ -131,6 +133,14 @@ export default function CommandPalette({
     });
 
     out.push({
+      id: "duplicates",
+      label: "Find notes written twice",
+      group: "Vault",
+      hint: "candidates only — nothing is merged",
+      run: onFindDuplicates,
+    });
+
+    out.push({
       id: "new-view",
       label: "New view — a saved question about the vault",
       group: "Vault",
@@ -177,6 +187,7 @@ export default function CommandPalette({
     onExportPdf,
     onManageTags,
     onNewView,
+    onFindDuplicates,
     currentSearch,
     onSaveSearchAsView,
     legacyCitations,

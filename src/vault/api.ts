@@ -447,3 +447,68 @@ export const contextApi = {
   siblings: (id: string, limit = 8) =>
     invoke<NoteSummary[]>("folder_neighbours", { id, limit }),
 };
+
+// ---- duplicates and disagreements --------------------------------------------
+
+/** A note that may be the open one written twice. */
+export type Duplicate = {
+  id: string;
+  title: string;
+  folder: string;
+  /** What matched: "the same title in a different order", "62% of the …". */
+  reason: string;
+  score: number;
+};
+
+/** A pair from the vault-wide pass, where neither note is "the open one". */
+export type DuplicatePair = {
+  left: string;
+  leftTitle: string;
+  leftFolder: string;
+  right: string;
+  rightTitle: string;
+  rightFolder: string;
+  reason: string;
+  score: number;
+};
+
+/**
+ * Two numeric claims of the same quantity, in the same unit, that differ.
+ *
+ * Not a contradiction — nothing here knows which is right, or whether the two
+ * are even about the same measurement. It is arithmetic on two things someone
+ * wrote down, offered so a person can look.
+ */
+export type Disagreement = {
+  /** What both claims are about, as this note wrote it: `κ`, `Cp`. */
+  label: string;
+  /** The claim in this note, as written. */
+  here: string;
+  id: string;
+  title: string;
+  /** The claim in the other note, as written. */
+  there: string;
+  /** How many times apart the two values are, larger over smaller. */
+  factor: number;
+};
+
+export const duplicatesApi = {
+  /** Candidates for the open note. Dismissed pairs are already filtered out. */
+  of: (id: string, title: string, body: string, limit = 3) =>
+    invoke<Duplicate[]>("duplicates_of", { id, title, body, limit }),
+  /** Every pair in the vault. The tidying pass, run on request. */
+  all: (limit = 50) => invoke<DuplicatePair[]>("duplicate_pairs", { limit }),
+  /** Record that two notes are not duplicates, so neither is offered again. */
+  dismiss: (a: string, b: string) => invoke<void>("not_duplicates", { a, b }),
+  /**
+   * Fold one note into another. The absorbed note goes to the trash, its links
+   * are repointed, and its tags and citations move across.
+   */
+  merge: (keep: string, absorb: string) =>
+    invoke<NoteSummary>("merge_notes", { keep, absorb }),
+};
+
+export const disagreementsApi = {
+  of: (id: string, body: string, limit = 5) =>
+    invoke<Disagreement[]>("disagreements", { id, body, limit }),
+};
