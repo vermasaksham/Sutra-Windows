@@ -14,6 +14,7 @@ import MigrationPrompt from "./notes/MigrationPrompt";
 import CitationMigrationPrompt from "./notes/CitationMigrationPrompt";
 import CommandPalette from "./notes/CommandPalette";
 import TagManager from "./notes/TagManager";
+import ViewEditor from "./notes/ViewEditor";
 import NoteHeader from "./notes/NoteHeader";
 import NoteList from "./notes/NoteList";
 import Sidebar from "./notes/Sidebar";
@@ -36,6 +37,7 @@ import {
   notesApi,
   sourcesApi,
   vaultApi,
+  viewsApi,
   type Backlink,
   type Citation,
   type MigrationPlan,
@@ -44,6 +46,8 @@ import {
   type NoteType,
   type SearchHit,
   type VaultInfo,
+  type ViewQuery,
+  type ViewResult,
 } from "./vault/api";
 
 const SAVE_LABEL = {
@@ -80,6 +84,21 @@ export default function App() {
   > | null>(null);
   const [citationPromptOpen, setCitationPromptOpen] = useState(false);
   const [tagsOpen, setTagsOpen] = useState(false);
+  /** Every view note, for the rail. */
+  const [views, setViews] = useState<NoteSummary[]>([]);
+  /** The view the list is showing, if any. Exclusive with a folder or a tag. */
+  const [activeView, setActiveView] = useState<string | null>(null);
+  /** What that view currently matches. Null while it is being run. */
+  const [viewResult, setViewResult] = useState<ViewResult | null>(null);
+  /**
+   * The view being edited: its id (null when it is a new one) and its query.
+   * Null when the editor is closed.
+   */
+  const [editingView, setEditingView] = useState<{
+    id: string | null;
+    title: string;
+    query: ViewQuery;
+  } | null>(null);
   /** Bumped to move focus to the search field; the shortcut lives up here but
    *  the input is three components down. */
   const [focusSearch, setFocusSearch] = useState(0);
@@ -171,6 +190,107 @@ export default function App() {
   }, []);
 
   useEffect(refreshFolders, [refreshFolders, notes]);
+
+  const refreshViews = useCallback(() => {
+    viewsApi
+      .list()
+      .then(setViews)
+      .catch(() => setViews([]));
+  }, []);
+
+  useEffect(() => {
+    if (vault) refreshViews();
+  }, [vault, refreshViews, notes]);
+
+  /**
+   * Run the open view.
+   *
+   * Re-run whenever the vault changes, because a view is a question and its
+   * answer moves: writing a note that matches must make it appear here, and a
+   * result list that goes stale is worse than no list at all.
+   */
+  useEffect(() => {
+    if (!activeView) return setViewResult(null);
+    let cancelled = false;
+    viewsApi
+      .read(activeView)
+      .then((query) => viewsApi.run(query ?? {}))
+      .then((found) => {
+        if (!cancelled) setViewResult(found);
+      })
+      .catch((cause) => {
+        if (!cancelled) {
+          setViewResult(null);
+          report("Could not run the view", cause);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [activeView, notes, report]);
+
+  /**
+   * Choose what the middle column lists: a folder, a tag, or a view.
+   *
+   * The three are alternatives, not filters that stack — a folder is where a
+   * note lives, a tag is what it is about, and a view is a question about the
+   * whole vault. Intersecting them would answer a question nobody asked. One
+   * function rather than three call sites each clearing the other two, because
+   * that is the shape where the fourth call site forgets one.
+   */
+  const show = useCallback(
+    (what: {
+      folder?: string | null;
+      tag?: string | null;
+      view?: string | null;
+    }) => {
+      setActiveFolder(what.folder ?? null);
+      setActiveTag(what.tag ?? null);
+      setActiveView(what.view ?? null);
+      setViewResult(null);
+    },
+    [],
+  );
+
+  const selectView = useCallback(
+    (id: string | null) => show({ view: id }),
+    [show],
+  );
+
+  /** Open the query editor for a view, or for a new one. */
+  const editView = useCallback(
+    async (id: string | null) => {
+      if (id === null) {
+        setEditingView({ id: null, title: "", query: {} });
+        return;
+      }
+      try {
+        const query = await viewsApi.read(id);
+        setEditingView({
+          id,
+          title: views.find((v) => v.id === id)?.title ?? "",
+          query: query ?? {},
+        });
+      } catch (cause) {
+        report("Could not read the view", cause);
+      }
+    },
+    [views, report],
+  );
+
+  /** Write the edited query back, creating the view if it is a new one. */
+  const saveView = useCallback(
+    async (id: string | null, title: string, query: ViewQuery) => {
+      const saved = id
+        ? await viewsApi.save(id, query)
+        : await viewsApi.create(title, query);
+      setEditingView(null);
+      await refresh();
+      refreshViews();
+      selectView(saved.id);
+    },
+    [refresh, refreshViews, selectView],
+  );
 
   useEffect(() => {
     if (!vault) return;
@@ -459,9 +579,17 @@ export default function App() {
     )
     .map(([tag]) => tag);
 
-  const listed = activeTag
-    ? notes.filter((n) => taggedWith(n, activeTag))
-    : notesUnder(notes, activeFolder);
+  const openView = activeView
+    ? (views.find((v) => v.id === activeView) ?? null)
+    : null;
+
+  // A view replaces the list rather than filtering it. Its results are notes
+  // like any other — selecting one opens it where it actually lives.
+  const listed = openView
+    ? (viewResult?.notes ?? [])
+    : activeTag
+      ? notes.filter((n) => taggedWith(n, activeTag))
+      : notesUnder(notes, activeFolder);
 
   return (
     <div className="sutra-shell flex h-screen">
@@ -470,16 +598,14 @@ export default function App() {
           vaultName={vault.name}
           notes={notes}
           folders={folders}
+          views={views}
           activeFolder={activeFolder}
           activeTag={activeTag}
-          onSelectFolder={(folder) => {
-            setActiveFolder(folder);
-            setActiveTag(null);
-          }}
-          onSelectTag={(tag) => {
-            setActiveTag(tag);
-            if (tag !== null) setActiveFolder(null);
-          }}
+          activeView={activeView}
+          onSelectFolder={(folder) => show({ folder })}
+          onSelectTag={(tag) => show({ tag })}
+          onSelectView={selectView}
+          onNewView={() => void editView(null)}
           onCapture={() => void capture()}
           onManageTags={() => setTagsOpen(true)}
           onNewFolder={(parent) => {
@@ -501,13 +627,30 @@ export default function App() {
           query={query}
           onQuery={setQuery}
           heading={
-            activeTag
-              ? `#${activeTag}`
-              : activeFolder === null
-                ? "All notes"
-                : activeFolder
+            openView
+              ? openView.title
+              : activeTag
+                ? `#${activeTag}`
+                : activeFolder === null
+                  ? "All notes"
+                  : activeFolder
           }
-          showFolders={activeFolder === null || activeTag !== null}
+          // A view's results come from wherever they come from, so every row
+          // says which folder it is really in — the point being that opening
+          // one opens the note in its own place, not inside the view.
+          showFolders={
+            activeView !== null || activeFolder === null || activeTag !== null
+          }
+          view={
+            openView && viewResult
+              ? {
+                  description: viewResult.description,
+                  truncated: viewResult.truncated,
+                  ignored: viewResult.ignored,
+                  onEdit: () => void editView(openView.id),
+                }
+              : null
+          }
           selectedId={selectedId}
           onSelect={(id) => void select(id)}
           onDelete={(id) => void deleteNote(id)}
@@ -543,10 +686,7 @@ export default function App() {
             <FolderBar
               folder={note.doc.folder}
               folders={folders}
-              onSelectFolder={(folder) => {
-                setActiveFolder(folder);
-                setActiveTag(null);
-              }}
+              onSelectFolder={(folder) => show({ folder })}
               onMove={(folder) => void moveNote(folder)}
               onCreateFolder={(folder) => void createFolder(folder)}
             />
@@ -556,7 +696,7 @@ export default function App() {
               onIcon={(icon) => void setMeta({ icon })}
               onCover={() => void pickCover()}
               onTags={(tags) => void setMeta({ tags })}
-              onSelectTag={setActiveTag}
+              onSelectTag={(tag) => show({ tag })}
               onType={(type) => void setType(type)}
               allTags={allTags}
             />
@@ -578,6 +718,30 @@ export default function App() {
                 onChange={(meta) => void setSourceMeta(meta)}
                 onOpen={(id) => void select(id)}
               />
+            )}
+            {note.doc.type === "view" && (
+              // A view note opened as a note. Its body is the place to write
+              // down why the view exists, so it is worth being able to open —
+              // but it would be a dead end without a way back to the results.
+              <div className="sutra-no-print mb-3 flex flex-wrap items-center gap-3 rounded-lg border border-border px-3 py-2 text-sm">
+                <span className="min-w-0 flex-1 text-ink-soft">
+                  This note is a saved view.
+                </span>
+                <button
+                  type="button"
+                  onClick={() => selectView(selectedId)}
+                  className="text-accent transition-opacity duration-150 ease-out hover:opacity-80"
+                >
+                  Run it
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void editView(selectedId)}
+                  className="text-ink-muted transition-colors duration-150 ease-out hover:text-accent"
+                >
+                  Edit the query
+                </button>
+              </div>
             )}
             <Editor
               key={`${note.doc.id}:${note.revision}`}
@@ -643,6 +807,15 @@ export default function App() {
           onExportDocx={() => void exportDocx()}
           onExportPdf={exportPdf}
           onManageTags={() => setTagsOpen(true)}
+          onNewView={() => void editView(null)}
+          currentSearch={query}
+          onSaveSearchAsView={() =>
+            setEditingView({
+              id: null,
+              title: query.trim(),
+              query: { all: [{ text: query.trim() }] },
+            })
+          }
           legacyCitations={
             legacyCitations ? Object.keys(legacyCitations).length : 0
           }
@@ -655,6 +828,19 @@ export default function App() {
         <TagManager
           onClose={() => setTagsOpen(false)}
           onChanged={() => void refresh()}
+          onReport={report}
+        />
+      )}
+
+      {editingView && (
+        <ViewEditor
+          title={editingView.title}
+          query={editingView.query}
+          folders={folders}
+          tags={allTags}
+          sources={sources}
+          onCancel={() => setEditingView(null)}
+          onSave={(title, query) => saveView(editingView.id, title, query)}
           onReport={report}
         />
       )}

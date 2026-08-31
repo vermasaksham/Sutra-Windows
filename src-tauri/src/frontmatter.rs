@@ -35,6 +35,10 @@ pub enum NoteType {
     /// A paper, book or dataset. Its own kind because a source is cited rather
     /// than written, and mixing them into the note list would bury the notes.
     Source,
+    /// A saved query. Its own kind because opening one runs it rather than
+    /// showing its body — the one note in the vault that is read by asking a
+    /// question instead of by reading it.
+    View,
 }
 
 impl NoteType {
@@ -50,6 +54,7 @@ impl NoteType {
             Self::Task => "task",
             Self::Daily => "daily",
             Self::Source => "source",
+            Self::View => "view",
         }
     }
 
@@ -59,7 +64,7 @@ impl NoteType {
     /// by hand, and the two drifting apart is silent — a note saved as a kind
     /// the UI has never heard of just renders as the default.
     #[cfg(test)]
-    pub fn all() -> [Self; 10] {
+    pub fn all() -> [Self; 11] {
         [
             Self::Standard,
             Self::Literature,
@@ -71,6 +76,7 @@ impl NoteType {
             Self::Task,
             Self::Daily,
             Self::Source,
+            Self::View,
         ]
     }
 
@@ -87,6 +93,7 @@ impl NoteType {
             "task" => Self::Task,
             "daily" => Self::Daily,
             "source" => Self::Source,
+            "view" => Self::View,
             _ => Self::Standard,
         }
     }
@@ -196,6 +203,13 @@ pub struct Frontmatter {
     /// The sources this note draws on, with where in them.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub sources: Vec<Citation>,
+    /// Present on a note of `type: view`: the query it stands for.
+    ///
+    /// In the note's own frontmatter rather than in a settings file, so a view
+    /// is backed up, synced, versioned and readable as plain text along with
+    /// everything else — and so deleting the index cannot lose one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub view: Option<crate::views::Query>,
 }
 
 /// The current time, truncated to whole seconds.
@@ -227,6 +241,7 @@ impl Frontmatter {
             cover: None,
             source: None,
             sources: Vec::new(),
+            view: None,
         }
     }
 }
@@ -309,6 +324,7 @@ mod tests {
             cover: None,
             source: None,
             sources: Vec::new(),
+            view: None,
         }
     }
 
@@ -415,6 +431,7 @@ mod tests {
                 "task",
                 "daily",
                 "source",
+                "view",
             ]
         );
         // And every one of them survives being written and read back.

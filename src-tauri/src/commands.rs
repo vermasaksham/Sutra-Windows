@@ -12,10 +12,11 @@ use crate::export::ExportDocument;
 use crate::frontmatter::NoteType;
 use crate::frontmatter::{Citation, SourceMeta};
 use crate::index::CitingNote;
-use crate::index::{Backlink, SearchHit};
+use crate::index::{Backlink, SearchHit, ViewResult};
 use crate::state::AppState;
 use crate::tags::Suggestion;
 use crate::vault::{MigrationPlan, NoteDoc, NoteSummary, Retag, TagChange};
+use crate::views::Query;
 use crate::zotero::{Reference, Zotero};
 use serde::Serialize;
 use std::collections::HashMap;
@@ -490,4 +491,51 @@ pub fn list_folders(state: State<'_, AppState>) -> Result<Vec<String>> {
 #[tauri::command]
 pub fn create_folder(state: State<'_, AppState>, folder: String) -> Result<String> {
     state.with_vault(|vault| vault.create_folder(&folder))
+}
+
+// ---- views -------------------------------------------------------------------
+
+/// Every view note in the vault.
+#[tauri::command]
+pub fn list_views(state: State<'_, AppState>) -> Result<Vec<NoteSummary>> {
+    state.with_vault(|vault| vault.list_views())
+}
+
+/// The query a view note holds, or `None` if it holds none.
+#[tauri::command]
+pub fn read_view(state: State<'_, AppState>, id: String) -> Result<Option<Query>> {
+    state.with_vault(|vault| vault.view_query(&id))
+}
+
+/// Run a query and return the notes it matches.
+///
+/// Takes the query rather than a view's id on purpose: evaluating a view then
+/// touches nothing on disk at all, not even the view's own file, and the same
+/// command gives the editor a live preview of a query that has not been saved
+/// yet — which is what makes building one a matter of seeing the results
+/// change rather than guessing.
+#[tauri::command]
+pub fn run_view(state: State<'_, AppState>, query: Query) -> Result<ViewResult> {
+    state.with_index(|index| index.run_view(&query))
+}
+
+/// Create a view note holding this query.
+#[tauri::command]
+pub fn create_view(state: State<'_, AppState>, title: String, query: Query) -> Result<NoteDoc> {
+    state.with_both(|vault, index| {
+        let doc = vault.create_view(&title, query.clone())?;
+        index.upsert(&doc.summary, &doc.body)?;
+        Ok(doc)
+    })
+}
+
+/// Replace a view note's query.
+#[tauri::command]
+pub fn save_view(state: State<'_, AppState>, id: String, query: Query) -> Result<NoteSummary> {
+    state.with_both(|vault, index| {
+        let summary = vault.set_view_query(&id, query.clone())?;
+        let doc = vault.read_note(&id)?;
+        index.upsert(&summary, &doc.body)?;
+        Ok(summary)
+    })
 }

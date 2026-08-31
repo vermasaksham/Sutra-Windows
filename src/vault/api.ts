@@ -11,7 +11,7 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 
 export type VaultInfo = { name: string };
 
-/** The nine kinds a note can be. Never asked for before writing. */
+/** The kinds a note can be. Never asked for before writing. */
 export type NoteType =
   | "standard"
   | "literature"
@@ -22,8 +22,34 @@ export type NoteType =
   | "meeting"
   | "task"
   | "daily"
-  | "source";
+  | "source"
+  | "view";
 
+/**
+ * What each kind is called, including the ones the picker does not offer.
+ */
+export const TYPE_LABELS: Record<NoteType, string> = {
+  standard: "Note",
+  literature: "Literature",
+  idea: "Idea",
+  question: "Research question",
+  experiment: "Experiment",
+  project: "Project",
+  meeting: "Meeting",
+  task: "Task",
+  daily: "Daily",
+  source: "Source",
+  view: "View",
+};
+
+/**
+ * The kinds the type picker offers, in order.
+ *
+ * `view` is missing on purpose. Every other kind is a way of describing a note
+ * someone has written; a view is a saved query, and a note turned into one by
+ * a dropdown would be a view with nothing to run. Views are made by saving a
+ * query, which is the only way to get one that means anything.
+ */
 export const NOTE_TYPES: ReadonlyArray<{ value: NoteType; label: string }> = [
   { value: "standard", label: "Note" },
   { value: "literature", label: "Literature" },
@@ -263,4 +289,127 @@ export function onVaultChanged(
   return listen<VaultChanged>("vault:changed", (event) =>
     handler(event.payload.changed),
   ).catch(() => () => {});
+}
+
+// ---- saved views -------------------------------------------------------------
+
+/**
+ * One thing a note must, or must not, be.
+ *
+ * A union of single-key objects, mirroring the YAML a view note holds. Typed
+ * rather than a query string on purpose: the UI can offer a real form, every
+ * term compiles to something the index can answer, and there is no syntax for
+ * anyone to get wrong.
+ */
+export type Condition =
+  /** In exactly this folder. `""` is the top level of the vault. */
+  | { in: string }
+  /** In this folder or any folder beneath it. */
+  | { under: string }
+  /** Carries this tag or any tag beneath it: `method` finds `method/xrd`. */
+  | { tag: string }
+  | { type: NoteType }
+  /** Cites this source note. */
+  | { cites: string }
+  /** Contains a wikilink to this note. */
+  | { "links-to": string }
+  /** Matches this full-text query. */
+  | { text: string }
+  /** Edited on or after this `YYYY-MM-DD`. */
+  | { "updated-after": string }
+  /** Edited before this `YYYY-MM-DD`. */
+  | { "updated-before": string };
+
+/**
+ * The key a condition is written under — the thing that says which it is.
+ *
+ * `keyof` over a union gives the keys they *share*, which here is none. The
+ * conditional distributes over the members first, so this is the union of
+ * every key instead.
+ */
+type KeyOfEach<T> = T extends unknown ? keyof T : never;
+export type ConditionKind = KeyOfEach<Condition> & string;
+
+/** Every kind, in the order the editor offers them. */
+export const CONDITION_KINDS: ReadonlyArray<{
+  kind: ConditionKind;
+  label: string;
+}> = [
+  { kind: "under", label: "In folder (and below)" },
+  { kind: "in", label: "In folder (exactly)" },
+  { kind: "tag", label: "Tagged" },
+  { kind: "type", label: "Of type" },
+  { kind: "text", label: "Mentioning" },
+  { kind: "cites", label: "Cites source" },
+  { kind: "links-to", label: "Links to note" },
+  { kind: "updated-after", label: "Edited since" },
+  { kind: "updated-before", label: "Untouched since" },
+];
+
+export type ViewSort = "recent" | "stale" | "title" | "folder";
+
+export const VIEW_SORTS: ReadonlyArray<{ value: ViewSort; label: string }> = [
+  { value: "recent", label: "Recently edited first" },
+  { value: "stale", label: "Least recently edited first" },
+  { value: "title", label: "By title" },
+  { value: "folder", label: "By folder" },
+];
+
+/**
+ * A saved query, exactly as it sits in a view note's frontmatter.
+ *
+ * Terms Rust could not read come back as-is and are passed back unchanged on
+ * save, so a view written by a newer build is never quietly edited by an older
+ * one. That is why the arrays are `unknown[]` at the edges and narrowed where
+ * they are used.
+ */
+export type ViewQuery = {
+  /** All of these must hold. */
+  all?: Condition[];
+  /** At least one of these must hold. Empty means no such requirement. */
+  any?: Condition[];
+  /** None of these may hold. */
+  none?: Condition[];
+  sort?: ViewSort;
+  limit?: number;
+};
+
+export type ViewResult = {
+  notes: NoteSummary[];
+  /** The query in English, for the header above the results. */
+  description: string;
+  /** The limit was reached, so there may be more. */
+  truncated: boolean;
+  /** Terms this build could not read and left out of the results. */
+  ignored: number;
+};
+
+export const viewsApi = {
+  /** Every view note in the vault. */
+  list: () => invoke<NoteSummary[]>("list_views"),
+  /** The query a view note holds, or null if it holds none. */
+  read: (id: string) => invoke<ViewQuery | null>("read_view", { id }),
+  /**
+   * Run a query. Takes the query rather than a view's id, so a query being
+   * edited previews live and evaluating one touches no file at all.
+   */
+  run: (query: ViewQuery) => invoke<ViewResult>("run_view", { query }),
+  create: (title: string, query: ViewQuery) =>
+    invoke<NoteDoc>("create_view", { title, query }),
+  save: (id: string, query: ViewQuery) =>
+    invoke<NoteSummary>("save_view", { id, query }),
+};
+
+/** Which kind of condition this is, and the value it carries. */
+export function conditionKind(condition: Condition): ConditionKind {
+  return Object.keys(condition)[0] as ConditionKind;
+}
+
+export function conditionValue(condition: Condition): string {
+  return String(Object.values(condition)[0] ?? "");
+}
+
+/** A condition of `kind` carrying `value`. */
+export function condition(kind: ConditionKind, value: string): Condition {
+  return { [kind]: value } as Condition;
 }

@@ -15,6 +15,7 @@ mod protocol;
 mod state;
 mod tags;
 mod vault;
+mod views;
 mod watcher;
 mod zotero;
 
@@ -79,6 +80,11 @@ fn main() {
             commands::import_zotero_source,
             commands::legacy_citations,
             commands::migrate_citations,
+            commands::list_views,
+            commands::read_view,
+            commands::run_view,
+            commands::create_view,
+            commands::save_view,
         ])
         // `generate_context!` pulls in tauri.conf.json at compile time.
         .run(tauri::generate_context!())

@@ -45,6 +45,20 @@ type Props = {
   onCreate: () => void;
   /** Focusing the search field is a global shortcut, so App drives it. */
   focusSearch: number;
+  /**
+   * Set when the column is showing a saved view rather than a place.
+   *
+   * A view has no location, so there is nothing to create a note "in" — the
+   * new-note button becomes the way to change the query instead, which is the
+   * only thing that changes what is listed here.
+   */
+  view?: {
+    /** The query in English, from Rust, so there is one rendering of it. */
+    description: string;
+    truncated: boolean;
+    ignored: number;
+    onEdit: () => void;
+  } | null;
 };
 
 export default function NoteList({
@@ -59,6 +73,7 @@ export default function NoteList({
   onDelete,
   onCreate,
   focusSearch,
+  view,
 }: Props) {
   const searchRef = useRef<HTMLInputElement>(null);
 
@@ -107,18 +122,46 @@ export default function NoteList({
         <p className="min-w-0 truncate text-[0.6875rem] font-semibold tracking-wide text-ink-muted uppercase">
           {searching ? `${rows.length} found` : heading}
         </p>
-        {!searching && (
-          <button
-            type="button"
-            onClick={onCreate}
-            aria-label="New note here"
-            title="New note here"
-            className="grid size-4 shrink-0 place-items-center rounded text-ink-muted transition-colors duration-150 ease-out hover:text-accent"
-          >
-            <Plus />
-          </button>
-        )}
+        {!searching &&
+          (view ? (
+            <button
+              type="button"
+              onClick={view.onEdit}
+              className="shrink-0 text-[0.6875rem] text-ink-muted transition-colors duration-150 ease-out hover:text-accent"
+            >
+              Edit query
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={onCreate}
+              aria-label="New note here"
+              title="New note here"
+              className="grid size-4 shrink-0 place-items-center rounded text-ink-muted transition-colors duration-150 ease-out hover:text-accent"
+            >
+              <Plus />
+            </button>
+          ))}
       </div>
+
+      {view && !searching && (
+        <div className="px-3.5 pb-2">
+          <p className="text-xs text-ink-muted">{view.description}</p>
+          {view.truncated && (
+            <p className="pt-1 text-xs text-highlight">
+              Stopped at the limit — there may be more. Narrow the query, or
+              raise the limit.
+            </p>
+          )}
+          {view.ignored > 0 && (
+            <p className="pt-1 text-xs text-highlight">
+              {view.ignored === 1
+                ? "One condition in this view was written by a newer Sutra and could not be applied, so these results are wider than the query asks for. The file still holds it."
+                : `${view.ignored} conditions in this view were written by a newer Sutra and could not be applied, so these results are wider than the query asks for. The file still holds them.`}
+            </p>
+          )}
+        </div>
+      )}
 
       {rows.length === 0 ? (
         <p className="px-3.5 py-2 text-sm text-ink-muted">
@@ -126,7 +169,9 @@ export default function NoteList({
             ? "No matches."
             : query !== ""
               ? "Searching…"
-              : "Nothing here yet."}
+              : view
+                ? "Nothing matches this view."
+                : "Nothing here yet."}
         </p>
       ) : (
         <ul className="min-h-0 flex-1 overflow-y-auto px-1.5 pb-2">

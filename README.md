@@ -86,6 +86,7 @@ src/
     tree.ts           Folder paths -> a tree, inferring missing parents
     tags.ts           Tag paths -> a tree, plus autocomplete. Unit tested.
     TagManager.tsx    Rename, merge and tidy tags across the vault
+    ViewEditor.tsx    Building a saved query, as a form with a live preview
     SourcesPanel.tsx  What a note draws on, with page and quote
     SourceDetails.tsx A source note's paper, and what rests on it
     SourcePicker.tsx  The vault first, then Zotero
@@ -129,6 +130,7 @@ src-tauri/
     zotero.rs         Reading references from a running Zotero
     links.rs          Finding [[id]] references in markdown
     citations.rs      Finding and rewriting [@ref] in markdown. Unit tested.
+    views.rs          The typed query, and its compiler. Unit tested.
     frontmatter.rs    The YAML block, parsing and serialising
     note.rs           Filenames, slugging, atomic writes
     watcher.rs        Debounced filesystem watching
@@ -212,15 +214,71 @@ nothing reaches the file and the separation survives export and every other
 editor. That makes it a convention the app can make obvious but cannot enforce —
 which is the price of a format worth keeping, and worth paying.
 
+## Saved views
+
+A view is a note. `type: view` in `Views/`, with the query in its own
+frontmatter — so a view is backed up, synced, diffed and readable as plain text
+like everything else, and deleting the index cannot lose one. Its body is yours:
+the place to write down why the view exists, which is what keeps a saved search
+from rotting into a list nobody remembers the purpose of.
+
+The query is typed, not a string language:
+
+```yaml
+view:
+  all:
+    - under: Research/Sb2Se3
+    - tag: method/xrd
+  none:
+    - tag: archive
+  sort: title
+```
+
+`tag:xrd AND (type:literature OR type:experiment) -tag:archive` would be a
+parser, a syntax to teach, an error-message design, and an escaping problem the
+first time a tag has a space in it. A small tree of typed terms instead means
+YAML does the parsing, the editor is a form rather than a text box, and every
+term compiles to SQL that can use an index. The price is that the expressible
+queries are the enumerated ones and no others, which is a boundary worth having.
+
+`under:` and `tag:` compile to a half-open range rather than a `LIKE` or `GLOB`
+prefix — both would need escaping (`Data [raw]` is an ordinary folder name) and
+neither reliably seeks the index. A view over 5,000 notes is answered in under a
+millisecond, from indexes only, with no table scanned; both are asserted, the
+second by reading SQLite's own query plan.
+
+**Evaluating a view touches no file.** A view is a question, and asking one must
+not change the answer — no cached results, no `lastViewed`, no stamped
+`updated`. That is a test, not an intention.
+
+A term this build cannot read — a view written by a newer Sutra, or a typo — is
+kept verbatim, written back unchanged, and left out of the results, with the
+list saying so. Silently dropping half of someone's query on the next save is
+data loss.
+
+### The line this does not cross
+
+A view is a **saved query**, not a database view. It has no schema of its own,
+no columns and no per-view fields; nothing can be edited from inside one; and
+its results are the notes themselves, opened in their real folders. Location,
+tags and views stay three independent axes — selecting a view replaces the list
+rather than filtering within a folder, because intersecting them would answer a
+question nobody asked.
+
 ## Scope
 
 In: block editor, slash menu, drag handles, real folders, wikilinks, backlinks,
 full-text search, tags, note types, an Inbox, a command palette, KaTeX + mhchem,
 light/dark, autosave, keyboard shortcuts.
 
+In too, since Phase 7: hierarchical tags, note types, sources as notes, and
+saved views.
+
 Deliberately out, and not up for discussion: database views, kanban boards,
 relations, filtered tables. Sutra is a writing tool, not a database with a UI.
-Also out: real-time collaboration, cloud sync, mobile apps, plugin systems.
+Saved views are the near miss — they are a saved query, which is a different
+thing, and the paragraph above draws the line they may not cross. Also out:
+real-time collaboration, cloud sync, mobile apps, plugin systems.
 
 Importing a source from Zotero reads its local API on 127.0.0.1, so nothing
 leaves the machine. It must be enabled in Zotero → Settings → Advanced → "Allow

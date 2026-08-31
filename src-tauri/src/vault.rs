@@ -11,6 +11,7 @@ use crate::error::{Result, SutraError};
 use crate::frontmatter::{self, Citation, Frontmatter, NoteType, SourceMeta};
 use crate::note;
 use crate::tags;
+use crate::views;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
@@ -44,6 +45,10 @@ pub const INBOX: &str = "Inbox";
 /// A convention, not a rule: a source is an ordinary note and works from
 /// anywhere. This is only where new ones are put.
 pub const LIBRARY: &str = "Library";
+
+/// Where saved views are kept, for the same reason and with the same force: a
+/// convention, not a rule.
+pub const VIEWS: &str = "Views";
 
 /// How deep a note may sit below the root. The brief asks for three or four
 /// levels; four is the cap. It is also roughly what keeps a Windows path under
@@ -706,6 +711,68 @@ impl Vault {
             .list_notes()?
             .into_iter()
             .filter(|n| n.note_type == NoteType::Source)
+            .collect())
+    }
+
+    // ---- views ---------------------------------------------------------------
+
+    /// Create a view note holding `query`.
+    ///
+    /// A view is a note, so this is the same three lines as creating any other
+    /// one. Its body is empty and stays yours: the place to write down why the
+    /// view exists, which is the thing that stops a saved search from rotting
+    /// into a list nobody remembers the purpose of.
+    pub fn create_view(&self, title: &str, query: views::Query) -> Result<NoteDoc> {
+        let folder = self.checked_folder(VIEWS)?;
+        fs::create_dir_all(self.root.join(&folder))?;
+
+        let id = Ulid::generate().to_string();
+        let title = if title.trim().is_empty() {
+            "Untitled view"
+        } else {
+            title.trim()
+        };
+        let mut fm = Frontmatter::new(id.clone(), title.to_string());
+        fm.note_type = NoteType::View;
+        fm.view = Some(query);
+
+        let relative = join_relative(&folder, &unique_name(&self.root.join(&folder), title, None));
+        note::write_atomic(&self.root.join(&relative), &frontmatter::join(&fm, "")?)?;
+        self.remember(&id, &relative);
+
+        Ok(NoteDoc {
+            summary: summary_of(&fm, "", folder),
+            body: String::new(),
+            adopted: false,
+        })
+    }
+
+    /// The query a view note holds.
+    ///
+    /// `None` for a note that is not a view, or a view whose block was deleted
+    /// by hand — both of which are recoverable states, not errors: the note is
+    /// still there and still says what it was for.
+    pub fn view_query(&self, id: &str) -> Result<Option<views::Query>> {
+        let relative = self.relative_for(id)?;
+        let contents = fs::read_to_string(self.root.join(&relative))?;
+        let (parsed, _) = frontmatter::split(&contents)?;
+        Ok(parsed.and_then(|fm| fm.view))
+    }
+
+    /// Replace a view note's query. Makes the note a view if it was not one.
+    pub fn set_view_query(&self, id: &str, query: views::Query) -> Result<NoteSummary> {
+        self.edit(id, |fm| {
+            fm.note_type = NoteType::View;
+            fm.view = Some(query);
+        })
+    }
+
+    /// Every view note in the vault, wherever it sits.
+    pub fn list_views(&self) -> Result<Vec<NoteSummary>> {
+        Ok(self
+            .list_notes()?
+            .into_iter()
+            .filter(|n| n.note_type == NoteType::View)
             .collect())
     }
 
@@ -2712,5 +2779,136 @@ mod tests {
         // Nothing left to do, so nothing is written.
         assert_eq!(vault.migrate_citations(&mapping).unwrap(), 0);
         assert!(vault.legacy_citations().unwrap().is_empty());
+    }
+    // ---- views ---------------------------------------------------------------
+
+    #[test]
+    fn a_view_is_an_ordinary_note_with_a_query_in_its_frontmatter() {
+        // The whole design in one assertion: a view is a markdown file. Open
+        // it in any editor, read what it looks for, delete Sutra, and the
+        // query is still there in plain text.
+        let vault = TempVault::new();
+        let query: views::Query =
+            serde_yaml_ng::from_str("all:\n- under: Research\n- tag: method/xrd\nsort: title\n")
+                .unwrap();
+        let doc = vault.create_view("Everything XRD", query.clone()).unwrap();
+
+        let path = vault.root().join(VIEWS).join("Everything XRD.md");
+        let text = fs::read_to_string(&path).unwrap();
+        assert!(text.contains("type: view"), "{text}");
+        assert!(text.contains("under: Research"), "{text}");
+        assert!(text.contains("tag: method/xrd"), "{text}");
+        // Written the way a person would write it, not with YAML tags.
+        assert!(!text.contains('!'), "{text}");
+
+        assert_eq!(vault.view_query(&doc.summary.id).unwrap(), Some(query));
+    }
+
+    #[test]
+    fn a_view_note_can_be_written_in_moved_and_tagged_like_any_other() {
+        // "A view is a note" is only true if every ordinary thing works on it.
+        let vault = TempVault::new();
+        let doc = vault
+            .create_view(
+                "Unread papers",
+                serde_yaml_ng::from_str("all: [{tag: unread}]").unwrap(),
+            )
+            .unwrap();
+        let id = doc.summary.id;
+
+        vault
+            .save_note(
+                &id,
+                "Unread papers",
+                "Why: chapter 3 needs these read first.",
+            )
+            .unwrap();
+        vault
+            .set_meta(&id, Some("📥".into()), None, vec!["chapter/3".into()])
+            .unwrap();
+        vault.move_note(&id, "Research").unwrap();
+
+        let read = vault.read_note(&id).unwrap();
+        assert_eq!(read.summary.folder, "Research");
+        assert_eq!(read.summary.tags, ["chapter/3"]);
+        assert_eq!(read.body.trim(), "Why: chapter 3 needs these read first.");
+        // And the query survived all of it.
+        assert!(vault.view_query(&id).unwrap().is_some());
+    }
+
+    #[test]
+    fn a_view_whose_query_was_deleted_by_hand_is_still_a_readable_note() {
+        // Someone will delete the `view:` block. That must leave a note that
+        // opens and says what it was for, not a file the app refuses to read.
+        let vault = TempVault::new();
+        let doc = vault
+            .create_view(
+                "Broken",
+                serde_yaml_ng::from_str("all: [{tag: x}]").unwrap(),
+            )
+            .unwrap();
+        let id = doc.summary.id;
+        vault
+            .save_note(&id, "Broken", "The prose survives.")
+            .unwrap();
+
+        let path = vault.root().join(VIEWS).join("Broken.md");
+        let text = fs::read_to_string(&path).unwrap();
+        let stripped: String = text
+            .lines()
+            .filter(|l| !l.starts_with("view:") && !l.starts_with("  ") && !l.starts_with("- "))
+            .collect::<Vec<_>>()
+            .join("\n");
+        fs::write(&path, stripped).unwrap();
+
+        assert_eq!(vault.view_query(&id).unwrap(), None);
+        assert_eq!(
+            vault.read_note(&id).unwrap().body.trim(),
+            "The prose survives."
+        );
+    }
+
+    #[test]
+    fn saving_a_query_onto_an_existing_note_makes_it_a_view() {
+        let vault = TempVault::new();
+        let doc = vault.create_note("Was a note", None).unwrap();
+        let summary = vault
+            .set_view_query(
+                &doc.summary.id,
+                serde_yaml_ng::from_str("all: [{type: question}]").unwrap(),
+            )
+            .unwrap();
+        assert_eq!(summary.note_type, NoteType::View);
+        assert_eq!(vault.list_views().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn a_view_written_by_a_newer_sutra_survives_a_round_trip_through_this_one() {
+        // The forward-compatibility rule. An unknown term is ignored when the
+        // view runs, but it is still in the file after this build saves it —
+        // opening a vault on an older machine must not quietly edit the query.
+        let vault = TempVault::new();
+        let path = vault.root().join("From the future.md");
+        fs::write(
+            &path,
+            "---\nid: 01HQ3M8K2PVIEWFROMTHEFUTURE\ntype: view\ntitle: From the future\n\
+             position: 0\ncreated: 2026-08-31T00:00:00Z\nupdated: 2026-08-31T00:00:00Z\n\
+             view:\n  all:\n  - tag: xrd\n  - written-by: alice\n---\n\nBody.\n",
+        )
+        .unwrap();
+
+        let id = "01HQ3M8K2PVIEWFROMTHEFUTURE";
+        let query = vault.view_query(id).unwrap().unwrap();
+        assert_eq!(query.unreadable().len(), 1);
+        assert_eq!(query.compile().ignored, 1);
+
+        vault.set_view_query(id, query).unwrap();
+        let text = fs::read_to_string(&path).unwrap();
+        assert!(
+            text.contains("written-by"),
+            "the unknown term was dropped:\n{text}"
+        );
+        assert!(text.contains("alice"), "{text}");
+        assert!(text.contains("tag: xrd"), "{text}");
     }
 }

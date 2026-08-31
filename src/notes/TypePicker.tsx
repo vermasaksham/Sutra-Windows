@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { NOTE_TYPES, type NoteType } from "../vault/api";
+import { NOTE_TYPES, TYPE_LABELS, type NoteType } from "../vault/api";
 
 /**
  * What kind of note this is, changeable at any time.
@@ -28,8 +28,10 @@ export default function TypePicker({
   }, [open]);
 
   // A hand-edited file can carry a type this build has never heard of, so the
-  // label falls back rather than the component crashing.
-  const label = NOTE_TYPES.find((t) => t.value === type)?.label ?? "Note";
+  // label falls back rather than the component crashing. Read from the labels
+  // rather than the offered list, so a view still says "View" even though the
+  // picker will not turn a note into one.
+  const label = TYPE_LABELS[type] ?? "Note";
   const isDefault = type === "standard";
 
   return (

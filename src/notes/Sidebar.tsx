@@ -8,9 +8,11 @@ import type { NoteSummary } from "../vault/api";
 /**
  * The left rail: what to look at, rather than which note.
  *
- * Four groups, deliberately not one hierarchy — a folder is where a note
- * lives, a tag is what it is about, and the two must never be presented as the
- * same kind of thing.
+ * Separate groups, deliberately not one hierarchy — a folder is where a note
+ * lives, a tag is what it is about, a view is a question asked of the whole
+ * vault, and none of the three may be presented as the same kind of thing.
+ * A note sits in exactly one folder, carries any number of tags, and appears
+ * in a view without belonging to it at all.
  *
  * The Inbox is pinned above the folder tree even though it is an ordinary
  * directory. It is where captures land, so it is the one folder that has a job
@@ -21,23 +23,31 @@ export default function Sidebar({
   vaultName,
   notes,
   folders,
+  views,
   activeFolder,
   activeTag,
+  activeView,
   onSelectFolder,
   onSelectTag,
+  onSelectView,
   onCapture,
   onNewFolder,
+  onNewView,
   onManageTags,
 }: {
   vaultName: string;
   notes: NoteSummary[];
   folders: string[];
+  views: NoteSummary[];
   activeFolder: string | null;
   activeTag: string | null;
+  activeView: string | null;
   onSelectFolder: (folder: string | null) => void;
   onSelectTag: (tag: string | null) => void;
+  onSelectView: (id: string | null) => void;
   onCapture: () => void;
   onNewFolder: (parent: string | null) => void;
+  onNewView: () => void;
   onManageTags: () => void;
 }) {
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
@@ -92,14 +102,14 @@ export default function Sidebar({
           <Row
             label="All notes"
             count={notes.length}
-            active={activeFolder === null && activeTag === null}
+            active={activeFolder === null && activeTag === null && !activeView}
             onClick={() => onSelectFolder(null)}
           />
           <Row
             label="Inbox"
             count={inboxCount}
             emphasis={inboxCount > 0}
-            active={activeFolder === INBOX && activeTag === null}
+            active={activeFolder === INBOX && activeTag === null && !activeView}
             onClick={() => onSelectFolder(INBOX)}
           />
         </div>
@@ -129,11 +139,61 @@ export default function Sidebar({
               <li key={node.path}>
                 <FolderRow
                   node={node}
-                  active={activeFolder === node.path && activeTag === null}
+                  active={
+                    activeFolder === node.path &&
+                    activeTag === null &&
+                    !activeView
+                  }
                   collapsed={collapsed.has(node.path)}
                   onToggle={() => toggle(node.path)}
                   onSelect={() => onSelectFolder(node.path)}
                 />
+              </li>
+            ))}
+          </ul>
+        )}
+
+        <div className="flex items-center justify-between px-3 pt-4 pb-1">
+          <p className="text-[0.6875rem] font-semibold tracking-wide text-ink-muted uppercase">
+            Views
+          </p>
+          <button
+            type="button"
+            onClick={onNewView}
+            aria-label="New view"
+            title="New view"
+            className="grid size-4 place-items-center rounded text-ink-muted transition-colors duration-150 ease-out hover:text-accent"
+          >
+            <Plus small />
+          </button>
+        </div>
+
+        {views.length === 0 ? (
+          <p className="px-3 pb-1 text-xs text-ink-muted">
+            A saved question about the vault, run fresh every time.
+          </p>
+        ) : (
+          <ul aria-label="Views" className="px-1.5">
+            {views.map((view) => (
+              <li key={view.id}>
+                <button
+                  type="button"
+                  onClick={() =>
+                    onSelectView(activeView === view.id ? null : view.id)
+                  }
+                  aria-current={activeView === view.id ? "true" : undefined}
+                  className={[
+                    "flex w-full items-center gap-1.5 rounded-md px-2 py-1 text-left text-sm transition-colors duration-150 ease-out",
+                    activeView === view.id
+                      ? "bg-row-active font-medium text-accent"
+                      : "text-ink-soft hover:bg-row-hover hover:text-ink",
+                  ].join(" ")}
+                >
+                  <span className="shrink-0 text-ink-muted" aria-hidden>
+                    {view.icon ?? <Lens />}
+                  </span>
+                  <span className="min-w-0 flex-1 truncate">{view.title}</span>
+                </button>
               </li>
             ))}
           </ul>
@@ -160,7 +220,7 @@ export default function Sidebar({
                 <li key={node.path}>
                   <TagRow
                     node={node}
-                    active={activeTag === node.path}
+                    active={activeTag === node.path && !activeView}
                     collapsed={tagsCollapsed.has(node.path)}
                     onToggle={() => toggleTag(node.path)}
                     onSelect={() =>
@@ -415,6 +475,24 @@ function Chevron({ open }: { open: boolean }) {
       aria-hidden
     >
       <path d="M9 6l6 6-6 6" />
+    </svg>
+  );
+}
+
+/** A view's default mark: a saved question, drawn as a lens. */
+function Lens() {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={1.75}
+      strokeLinecap="round"
+      className="size-3.5"
+      aria-hidden
+    >
+      <circle cx="11" cy="11" r="6" />
+      <path d="M15.5 15.5L20 20" />
     </svg>
   );
 }

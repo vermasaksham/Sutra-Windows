@@ -16,7 +16,7 @@ use std::sync::Mutex;
 /// Bumped whenever the schema changes. On mismatch the index is dropped and
 /// rebuilt rather than migrated — migrations are for data you cannot recreate,
 /// and this is not that.
-const SCHEMA_VERSION: i32 = 6;
+const SCHEMA_VERSION: i32 = 7;
 
 const SCHEMA: &str = r#"
 CREATE TABLE notes (
@@ -43,6 +43,19 @@ CREATE TABLE notes (
     updated   TEXT NOT NULL
 );
 CREATE INDEX notes_by_folder ON notes(folder, position);
+-- Saved views sort by edit date more often than by anything else, and a view
+-- over a large vault should seek this rather than sort the whole table.
+CREATE INDEX notes_by_updated ON notes(updated);
+
+-- Tags, one row each, so a view can seek an index instead of scanning every
+-- note's JSON. The `tags` column on `notes` stays: it is what the note list
+-- reads back, and this is the lookup side of the same fact.
+CREATE TABLE note_tags (
+    note_id TEXT NOT NULL,
+    tag     TEXT NOT NULL,
+    PRIMARY KEY (note_id, tag)
+);
+CREATE INDEX note_tags_by_tag ON note_tags(tag);
 
 -- Which notes cite which sources, flattened so the reverse lookup is a query
 -- rather than a scan of every note's frontmatter. Rebuilt from the markdown
@@ -93,6 +106,23 @@ pub struct SearchHit {
     pub title: String,
     /// A fragment of the body with the match marked, straight from FTS5.
     pub excerpt: String,
+}
+
+/// What running a saved view returned.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ViewResult {
+    pub notes: Vec<NoteSummary>,
+    /// The query in English, for the header above the results. Computed here
+    /// rather than in the frontend so there is one rendering of what a term
+    /// means, not two that can disagree.
+    pub description: String,
+    /// The limit was reached, so there may be more. Said out loud rather than
+    /// hidden, because a list that quietly stops is a list that lies.
+    pub truncated: bool,
+    /// Terms this version could not read and skipped. The file still holds
+    /// them; the results were computed without them.
+    pub ignored: usize,
 }
 
 /// A note that links to the one being viewed.
@@ -255,6 +285,30 @@ impl Index {
         Ok(rows.filter_map(std::result::Result::ok).collect())
     }
 
+    /// Run a saved view.
+    ///
+    /// One statement, planned by SQLite, reading only the index. Nothing here
+    /// opens, reads, stats or writes a note file: a view is a question about
+    /// the vault, and asking a question must not be able to change the answer.
+    pub fn run_view(&self, query: &crate::views::Query) -> Result<ViewResult> {
+        let compiled = query.compile();
+        let guard = self.conn.lock().unwrap_or_else(|e| e.into_inner());
+        let mut stmt = guard.prepare(&compiled.sql)?;
+        let params: Vec<&dyn rusqlite::ToSql> = compiled
+            .params
+            .iter()
+            .map(std::convert::AsRef::as_ref)
+            .collect();
+        let rows = stmt.query_map(params.as_slice(), row_to_summary)?;
+        let notes: Vec<NoteSummary> = rows.filter_map(std::result::Result::ok).collect();
+        Ok(ViewResult {
+            description: crate::views::describe(query),
+            truncated: notes.len() == query.limit(),
+            ignored: compiled.ignored,
+            notes,
+        })
+    }
+
     /// Notes that link to `id`.
     pub fn backlinks(&self, id: &str) -> Result<Vec<Backlink>> {
         let guard = self.conn.lock().unwrap_or_else(|e| e.into_inner());
@@ -318,6 +372,18 @@ fn insert_note(tx: &rusqlite::Transaction<'_>, note: &NoteSummary, body: &str) -
         "INSERT INTO notes_fts (id, title, body, tags) VALUES (?1, ?2, ?3, ?4)",
         params![note.id, note.title, body, note.tags.join(" ")],
     )?;
+    for tag in &note.tags {
+        // Trimmed and de-duplicated by the primary key: `#xrd` and `#xrd/`
+        // are one tag, and a note listing it twice is still one row.
+        let tag = tag.trim().trim_matches('/');
+        if tag.is_empty() {
+            continue;
+        }
+        tx.execute(
+            "INSERT OR IGNORE INTO note_tags (note_id, tag) VALUES (?1, ?2)",
+            params![note.id, tag],
+        )?;
+    }
     for citation in &note.sources {
         // A note citing one source at two pages is two rows; citing it twice at
         // the same page is one, which the primary key enforces.
@@ -345,6 +411,7 @@ fn remove_note(tx: &rusqlite::Transaction<'_>, id: &str) -> Result<()> {
     tx.execute("DELETE FROM notes_fts WHERE id = ?1", [id])?;
     tx.execute("DELETE FROM links WHERE source = ?1", [id])?;
     tx.execute("DELETE FROM note_sources WHERE note_id = ?1", [id])?;
+    tx.execute("DELETE FROM note_tags WHERE note_id = ?1", [id])?;
     Ok(())
 }
 
@@ -381,7 +448,7 @@ fn row_to_summary(row: &rusqlite::Row<'_>) -> rusqlite::Result<NoteSummary> {
 /// search. Someone typing `Sb2Se3 (run 3)` means it literally, so every term is
 /// quoted, and a trailing `*` makes the last one a prefix so results narrow as
 /// they type.
-fn fts_query(input: &str) -> String {
+pub(crate) fn fts_query(input: &str) -> String {
     let mut terms: Vec<String> = input
         .split_whitespace()
         .map(|term| format!("\"{}\"", term.replace('"', "\"\"")))
@@ -814,5 +881,367 @@ mod tests {
         let without = f.vault.set_citations(&note.summary.id, vec![]).unwrap();
         f.index.upsert(&without, "").unwrap();
         assert!(f.index.citing(&source.summary.id).unwrap().is_empty());
+    }
+    // ---- saved views ---------------------------------------------------------
+
+    /// A view over the fixture's vault, by its YAML.
+    fn view(f: &Fixture, yaml: &str) -> Vec<String> {
+        let query: crate::views::Query = serde_yaml_ng::from_str(yaml).unwrap();
+        f.index
+            .run_view(&query)
+            .unwrap()
+            .notes
+            .into_iter()
+            .map(|n| n.title)
+            .collect()
+    }
+
+    /// A note at a folder, with tags, indexed.
+    fn note(f: &Fixture, folder: &str, title: &str, tags: &[&str], body: &str) -> String {
+        let doc = f
+            .vault
+            .create_note(title, Some(folder.to_string()))
+            .unwrap();
+        f.vault.save_note(&doc.summary.id, title, body).unwrap();
+        let summary = f
+            .vault
+            .set_meta(
+                &doc.summary.id,
+                None,
+                None,
+                tags.iter().map(|t| (*t).to_string()).collect(),
+            )
+            .unwrap();
+        f.index.upsert(&summary, body).unwrap();
+        doc.summary.id
+    }
+
+    #[test]
+    fn under_a_folder_finds_descendants_and_not_siblings_that_start_the_same_way() {
+        let f = Fixture::new();
+        note(&f, "Research", "At the top", &[], "");
+        note(&f, "Research/Sb2Se3", "One down", &[], "");
+        note(&f, "Research/Sb2Se3/XRD", "Two down", &[], "");
+        note(&f, "Researchers", "A different folder entirely", &[], "");
+
+        let mut found = view(&f, "all: [{under: Research}]\nsort: title\n");
+        found.sort();
+        assert_eq!(found, ["At the top", "One down", "Two down"]);
+
+        // `in` is that folder and nothing beneath it.
+        assert_eq!(view(&f, "all: [{in: Research}]"), ["At the top"]);
+    }
+
+    #[test]
+    fn a_folder_named_with_a_glob_character_matches_literally() {
+        // The reason `under` is a range and not LIKE or GLOB. `Data [raw]` is
+        // an ordinary folder name and a bracket in a GLOB pattern is a
+        // character class, so this would silently return nothing.
+        let f = Fixture::new();
+        note(&f, "Data [raw]/2026", "Under the awkward name", &[], "");
+        note(
+            &f,
+            "Data x/2026",
+            "Under a name a glob would also match",
+            &[],
+            "",
+        );
+        assert_eq!(
+            view(&f, "all: [{under: 'Data [raw]'}]"),
+            ["Under the awkward name"]
+        );
+    }
+
+    #[test]
+    fn a_tag_view_includes_the_tags_beneath_it() {
+        // A hierarchical tag is a category. Asking for `method` and not being
+        // shown `method/xrd` would make the tag tree a lie.
+        let f = Fixture::new();
+        note(&f, "", "XRD run", &["method/xrd"], "");
+        note(&f, "", "Raman run", &["method/raman"], "");
+        note(&f, "", "Methodology", &["method"], "");
+        note(&f, "", "Older XRD work", &["method/xrd-old"], "");
+        note(&f, "", "Unrelated", &["sb2se3"], "");
+
+        let mut found = view(&f, "all: [{tag: method}]\nsort: title\n");
+        found.sort();
+        assert_eq!(
+            found,
+            ["Methodology", "Older XRD work", "Raman run", "XRD run"]
+        );
+
+        // But `method/xrd` must not swallow `method/xrd-old`: a tag whose name
+        // merely starts the same way is a different tag.
+        assert_eq!(view(&f, "all: [{tag: method/xrd}]"), ["XRD run"]);
+    }
+
+    #[test]
+    fn all_any_and_none_mean_what_they_say() {
+        let f = Fixture::new();
+        note(&f, "Research", "Kept", &["xrd"], "");
+        note(&f, "Research", "Excluded by none", &["xrd", "archive"], "");
+        note(&f, "Elsewhere", "Excluded by all", &["xrd"], "");
+        note(&f, "Research", "Excluded by tag", &["raman"], "");
+
+        assert_eq!(
+            view(
+                &f,
+                "all:\n  - in: Research\n  - tag: xrd\nnone:\n  - tag: archive\n"
+            ),
+            ["Kept"]
+        );
+    }
+
+    #[test]
+    fn any_is_a_union_and_an_empty_any_is_not_a_filter() {
+        let f = Fixture::new();
+        note(&f, "A", "In A", &[], "");
+        note(&f, "B", "In B", &[], "");
+        note(&f, "C", "In C", &[], "");
+
+        let mut found = view(&f, "any:\n  - in: A\n  - in: B\n");
+        found.sort();
+        assert_eq!(found, ["In A", "In B"]);
+
+        // `all` alone, with `any` absent, must not be intersected with nothing.
+        assert_eq!(view(&f, "all: [{in: C}]"), ["In C"]);
+    }
+
+    #[test]
+    fn a_view_can_ask_about_text_citations_and_links() {
+        let f = Fixture::new();
+        let source = f
+            .vault
+            .create_source(
+                "Zhou 2019",
+                crate::frontmatter::SourceMeta {
+                    year: Some("2019".into()),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        f.index.upsert(&source.summary, "").unwrap();
+
+        let target = note(&f, "", "The linked note", &[], "");
+        let citing = note(&f, "", "Cites the paper", &[], "Selenide ribbons.");
+        f.vault
+            .set_citations(
+                &citing,
+                vec![crate::frontmatter::Citation {
+                    id: source.summary.id.clone(),
+                    page: Some("S12".into()),
+                    quote: None,
+                    captured: None,
+                }],
+            )
+            .unwrap();
+        let citing_summary = f.vault.read_note(&citing).unwrap().summary;
+        f.index
+            .upsert(&citing_summary, "Selenide ribbons.")
+            .unwrap();
+
+        let linking = note(&f, "", "Links to it", &[], &format!("See [[{target}]]."));
+        let _ = linking;
+
+        assert_eq!(view(&f, "all: [{text: selenide}]"), ["Cites the paper"]);
+        assert_eq!(
+            view(&f, &format!("all: [{{cites: {}}}]", source.summary.id)),
+            ["Cites the paper"]
+        );
+        assert_eq!(
+            view(&f, &format!("all: [{{links-to: {target}}}]")),
+            ["Links to it"]
+        );
+    }
+
+    #[test]
+    fn a_view_says_when_it_stopped_short() {
+        // A list that quietly stops at its limit is a list that lies about the
+        // vault. This is the flag the header reads.
+        let f = Fixture::new();
+        for i in 0..5 {
+            note(&f, "", &format!("Note {i}"), &[], "");
+        }
+        let query: crate::views::Query = serde_yaml_ng::from_str("limit: 3").unwrap();
+        let result = f.index.run_view(&query).unwrap();
+        assert_eq!(result.notes.len(), 3);
+        assert!(result.truncated);
+
+        let query: crate::views::Query = serde_yaml_ng::from_str("limit: 50").unwrap();
+        assert!(!f.index.run_view(&query).unwrap().truncated);
+    }
+
+    #[test]
+    fn evaluating_a_view_touches_no_note_file() {
+        // The other half of the step's proof, and the line that keeps a view a
+        // question rather than an operation. A saved search that rewrote
+        // frontmatter — a `lastViewed`, a cached result set, a stamped
+        // `updated` — would make reading the vault change it, and would show
+        // up months later as five hundred notes that all claim to have been
+        // edited on the same afternoon.
+        let f = Fixture::new();
+        note(&f, "Research", "Alpha", &["xrd"], "Selenide ribbons.");
+        note(
+            &f,
+            "Research/Sb2Se3",
+            "Beta",
+            &["xrd", "archive"],
+            "Antimony.",
+        );
+        note(&f, "Elsewhere", "Gamma", &["raman"], "Raman shift.");
+        let view_note = f
+            .vault
+            .create_view(
+                "Everything XRD",
+                serde_yaml_ng::from_str("all: [{tag: xrd}]\nnone: [{tag: archive}]").unwrap(),
+            )
+            .unwrap();
+
+        /// Every markdown file in the vault: what it says and when it was last
+        /// written. The index database is deliberately not included — it is
+        /// derived, and SQLite may touch it freely.
+        fn snapshot(
+            root: &std::path::Path,
+        ) -> Vec<(std::path::PathBuf, Vec<u8>, std::time::SystemTime)> {
+            let mut out = Vec::new();
+            let mut stack = vec![root.to_path_buf()];
+            while let Some(dir) = stack.pop() {
+                for entry in std::fs::read_dir(&dir).unwrap().flatten() {
+                    let path = entry.path();
+                    if path.is_dir() {
+                        stack.push(path);
+                    } else if path.extension().is_some_and(|e| e == "md") {
+                        let meta = std::fs::metadata(&path).unwrap();
+                        out.push((
+                            path.clone(),
+                            std::fs::read(&path).unwrap(),
+                            meta.modified().unwrap(),
+                        ));
+                    }
+                }
+            }
+            out.sort_by(|a, b| a.0.cmp(&b.0));
+            out
+        }
+
+        f.index.rebuild(&f.vault).unwrap();
+        let before = snapshot(&f.root);
+        assert_eq!(before.len(), 4, "three notes and the view itself");
+
+        // The realistic path: read the view's query from its file, then run it.
+        let query = f.vault.view_query(&view_note.summary.id).unwrap().unwrap();
+        for _ in 0..20 {
+            let result = f.index.run_view(&query).unwrap();
+            assert_eq!(
+                result
+                    .notes
+                    .iter()
+                    .map(|n| n.title.as_str())
+                    .collect::<Vec<_>>(),
+                ["Alpha"]
+            );
+        }
+
+        assert_eq!(
+            before,
+            snapshot(&f.root),
+            "evaluating a view rewrote a note"
+        );
+    }
+
+    #[test]
+    fn a_view_over_five_thousand_notes_is_answered_from_the_index() {
+        // The step's proof. Five thousand notes, a query touching folder, tag
+        // and type at once, answered in one statement.
+        //
+        // 50 ms is the number the plan committed to. This runs in a debug
+        // build, where both Rust and the bundled SQLite are unoptimised, and
+        // it still comes in around 5 ms — so the ceiling is the promise, not
+        // a threshold tuned to just pass.
+        let f = Fixture::new();
+        let now = crate::frontmatter::now();
+        {
+            let guard = f.index.conn.lock().unwrap();
+            let tx = guard.unchecked_transaction().unwrap();
+            for i in 0..5_000 {
+                let summary = NoteSummary {
+                    id: Ulid::generate().to_string(),
+                    note_type: if i % 7 == 0 {
+                        crate::frontmatter::NoteType::Literature
+                    } else {
+                        crate::frontmatter::NoteType::Standard
+                    },
+                    title: format!("Note {i}"),
+                    folder: format!("Research/Batch{}", i % 50),
+                    position: i,
+                    tags: vec![format!("method/m{}", i % 30), "sb2se3".into()],
+                    icon: None,
+                    cover: None,
+                    source: None,
+                    sources: Vec::new(),
+                    excerpt: String::new(),
+                    updated: now,
+                };
+                insert_note(&tx, &summary, "Body text about selenide ribbons.").unwrap();
+            }
+            tx.commit().unwrap();
+        }
+
+        let query: crate::views::Query = serde_yaml_ng::from_str(
+            "all:\n  - under: Research\n  - tag: method/m3\n  - type: literature\n\
+             none:\n  - tag: archive\nlimit: 500\n",
+        )
+        .unwrap();
+
+        // Once to warm SQLite's page cache, then the measured run.
+        f.index.run_view(&query).unwrap();
+        let started = std::time::Instant::now();
+        let result = f.index.run_view(&query).unwrap();
+        let elapsed = started.elapsed();
+
+        assert!(!result.notes.is_empty(), "the query should match something");
+        assert!(
+            elapsed < std::time::Duration::from_millis(50),
+            "a view over 5,000 notes took {elapsed:?}"
+        );
+        eprintln!(
+            "view over 5,000 notes: {} results in {elapsed:?}",
+            result.notes.len()
+        );
+
+        // And it is fast because SQLite is seeking indexes, not because 5,000
+        // rows is small. A plan that says SCAN here is a plan that will stop
+        // being fast at 50,000.
+        let compiled = query.compile();
+        let guard = f.index.conn.lock().unwrap();
+        let mut stmt = guard
+            .prepare(&format!("EXPLAIN QUERY PLAN {}", compiled.sql))
+            .unwrap();
+        let params: Vec<&dyn rusqlite::ToSql> = compiled
+            .params
+            .iter()
+            .map(std::convert::AsRef::as_ref)
+            .collect();
+        let plan: Vec<String> = stmt
+            .query_map(params.as_slice(), |row| row.get::<_, String>(3))
+            .unwrap()
+            .filter_map(std::result::Result::ok)
+            .collect();
+        let plan = plan.join("\n");
+        // Every table access is a SEARCH — an index seek — and not one is a
+        // SCAN. Which index SQLite picks is its business and changes with the
+        // shape of the data; that it never falls back to walking a table is
+        // the property that keeps this fast at fifty thousand notes as well as
+        // at five.
+        for line in plan.lines() {
+            assert!(
+                !line.trim_start().starts_with("SCAN"),
+                "a view should never scan a table:\n{plan}"
+            );
+        }
+        assert!(
+            plan.contains("note_tags_by_tag"),
+            "the tag term should seek the tag index this step added:\n{plan}"
+        );
     }
 }

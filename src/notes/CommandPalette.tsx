@@ -42,6 +42,10 @@ type Props = {
   onExportDocx: () => void;
   onExportPdf: () => void;
   onManageTags: () => void;
+  onNewView: () => void;
+  /** What the list's search field holds, so it can be saved as a view. */
+  currentSearch: string;
+  onSaveSearchAsView: () => void;
   /** How many Zotero keys are still in note bodies. Zero hides the command. */
   legacyCitations: number;
   onMigrateCitations: () => void;
@@ -61,6 +65,9 @@ export default function CommandPalette({
   onExportDocx,
   onExportPdf,
   onManageTags,
+  onNewView,
+  currentSearch,
+  onSaveSearchAsView,
   legacyCitations,
   onMigrateCitations,
   onReindex,
@@ -123,6 +130,26 @@ export default function CommandPalette({
       run: onManageTags,
     });
 
+    out.push({
+      id: "new-view",
+      label: "New view — a saved question about the vault",
+      group: "Vault",
+      run: onNewView,
+    });
+
+    // Only offered while there is a search to save. A search someone has
+    // already run is the one moment they know what they want a view to find.
+    if (currentSearch.trim() !== "") {
+      out.push({
+        id: "search-as-view",
+        label: "Save this search as a view",
+        group: "Vault",
+        hint: `“${currentSearch.trim()}”`,
+        whenTyping: true,
+        run: onSaveSearchAsView,
+      });
+    }
+
     if (legacyCitations > 0) {
       out.push({
         id: "migrate-citations",
@@ -149,6 +176,9 @@ export default function CommandPalette({
     onExportDocx,
     onExportPdf,
     onManageTags,
+    onNewView,
+    currentSearch,
+    onSaveSearchAsView,
     legacyCitations,
     onMigrateCitations,
     onReindex,
