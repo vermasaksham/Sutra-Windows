@@ -3,6 +3,7 @@
 // target ignores it.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod ai;
 mod citations;
 mod claims;
 mod commands;
@@ -95,6 +96,9 @@ fn main() {
             commands::not_duplicates,
             commands::merge_notes,
             commands::disagreements,
+            commands::ai_status,
+            commands::set_ai_settings,
+            commands::ai_suggest,
         ])
         // `generate_context!` pulls in tauri.conf.json at compile time.
         .run(tauri::generate_context!())

@@ -2711,4 +2711,123 @@ mod tests {
         assert_eq!(found[0].3, 1000.0);
         assert_eq!(found[1].3, 3.0);
     }
+    // ---- optional AI ---------------------------------------------------------
+
+    /// An assistant that answers everything, so rejecting it proves something.
+    use crate::ai::Assistant as _;
+
+    struct Chatty;
+
+    impl crate::ai::Assistant for Chatty {
+        fn label(&self) -> String {
+            "chatty".into()
+        }
+        fn respond(&self, ask: &crate::ai::Ask) -> Result<crate::ai::Draft> {
+            Ok(crate::ai::finish(
+                ask,
+                "A confident summary, with a fabricated citation [@01HQFAKEFAKEFAKEFAKEFAKEFA] \
+                 and some tags.\nsb2se3\nmethod/dsc",
+                "chatty".into(),
+            ))
+        }
+    }
+
+    #[test]
+    fn with_ai_answering_and_every_draft_rejected_the_vault_is_byte_identical() {
+        // The step's proof. Rejecting is not an operation at all — there is
+        // nothing to undo, because asking never wrote anything. That is the
+        // architecture rather than a careful implementation: `ai` does not
+        // import `vault`, a `Draft` carries no path and no id, and the only
+        // module that writes is not on this path.
+        let f = Fixture::new();
+        let source = f
+            .vault
+            .create_source("Zhou 2019", crate::frontmatter::SourceMeta::default())
+            .unwrap()
+            .summary
+            .id;
+        let a = note(
+            &f,
+            "Research",
+            "Sb2Se3 Cp",
+            &["sb2se3"],
+            "Cp fitted over 300-800 K.",
+        );
+        note(
+            &f,
+            "Research",
+            "DSC run",
+            &["method/dsc"],
+            "Ramped under argon.",
+        );
+        f.index.rebuild(&f.vault).unwrap();
+
+        let before = snapshot(&f.root);
+        let assistant = Chatty;
+
+        for _ in 0..5 {
+            for task in [
+                crate::ai::Task::Summarise,
+                crate::ai::Task::Tags,
+                crate::ai::Task::Questions,
+            ] {
+                let doc = f.vault.read_note(&a).unwrap();
+                let ask = crate::ai::Ask {
+                    task,
+                    title: doc.summary.title.clone(),
+                    body: doc.body.clone(),
+                    vault_tags: f.vault.list_tags().unwrap().into_keys().collect(),
+                    known_sources: vec![source.clone()],
+                };
+                let draft = assistant.respond(&ask).unwrap();
+                // Rejecting: the value goes out of scope. There is no call to
+                // make, which is the whole point.
+                assert!(!draft.model.is_empty());
+                drop(draft);
+            }
+        }
+
+        assert_eq!(
+            before,
+            snapshot(&f.root),
+            "asking the assistant changed a note"
+        );
+    }
+
+    #[test]
+    fn accepting_a_draft_goes_through_the_same_write_as_typing_it() {
+        // The other half of the argument. Accepted text is not written by the
+        // assistant — it is handed to `save_note`, exactly as if the person
+        // had typed it, so there is one write path in the app and generated
+        // text has no privileges on it.
+        let f = Fixture::new();
+        let a = note(
+            &f,
+            "Research",
+            "Sb2Se3 Cp",
+            &[],
+            "Cp fitted over 300-800 K.",
+        );
+        let ask = crate::ai::Ask {
+            task: crate::ai::Task::Summarise,
+            title: "Sb2Se3 Cp".into(),
+            body: "Cp fitted over 300-800 K.".into(),
+            vault_tags: Vec::new(),
+            known_sources: Vec::new(),
+        };
+        let draft = Chatty.respond(&ask).unwrap();
+
+        let body = format!(
+            "{}\n\n{}",
+            f.vault.read_note(&a).unwrap().body.trim(),
+            draft.text
+        );
+        f.vault.save_note(&a, "Sb2Se3 Cp", &body).unwrap();
+
+        let saved = f.vault.read_note(&a).unwrap().body;
+        assert!(saved.contains("A confident summary"), "{saved}");
+        // And the fabricated citation never reached the file, because it was
+        // removed before the draft was ever shown.
+        assert!(!saved.contains("01HQFAKE"), "{saved}");
+    }
 }

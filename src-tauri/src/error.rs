@@ -41,6 +41,12 @@ pub enum SutraError {
     #[error("export failed: {0}")]
     Export(String),
 
+    /// AI assistance. Carries a sentence a person can act on, because every
+    /// failure here is either "it is switched off", "the key is wrong" or
+    /// "the network is down", and all three have an obvious next step.
+    #[error("{0}")]
+    Ai(String),
+
     /// Talking to Zotero. Carries a sentence a user can act on rather than a
     /// transport error, because the fix is almost always "start Zotero" or
     /// "turn the local API on".

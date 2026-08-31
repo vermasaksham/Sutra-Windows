@@ -512,3 +512,78 @@ export const disagreementsApi = {
   of: (id: string, body: string, limit = 5) =>
     invoke<Disagreement[]>("disagreements", { id, body, limit }),
 };
+
+// ---- optional AI -------------------------------------------------------------
+
+/** What the assistant can be asked for. */
+export type AiTask = "summarise" | "tags" | "questions";
+
+export const AI_TASKS: ReadonlyArray<{
+  task: AiTask;
+  label: string;
+  /** What accepting it would do, said before it is asked. */
+  accepts: string;
+}> = [
+  {
+    task: "summarise",
+    label: "Summarise this note",
+    accepts: "adds it to the end of the note",
+  },
+  { task: "tags", label: "Suggest tags", accepts: "adds the ones you pick" },
+  {
+    task: "questions",
+    label: "What does this leave open?",
+    accepts: "adds them to the end of the note",
+  },
+];
+
+/**
+ * A generated answer. Exists only here until it is accepted.
+ *
+ * There is no id and no path in this type, on purpose: there is nothing the
+ * frontend could hand back that would make the assistant write. Accepting one
+ * calls `notesApi.save` or `notesApi.setMeta`, exactly as typing would.
+ */
+export type AiDraft = {
+  task: AiTask;
+  /** Prose, for `summarise`. */
+  text: string;
+  /** One line each, for `tags` and `questions`. */
+  lines: string[];
+  /** Which model wrote it. Always shown. */
+  model: string;
+  /** References it invented, removed before this reached the screen. */
+  removedCitations: string[];
+};
+
+/** Whether assistance is on, and what it would use. Never the key itself. */
+export type AiStatus = {
+  /** What the setting says. */
+  enabled: boolean;
+  /**
+   * Whether asking would actually reach anything.
+   *
+   * Separate from `enabled`, because "switched on with no key" is a state
+   * someone can leave themselves in, and a panel of buttons that can only fail
+   * is worse than one that says what is missing.
+   */
+  ready: boolean;
+  /** A key is stored in the config file. */
+  hasKey: boolean;
+  /** `ANTHROPIC_API_KEY` is set, so nothing need be stored. */
+  keyInEnvironment: boolean;
+  model: string;
+};
+
+export const aiApi = {
+  status: () => invoke<AiStatus>("ai_status"),
+  /** An empty key clears the stored one. */
+  configure: (enabled: boolean, apiKey: string | null, model: string | null) =>
+    invoke<AiStatus>("set_ai_settings", { enabled, apiKey, model }),
+  /**
+   * Ask about the open note. Returns a value and changes nothing — the body is
+   * sent so the answer is about what is on screen, not what was last saved.
+   */
+  suggest: (task: AiTask, title: string, body: string) =>
+    invoke<AiDraft>("ai_suggest", { task, title, body }),
+};

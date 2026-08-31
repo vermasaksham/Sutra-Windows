@@ -22,7 +22,13 @@ tauri-plugin-dialog = "2"
 thiserror = "2"
 time = { version = "0.3.45", features = ["formatting", "parsing", "serde-well-known", "macros"] }
 ulid = "3"
-ureq = { version = "3.4.0", default-features = false }
+# Zotero is plain HTTP on 127.0.0.1 and needed no TLS; the Anthropic API is
+# HTTPS, so `rustls` is here for step 8's optional assistant and nothing else.
+# `json` is what gives `send_json`/`read_json`.
+ureq = { version = "3.4.0", default-features = false, features = [
+  "rustls",
+  "json",
+] }
 # Reading back the .docx docx-rs just wrote, so vector copies of the formulas
 # can be woven in beside the raster ones. docx-rs pulls this in already.
 zip = "7.2.0"

@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import SourcesPanel from "./SourcesPanel";
 import BacklinksPanel from "./BacklinksPanel";
+import AiPanel from "./AiPanel";
 import type {
   Backlink,
   Citation,
@@ -39,9 +40,16 @@ export default function ContextPanel({
   related,
   siblings,
   folder,
+  title,
+  body,
+  aiReady,
+  aiWanted,
   onChangeCitations,
   onOpen,
   onCompare,
+  onAcceptText,
+  onAcceptTags,
+  onOpenAiSettings,
   onClose,
   onReport,
 }: {
@@ -56,10 +64,19 @@ export default function ContextPanel({
   related: RelatedNote[];
   siblings: NoteSummary[];
   folder: string;
+  /** The open note, as it is on screen, for the assistant to be asked about. */
+  title: string;
+  body: string;
+  aiReady: boolean;
+  /** The setting, so the panel can tell "off" from "on but not set up". */
+  aiWanted: boolean;
   onChangeCitations: (citations: Citation[]) => void;
   onOpen: (id: string) => void;
   /** Open the side-by-side comparison for a candidate duplicate. */
   onCompare: (id: string, reason: string) => void;
+  onAcceptText: (text: string) => void;
+  onAcceptTags: (tags: string[]) => void;
+  onOpenAiSettings: () => void;
   onClose: () => void;
   onReport: (message: string, cause: unknown) => void;
 }) {
@@ -209,6 +226,22 @@ export default function ContextPanel({
             </li>
           ))}
         </Section>
+
+        {/*
+          Last, and below everything computed. The order is the argument: what
+          the vault can prove comes first, and the part that cannot show its
+          working comes after it.
+        */}
+        <AiPanel
+          ready={aiReady}
+          wanted={aiWanted}
+          title={title}
+          body={body}
+          onAcceptText={onAcceptText}
+          onAcceptTags={onAcceptTags}
+          onOpenSettings={onOpenAiSettings}
+          onReport={onReport}
+        />
       </div>
     </aside>
   );

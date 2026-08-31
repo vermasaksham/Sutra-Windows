@@ -6,6 +6,7 @@ import { setSources } from "./editor/citation/citationStore";
 import ContextPanel from "./notes/ContextPanel";
 import DuplicateReview from "./notes/DuplicateReview";
 import DuplicateList from "./notes/DuplicateList";
+import AiSettingsDialog from "./notes/AiSettings";
 import { citedRefs } from "./notes/citedRefs";
 import SourceDetails from "./notes/SourceDetails";
 import ExportMenu from "./notes/ExportMenu";
@@ -37,6 +38,7 @@ import {
   legacyCitationsApi,
   migrationApi,
   notesApi,
+  aiApi,
   contextApi,
   disagreementsApi,
   duplicatesApi,
@@ -51,6 +53,7 @@ import {
   type NoteType,
   type SearchHit,
   type VaultInfo,
+  type AiStatus,
   type Disagreement,
   type Duplicate,
   type RelatedNote,
@@ -99,6 +102,9 @@ export default function App() {
   const [duplicates, setDuplicates] = useState<Duplicate[]>([]);
   const [disagreements, setDisagreements] = useState<Disagreement[]>([]);
   /** The pair being compared side by side, if any. */
+  /** Whether assistance is on, and what it would use. Never the key. */
+  const [ai, setAi] = useState<AiStatus | null>(null);
+  const [aiSettingsOpen, setAiSettingsOpen] = useState(false);
   const [duplicatesOpen, setDuplicatesOpen] = useState(false);
   const [comparing, setComparing] = useState<{
     left: string;
@@ -232,6 +238,13 @@ export default function App() {
   useEffect(() => {
     localStorage.setItem("sutra.context", contextOpen ? "open" : "closed");
   }, [contextOpen]);
+
+  useEffect(() => {
+    aiApi
+      .status()
+      .then(setAi)
+      .catch(() => setAi(null));
+  }, []);
 
   /**
    * Load what is near the open note.
@@ -911,13 +924,41 @@ export default function App() {
           related={related}
           siblings={siblings}
           folder={note.doc.folder}
+          title={note.doc.title}
+          body={note.doc.body}
+          aiReady={ai?.ready ?? false}
+          aiWanted={ai?.enabled ?? false}
           onChangeCitations={(citations) => void setCitations(citations)}
           onOpen={(id) => void select(id)}
           onCompare={(id, reason) => {
             if (selectedId)
               setComparing({ left: selectedId, right: id, reason });
           }}
+          // Accepting a draft is an ordinary edit of the buffer, saved the way
+          // typing is. Generated text gets no path of its own into a file.
+          onAcceptText={(text) =>
+            note.setBody(`${note.doc?.body.trimEnd() ?? ""}\n\n${text}\n`)
+          }
+          onAcceptTags={(tags) => {
+            const existing = note.doc?.tags ?? [];
+            void setMeta({
+              tags: [...existing, ...tags.filter((t) => !existing.includes(t))],
+            });
+          }}
+          onOpenAiSettings={() => setAiSettingsOpen(true)}
           onClose={() => setContextOpen(false)}
+          onReport={report}
+        />
+      )}
+
+      {aiSettingsOpen && ai && (
+        <AiSettingsDialog
+          status={ai}
+          onSaved={(status) => {
+            setAi(status);
+            setAiSettingsOpen(false);
+          }}
+          onClose={() => setAiSettingsOpen(false)}
           onReport={report}
         />
       )}
@@ -975,6 +1016,8 @@ export default function App() {
           onManageTags={() => setTagsOpen(true)}
           onNewView={() => void editView(null)}
           onFindDuplicates={() => setDuplicatesOpen(true)}
+          aiEnabled={ai?.enabled ?? false}
+          onAiSettings={() => setAiSettingsOpen(true)}
           currentSearch={query}
           onSaveSearchAsView={() =>
             setEditingView({

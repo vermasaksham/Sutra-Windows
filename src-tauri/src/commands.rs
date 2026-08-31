@@ -7,6 +7,7 @@
 //! 2. The body is markdown text, passed through untouched. Rust is responsible
 //!    for the file and its frontmatter, not for interpreting the prose.
 
+use crate::ai::{Ask, Draft, Task};
 use crate::claims::Disagreement;
 use crate::duplicates::Duplicate;
 use crate::error::{Result, SutraError};
@@ -16,7 +17,7 @@ use crate::frontmatter::{Citation, SourceMeta};
 use crate::index::CitingNote;
 use crate::index::{Backlink, DuplicatePair, SearchHit, ViewResult};
 use crate::related::Related;
-use crate::state::AppState;
+use crate::state::{self, AiSettings, AiStatus, AppState};
 use crate::tags::Suggestion;
 use crate::vault::{MigrationPlan, NoteDoc, NoteSummary, Retag, TagChange};
 use crate::views::Query;
@@ -636,4 +637,78 @@ pub fn disagreements(
     limit: usize,
 ) -> Result<Vec<Disagreement>> {
     state.with_index(|index| index.disagreements(&id, &body, limit))
+}
+
+// ---- optional AI -------------------------------------------------------------
+
+/// Whether assistance is switched on, and what it would use.
+///
+/// Never returns the key. The UI needs to know that one is stored, not what it
+/// is: a credential that is only ever written cannot leak through a screenshot
+/// or a devtools panel.
+#[tauri::command]
+pub fn ai_status(app: AppHandle) -> AiStatus {
+    state::ai_status(&app)
+}
+
+/// Switch assistance on or off, and set the key and model.
+///
+/// An empty key clears the stored one rather than storing an empty string, so
+/// "remove my key" is expressible.
+#[tauri::command]
+pub fn set_ai_settings(
+    app: AppHandle,
+    enabled: bool,
+    api_key: Option<String>,
+    model: Option<String>,
+) -> AiStatus {
+    state::set_ai_settings(
+        &app,
+        AiSettings {
+            enabled,
+            api_key: api_key.filter(|k| !k.trim().is_empty()),
+            model: model.filter(|m| !m.trim().is_empty()),
+        },
+    );
+    state::ai_status(&app)
+}
+
+/// Ask for a suggestion about the open note.
+///
+/// Returns a value and changes nothing. There is no id in the reply, no path,
+/// and no write anywhere on this path — accepting a suggestion goes through
+/// `save_note` or `set_note_meta` like anything a person types, which is what
+/// makes "the AI may not write to a file" a fact about the code rather than a
+/// promise.
+///
+/// The body comes from the frontend so the suggestion is about what is on
+/// screen, including edits autosave has not written yet.
+#[tauri::command]
+pub fn ai_suggest(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    task: Task,
+    title: String,
+    body: String,
+) -> Result<Draft> {
+    // Gathered before the assistant is even built, and it is all that leaves
+    // the machine: one note, the vault's tag list when tags are being asked
+    // for, and the source ids the citation rule is checked against.
+    let ask = state.with_vault(|vault| {
+        let mut vault_tags: Vec<(String, usize)> = if task == Task::Tags {
+            vault.list_tags()?.into_iter().collect()
+        } else {
+            Vec::new()
+        };
+        vault_tags.sort_by(|(a_tag, a), (b_tag, b)| b.cmp(a).then_with(|| a_tag.cmp(b_tag)));
+        Ok(Ask {
+            task,
+            title,
+            body,
+            vault_tags: vault_tags.into_iter().map(|(tag, _)| tag).collect(),
+            known_sources: vault.list_sources()?.into_iter().map(|s| s.id).collect(),
+        })
+    })?;
+
+    state.assistant(&app).respond(&ask)
 }

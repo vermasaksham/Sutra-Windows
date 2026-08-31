@@ -44,6 +44,9 @@ type Props = {
   onManageTags: () => void;
   onNewView: () => void;
   onFindDuplicates: () => void;
+  /** Whether assistance is switched on, so the command can say which way. */
+  aiEnabled: boolean;
+  onAiSettings: () => void;
   /** What the list's search field holds, so it can be saved as a view. */
   currentSearch: string;
   onSaveSearchAsView: () => void;
@@ -68,6 +71,8 @@ export default function CommandPalette({
   onManageTags,
   onNewView,
   onFindDuplicates,
+  aiEnabled,
+  onAiSettings,
   currentSearch,
   onSaveSearchAsView,
   legacyCitations,
@@ -171,6 +176,16 @@ export default function CommandPalette({
     }
 
     out.push({
+      id: "ai",
+      label: aiEnabled ? "Assistance settings" : "Turn on assistance",
+      group: "Vault",
+      hint: aiEnabled
+        ? "what leaves this machine, and the key"
+        : "off by default — a model, unlike everything else here",
+      run: onAiSettings,
+    });
+
+    out.push({
       id: "reindex",
       label: "Rebuild the search index",
       group: "Vault",
@@ -188,6 +203,8 @@ export default function CommandPalette({
     onManageTags,
     onNewView,
     onFindDuplicates,
+    aiEnabled,
+    onAiSettings,
     currentSearch,
     onSaveSearchAsView,
     legacyCitations,

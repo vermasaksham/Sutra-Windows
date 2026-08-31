@@ -42,6 +42,49 @@ pub fn legacy_keys(body: &str) -> Vec<String> {
     found
 }
 
+/// Every distinct `[@ref]` in `body`, whatever shape, in order.
+///
+/// Unlike [`legacy_keys`] this does not judge what a reference looks like — it
+/// reports what is written. Used to check generated text against the vault,
+/// where the question is not "is this a plausible key" but "does this note
+/// exist here", and a made-up reference that happens to look well-formed is
+/// exactly the thing being caught.
+pub fn all_refs(body: &str) -> Vec<String> {
+    let mut found: Vec<String> = Vec::new();
+    let mut rest = body;
+
+    while let Some(start) = rest.find("[@") {
+        let after = &rest[start + 2..];
+        let Some(end) = after.find(']') else { break };
+        let candidate = &after[..end];
+
+        if !candidate.is_empty() && !found.iter().any(|f| f == candidate) {
+            found.push(candidate.to_string());
+        }
+        rest = &after[end + 1..];
+    }
+
+    found
+}
+
+/// Remove every `[@ref]` naming something not in `known`.
+///
+/// The whole reference goes, brackets included, rather than being left as
+/// broken text: a citation that resolves to nothing is worse than no citation,
+/// because it looks like provenance and is not.
+pub fn drop_unknown(body: &str, known: &[String]) -> (String, Vec<String>) {
+    let mut removed = Vec::new();
+    let mut out = body.to_string();
+    for reference in all_refs(body) {
+        if known.contains(&reference) {
+            continue;
+        }
+        out = out.replace(&format!("[@{reference}]"), "");
+        removed.push(reference);
+    }
+    (out, removed)
+}
+
 /// Replace every `[@from]` with `[@to]`.
 ///
 /// The whole reference is matched, brackets included, so a key appearing as
