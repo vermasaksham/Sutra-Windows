@@ -160,15 +160,22 @@ impl Index {
             std::fs::create_dir_all(parent)?;
         }
 
-        let conn = match Connection::open(path) {
-            Ok(c) if schema_matches(&c) => c,
-            Ok(_) | Err(_) => {
-                let _ = std::fs::remove_file(path);
-                let conn = Connection::open(path)?;
-                create_schema(&conn)?;
-                conn
-            }
+        // Scoped, so the connection is closed before anything tries to delete
+        // the file. Linux will happily unlink a database that is still open;
+        // Windows refuses, and the removal failing silently is how a stale
+        // index survives the discard and then fails on `CREATE TABLE notes`.
+        let usable = match Connection::open(path) {
+            Ok(conn) => schema_matches(&conn),
+            Err(_) => false,
         };
+
+        if !usable {
+            discard(path);
+        }
+        let conn = Connection::open(path)?;
+        if !usable {
+            reset_schema(&conn)?;
+        }
 
         // WAL keeps a read during a write from blocking, which matters because
         // the file watcher reindexes on its own thread while the UI queries.
@@ -857,6 +864,64 @@ fn create_schema(conn: &Connection) -> Result<()> {
     Ok(())
 }
 
+/// Delete an index database and the files SQLite keeps beside it.
+///
+/// Best effort. The write-ahead log and shared-memory files are journal state
+/// for the database being removed; leaving them behind would have a fresh
+/// database inherit the old one's uncommitted pages.
+fn discard(path: &Path) {
+    let _ = std::fs::remove_file(path);
+    for suffix in ["-wal", "-shm"] {
+        let mut sidecar = path.as_os_str().to_os_string();
+        sidecar.push(suffix);
+        let _ = std::fs::remove_file(std::path::PathBuf::from(sidecar));
+    }
+}
+
+/// Put the current schema into a database whatever was there before.
+///
+/// Clearing rather than only replacing, because [`discard`] can fail and is
+/// allowed to: another Sutra window may hold the file open, and on Windows
+/// that is enough to make it undeletable. The index is derived, so wiping it
+/// in place is as good as replacing it — and it means a stale schema is never
+/// the thing that stops the app from opening a vault.
+fn reset_schema(conn: &Connection) -> Result<()> {
+    drop_everything(conn);
+    create_schema(conn)
+}
+
+/// Drop every table the app made, leaving SQLite's own alone.
+///
+/// Two passes, and individual failures ignored. Dropping a virtual table takes
+/// its shadow tables with it, so a name read a moment ago may already be gone;
+/// and `notes_vocab` reads `notes_fts`, so the order they were created in is
+/// the wrong order to drop them in. Rather than encode that dependency here —
+/// where it would rot the next time the schema gains a table — this simply
+/// tries twice and lets `create_schema` be the thing that reports a real
+/// failure.
+fn drop_everything(conn: &Connection) {
+    for _ in 0..2 {
+        let Ok(names) = table_names(conn) else { return };
+        if names.is_empty() {
+            return;
+        }
+        for name in names {
+            let _ = conn.execute_batch(&format!(r#"DROP TABLE IF EXISTS "{name}""#));
+        }
+    }
+}
+
+fn table_names(conn: &Connection) -> Result<Vec<String>> {
+    let mut stmt = conn.prepare(
+        "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'",
+    )?;
+    let names = stmt
+        .query_map([], |row| row.get::<_, String>(0))?
+        .filter_map(std::result::Result::ok)
+        .collect();
+    Ok(names)
+}
+
 fn insert_note(tx: &rusqlite::Transaction<'_>, note: &NoteSummary, body: &str) -> Result<()> {
     let tags = serde_json::to_string(&note.tags).unwrap_or_else(|_| "[]".into());
     tx.execute(
@@ -1231,6 +1296,34 @@ mod tests {
             .unwrap();
         f.index.upsert(&updated, "No links any more.").unwrap();
         assert!(f.index.backlinks(&target_id).unwrap().is_empty());
+    }
+
+    #[test]
+    fn a_database_that_cannot_be_deleted_is_reset_in_place() {
+        // The half of the discard that Linux never reaches, because there an
+        // open file can always be unlinked. On Windows it cannot, so clearing
+        // a stale schema has to work by emptying the database as well as by
+        // replacing the file — and a Windows CI run is what found that, after
+        // 270 tests had passed on Linux for months.
+        let conn = Connection::open_in_memory().unwrap();
+        create_schema(&conn).unwrap();
+        for name in ["notes", "notes_fts", "notes_vocab", "links", "note_tags"] {
+            assert!(
+                table_names(&conn).unwrap().iter().any(|n| n == name),
+                "{name} should exist before the reset"
+            );
+        }
+        conn.execute("INSERT INTO links (source, target) VALUES ('a', 'b')", [])
+            .unwrap();
+
+        // Same connection, same file: nothing has been deleted.
+        reset_schema(&conn).unwrap();
+
+        assert!(schema_matches(&conn));
+        let rows: i64 = conn
+            .query_row("SELECT COUNT(*) FROM links", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(rows, 0, "the old contents should be gone, not carried over");
     }
 
     #[test]

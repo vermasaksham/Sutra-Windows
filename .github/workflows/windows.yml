@@ -5,9 +5,14 @@
 # time most of the platform-specific surface is exercised at all.
 name: Windows
 
+# `push` is limited to the default branch on purpose. A branch with an open
+# pull request would otherwise get two identical runs per commit — one for the
+# push and one for the PR — under different `github.ref` values, so the
+# concurrency group below cannot collapse them. Work on a branch is covered by
+# its pull request; `main` is covered directly.
 on:
   push:
-    branches: ["**"]
+    branches: [main]
   pull_request:
   workflow_dispatch:
 
