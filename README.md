@@ -79,6 +79,9 @@ src/
     IconPicker.tsx    Curated emoji, no dependency
     TagEditor.tsx     Tag chips; clicking one selects that tag
     shortcuts.ts      App-level keys only; the editor owns its own
+    CommandPalette.tsx  Every action behind Ctrl/Cmd K
+    TypePicker.tsx    What kind of note this is, changeable at any time
+    MigrationPrompt.tsx  Offered once to a vault laid out the old way
     tree.ts           Folder paths -> a tree, inferring missing parents
     folderStore.ts    The open note's folder, for the slash menu's attach
     Sidebar.tsx       Rail: the vault, the folder tree, the tag list
@@ -91,6 +94,7 @@ src/
     buildDocument.ts  Editor state -> a flat model Rust can write
     mathToImage.ts    Formulas rendered for export, and why via MathJax
     rasterise.ts      SVG -> PNG, for the raster copy Word insists on
+  platform.ts         Ctrl or ⌘, and how to write a shortcut
   vault/api.ts        Typed wrappers over the Tauri commands
   components/
   editor/
@@ -151,13 +155,16 @@ choosing which note, and the page itself. Each sits on its own ground, darkest
 to lightest, so the stack reads as depth rather than as three boxes. There is no
 toolbar — the only chrome is a save state and an export menu floating over the
 top-right of the page. Search lives at the head of the list rather than in an
-overlay, and Ctrl/Cmd K puts the cursor in it.
+overlay. Ctrl+K opens the command palette, Ctrl+Shift+F focuses search, and
+Ctrl+N captures to the Inbox — on macOS the same bindings read ⌘K, ⌘⇧F and ⌘N,
+because Windows is the primary target and macOS is the special case, not the
+other way round.
 
 ## Scope
 
-In: block editor, slash menu, drag handles, nested pages, breadcrumbs,
-wikilinks, backlinks, full-text search, tags, KaTeX + mhchem, light/dark,
-autosave, keyboard shortcuts.
+In: block editor, slash menu, drag handles, real folders, wikilinks, backlinks,
+full-text search, tags, note types, an Inbox, a command palette, KaTeX + mhchem,
+light/dark, autosave, keyboard shortcuts.
 
 Deliberately out, and not up for discussion: database views, kanban boards,
 relations, filtered tables. Sutra is a writing tool, not a database with a UI.

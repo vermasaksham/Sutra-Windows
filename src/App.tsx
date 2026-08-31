@@ -8,6 +8,7 @@ import ExportMenu from "./notes/ExportMenu";
 import FolderBar from "./notes/FolderBar";
 import ConflictPrompt from "./notes/ConflictPrompt";
 import MigrationPrompt from "./notes/MigrationPrompt";
+import CommandPalette from "./notes/CommandPalette";
 import NoteHeader from "./notes/NoteHeader";
 import NoteList from "./notes/NoteList";
 import Sidebar from "./notes/Sidebar";
@@ -16,6 +17,7 @@ import { buildDocument } from "./export/buildDocument";
 import { useShortcuts } from "./notes/shortcuts";
 import { notesUnder } from "./notes/tree";
 import { setCurrentFolder } from "./notes/folderStore";
+import { MOD, shortcut } from "./platform";
 import { useNote } from "./notes/useNote";
 import type { Editor as TiptapEditor } from "@tiptap/core";
 import {
@@ -28,6 +30,7 @@ import {
   type Backlink,
   type MigrationPlan,
   type NoteSummary,
+  type NoteType,
   type SearchHit,
   type VaultInfo,
 } from "./vault/api";
@@ -56,6 +59,7 @@ export default function App() {
   /** Set once, when a vault still records its hierarchy in frontmatter. */
   const [migration, setMigration] = useState<MigrationPlan | null>(null);
   const [migrating, setMigrating] = useState(false);
+  const [paletteOpen, setPaletteOpen] = useState(false);
   /** Bumped to move focus to the search field; the shortcut lives up here but
    *  the input is three components down. */
   const [focusSearch, setFocusSearch] = useState(0);
@@ -227,9 +231,39 @@ export default function App() {
     [refreshFolders, report],
   );
 
+  /** Capture: a new empty note in the Inbox, with nothing to decide. */
+  const capture = useCallback(async () => {
+    try {
+      await note.flush();
+      const created = await notesApi.capture();
+      await refresh();
+      setSelectedId(created.id);
+      // The note has no title, so NoteHeader puts the cursor there. The first
+      // thing typed is what makes this findable in three months.
+    } catch (cause) {
+      report("Could not capture the note", cause);
+    }
+  }, [note, refresh, report]);
+
+  const setType = useCallback(
+    async (type: NoteType) => {
+      if (!selectedId) return;
+      try {
+        await note.flush();
+        const summary = await notesApi.setType(selectedId, type);
+        note.applyMeta(summary);
+        await refresh();
+      } catch (cause) {
+        report("Could not change the note type", cause);
+      }
+    },
+    [selectedId, note, refresh, report],
+  );
+
   useShortcuts({
+    palette: () => setPaletteOpen(true),
     search: () => setFocusSearch((n) => n + 1),
-    newNote: () => void createNote(activeFolder),
+    capture: () => void capture(),
     save: () => void note.flush(),
   });
 
@@ -259,6 +293,9 @@ export default function App() {
       const current = note.doc;
       if (!current) return;
       try {
+        // Flush first: Rust reads the file to build the new summary, so an
+        // unsaved edit would otherwise be read back as the note's real state.
+        await note.flush();
         const updated = await notesApi.setMeta(
           current.id,
           patch.icon !== undefined ? patch.icon : current.icon,
@@ -343,7 +380,7 @@ export default function App() {
             setActiveTag(tag);
             if (tag !== null) setActiveFolder(null);
           }}
-          onNewNote={() => void createNote(activeFolder)}
+          onCapture={() => void capture()}
           onNewFolder={(parent) => {
             const name = window.prompt(
               parent
@@ -373,6 +410,7 @@ export default function App() {
           selectedId={selectedId}
           onSelect={(id) => void select(id)}
           onDelete={(id) => void deleteNote(id)}
+          onCreate={() => void createNote(activeFolder)}
           focusSearch={focusSearch}
         />
       </div>
@@ -418,6 +456,7 @@ export default function App() {
               onCover={() => void pickCover()}
               onTags={(tags) => void setMeta({ tags })}
               onSelectTag={setActiveTag}
+              onType={(type) => void setType(type)}
             />
             {note.doc.adopted && (
               <p className="mb-4 rounded-lg bg-highlight-bg px-3 py-2 text-sm text-highlight">
@@ -447,7 +486,7 @@ export default function App() {
               <p className="text-sm text-ink-muted">
                 {notes.length === 0
                   ? "Every note is one markdown file in the folder you chose."
-                  : "Pick one from the list, or search with Ctrl K."}
+                  : `Pick one from the list, or press ${shortcut(MOD, "K")}.`}
               </p>
               {notes.length === 0 && (
                 <button
@@ -462,6 +501,25 @@ export default function App() {
           </div>
         )}
       </main>
+
+      {paletteOpen && (
+        <CommandPalette
+          notes={notes}
+          openNoteId={selectedId}
+          onClose={() => setPaletteOpen(false)}
+          onOpenNote={(id) => void select(id)}
+          onNewNote={() => void createNote(activeFolder)}
+          onCapture={() => void capture()}
+          onSearch={(text) => {
+            setQuery(text);
+            setFocusSearch((n) => n + 1);
+          }}
+          onSetType={(type) => void setType(type)}
+          onExportDocx={() => void exportDocx()}
+          onExportPdf={exportPdf}
+          onReindex={() => void indexApi.reindex().then(() => refresh())}
+        />
+      )}
 
       {migration && (
         <MigrationPrompt

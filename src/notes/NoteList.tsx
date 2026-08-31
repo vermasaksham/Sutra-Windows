@@ -41,6 +41,8 @@ type Props = {
   selectedId: string | null;
   onSelect: (id: string) => void;
   onDelete: (id: string) => void;
+  /** A new note in whatever this column is currently showing. */
+  onCreate: () => void;
   /** Focusing the search field is a global shortcut, so App drives it. */
   focusSearch: number;
 };
@@ -55,6 +57,7 @@ export default function NoteList({
   selectedId,
   onSelect,
   onDelete,
+  onCreate,
   focusSearch,
 }: Props) {
   const searchRef = useRef<HTMLInputElement>(null);
@@ -100,9 +103,22 @@ export default function NoteList({
         </div>
       </div>
 
-      <p className="px-3.5 pb-1 text-[0.6875rem] font-semibold tracking-wide text-ink-muted uppercase">
-        {searching ? `${rows.length} found` : heading}
-      </p>
+      <div className="flex items-center justify-between px-3.5 pb-1">
+        <p className="min-w-0 truncate text-[0.6875rem] font-semibold tracking-wide text-ink-muted uppercase">
+          {searching ? `${rows.length} found` : heading}
+        </p>
+        {!searching && (
+          <button
+            type="button"
+            onClick={onCreate}
+            aria-label="New note here"
+            title="New note here"
+            className="grid size-4 shrink-0 place-items-center rounded text-ink-muted transition-colors duration-150 ease-out hover:text-accent"
+          >
+            <Plus />
+          </button>
+        )}
+      </div>
 
       {rows.length === 0 ? (
         <p className="px-3.5 py-2 text-sm text-ink-muted">
@@ -320,6 +336,22 @@ function Trash() {
       aria-hidden
     >
       <path d="M4 7h16M9 7V5h6v2M6 7l1 13h10l1-13" />
+    </svg>
+  );
+}
+
+function Plus() {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={1.75}
+      strokeLinecap="round"
+      className="size-3"
+      aria-hidden
+    >
+      <path d="M12 5v14M5 12h14" />
     </svg>
   );
 }

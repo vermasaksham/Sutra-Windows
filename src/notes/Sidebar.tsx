@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { MOD, shortcut } from "../platform";
 import ThemeToggle from "../components/ThemeToggle";
 import { buildFolders, flattenFolders, type FolderNode } from "./tree";
 import type { NoteSummary } from "../vault/api";
@@ -6,10 +7,14 @@ import type { NoteSummary } from "../vault/api";
 /**
  * The left rail: what to look at, rather than which note.
  *
- * Three groups, deliberately not one hierarchy — a folder is where a note
+ * Four groups, deliberately not one hierarchy — a folder is where a note
  * lives, a tag is what it is about, and the two must never be presented as the
- * same kind of thing. Location comes first because it is the only one of the
- * three that is a fact about the filesystem.
+ * same kind of thing.
+ *
+ * The Inbox is pinned above the folder tree even though it is an ordinary
+ * directory. It is where captures land, so it is the one folder that has a job
+ * rather than a meaning, and burying it among the others would make capture
+ * cost a decision again.
  */
 export default function Sidebar({
   vaultName,
@@ -19,7 +24,7 @@ export default function Sidebar({
   activeTag,
   onSelectFolder,
   onSelectTag,
-  onNewNote,
+  onCapture,
   onNewFolder,
 }: {
   vaultName: string;
@@ -29,11 +34,20 @@ export default function Sidebar({
   activeTag: string | null;
   onSelectFolder: (folder: string | null) => void;
   onSelectTag: (tag: string | null) => void;
-  onNewNote: () => void;
+  onCapture: () => void;
   onNewFolder: (parent: string | null) => void;
 }) {
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
-  const tree = buildFolders(folders, notes);
+  // The Inbox is pinned above, so it must not also appear in the tree.
+  const tree = buildFolders(
+    folders.filter((f) => f !== INBOX && !f.startsWith(`${INBOX}/`)),
+    notes.filter(
+      (n) => n.folder !== INBOX && !n.folder.startsWith(`${INBOX}/`),
+    ),
+  );
+  const inboxCount = notes.filter(
+    (n) => n.folder === INBOX || n.folder.startsWith(`${INBOX}/`),
+  ).length;
   const rows = flattenFolders(tree, collapsed);
   const counts = tagCounts(notes);
 
@@ -57,9 +71,9 @@ export default function Sidebar({
         </span>
         <button
           type="button"
-          onClick={onNewNote}
-          aria-label="New note"
-          title="New note (Ctrl N)"
+          onClick={onCapture}
+          aria-label="Capture a note to the Inbox"
+          title={`Capture to Inbox (${shortcut(MOD, "N")})`}
           className="grid size-6 shrink-0 place-items-center rounded-md text-ink-muted transition-colors duration-150 ease-out hover:bg-row-hover hover:text-accent"
         >
           <Plus />
@@ -73,6 +87,13 @@ export default function Sidebar({
             count={notes.length}
             active={activeFolder === null && activeTag === null}
             onClick={() => onSelectFolder(null)}
+          />
+          <Row
+            label="Inbox"
+            count={inboxCount}
+            emphasis={inboxCount > 0}
+            active={activeFolder === INBOX && activeTag === null}
+            onClick={() => onSelectFolder(INBOX)}
           />
         </div>
 
@@ -197,17 +218,23 @@ function FolderRow({
   );
 }
 
+/** The folder captures land in. Rust owns the name; this has to agree with it. */
+export const INBOX = "Inbox";
+
 function Row({
   label,
   count,
   active,
   hash,
+  emphasis,
   onClick,
 }: {
   label: string;
   count: number;
   active: boolean;
   hash?: boolean;
+  /** Draws attention while there is something waiting to be filed. */
+  emphasis?: boolean;
   onClick: () => void;
 }) {
   return (
@@ -228,7 +255,12 @@ function Row({
         </span>
       )}
       <span className="min-w-0 flex-1 truncate">{label}</span>
-      <span className="shrink-0 text-xs tabular-nums text-ink-muted">
+      <span
+        className={[
+          "shrink-0 text-xs tabular-nums",
+          emphasis && !active ? "text-accent" : "text-ink-muted",
+        ].join(" ")}
+      >
         {count}
       </span>
     </button>

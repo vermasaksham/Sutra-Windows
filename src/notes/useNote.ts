@@ -126,11 +126,14 @@ export function useNote(id: string | null, onSaved: () => void) {
    * edit still sitting in the buffer.
    */
   const applyMeta = useCallback((summary: NoteSummary) => {
-    setDoc((current) =>
-      current && current.id === summary.id
-        ? { ...current, ...summary }
-        : current,
-    );
+    setDoc((current) => {
+      if (!current || current.id !== summary.id) return current;
+      // The title is the buffer's, not the server's. A summary is computed
+      // from the file on disk, so merging its title in would revert whatever
+      // the user has typed since the last autosave — type a title, click a
+      // tag, watch it disappear. Everything else here the server does own.
+      return { ...current, ...summary, title: current.title };
+    });
   }, []);
 
   /**

@@ -1,11 +1,12 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { attachmentUrl } from "../editor/image/attachmentUrl";
 import IconPicker from "./IconPicker";
 import TagEditor from "./TagEditor";
-import type { NoteDoc } from "../vault/api";
+import TypePicker from "./TypePicker";
+import type { NoteDoc, NoteType } from "../vault/api";
 
 /**
- * Everything above the note body: cover, icon, title, tags.
+ * Everything above the note body: cover, icon, title, type, tags.
  *
  * All of it is page-level metadata, so all of it lives in frontmatter and none
  * of it touches the markdown body.
@@ -17,6 +18,7 @@ export default function NoteHeader({
   onCover,
   onTags,
   onSelectTag,
+  onType,
 }: {
   doc: NoteDoc;
   onTitle: (title: string) => void;
@@ -24,9 +26,20 @@ export default function NoteHeader({
   onCover: () => void;
   onTags: (tags: string[]) => void;
   onSelectTag: (tag: string) => void;
+  onType: (type: NoteType) => void;
 }) {
   const [picking, setPicking] = useState(false);
   const [coverFailed, setCoverFailed] = useState(false);
+  const titleRef = useRef<HTMLInputElement>(null);
+
+  // A note with no title is one that was just captured, so the cursor belongs
+  // in the title: the first thing typed is what makes it findable later.
+  // Keyed on the id so switching to another untitled note focuses again, and
+  // typing a title does not yank focus back mid-word.
+  useEffect(() => {
+    if (doc.title === "") titleRef.current?.focus();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [doc.id]);
 
   return (
     <>
@@ -86,6 +99,7 @@ export default function NoteHeader({
       </div>
 
       <input
+        ref={titleRef}
         value={doc.title}
         onChange={(e) => onTitle(e.target.value)}
         placeholder="Untitled"
@@ -93,7 +107,10 @@ export default function NoteHeader({
         className="mb-2 w-full bg-transparent text-4xl font-semibold tracking-tight text-ink outline-none placeholder:text-ink-muted"
       />
 
-      <TagEditor tags={doc.tags} onChange={onTags} onSelect={onSelectTag} />
+      <div className="mb-4 flex flex-wrap items-center gap-1.5">
+        <TypePicker type={doc.type} onChange={onType} />
+        <TagEditor tags={doc.tags} onChange={onTags} onSelect={onSelectTag} />
+      </div>
     </>
   );
 }

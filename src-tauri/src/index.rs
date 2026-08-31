@@ -16,11 +16,13 @@ use std::sync::Mutex;
 /// Bumped whenever the schema changes. On mismatch the index is dropped and
 /// rebuilt rather than migrated — migrations are for data you cannot recreate,
 /// and this is not that.
-const SCHEMA_VERSION: i32 = 4;
+const SCHEMA_VERSION: i32 = 5;
 
 const SCHEMA: &str = r#"
 CREATE TABLE notes (
     id        TEXT PRIMARY KEY,
+    -- Not the SQL keyword `type`, which would need quoting everywhere.
+    note_type TEXT NOT NULL DEFAULT 'standard',
     title     TEXT NOT NULL,
     -- Vault-relative directory, '' for the root. Replaces a parent id: a
     -- note's location is where its file is, so this is copied from the path
@@ -168,7 +170,7 @@ impl Index {
     pub fn all_notes(&self) -> Result<Vec<NoteSummary>> {
         let guard = self.conn.lock().unwrap_or_else(|e| e.into_inner());
         let mut stmt = guard.prepare(
-            "SELECT id, title, folder, position, tags, icon, cover, excerpt, updated
+            "SELECT id, note_type, title, folder, position, tags, icon, cover, excerpt, updated
              FROM notes
              ORDER BY folder, position, title COLLATE NOCASE",
         )?;
@@ -243,10 +245,11 @@ fn create_schema(conn: &Connection) -> Result<()> {
 fn insert_note(tx: &rusqlite::Transaction<'_>, note: &NoteSummary, body: &str) -> Result<()> {
     let tags = serde_json::to_string(&note.tags).unwrap_or_else(|_| "[]".into());
     tx.execute(
-        "INSERT INTO notes (id, title, folder, position, tags, icon, cover, excerpt, updated)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+        "INSERT INTO notes (id, note_type, title, folder, position, tags, icon, cover, excerpt, updated)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
         params![
             note.id,
+            note.note_type.as_str(),
             note.title,
             note.folder,
             note.position,
@@ -284,17 +287,19 @@ fn remove_note(tx: &rusqlite::Transaction<'_>, id: &str) -> Result<()> {
 }
 
 fn row_to_summary(row: &rusqlite::Row<'_>) -> rusqlite::Result<NoteSummary> {
-    let tags: String = row.get(4)?;
-    let updated: String = row.get(8)?;
+    let note_type: String = row.get(1)?;
+    let tags: String = row.get(5)?;
+    let updated: String = row.get(9)?;
     Ok(NoteSummary {
         id: row.get(0)?,
-        title: row.get(1)?,
-        folder: row.get(2)?,
-        position: row.get(3)?,
+        note_type: crate::frontmatter::NoteType::parse(&note_type),
+        title: row.get(2)?,
+        folder: row.get(3)?,
+        position: row.get(4)?,
         tags: serde_json::from_str(&tags).unwrap_or_default(),
-        icon: row.get(5)?,
-        cover: row.get(6)?,
-        excerpt: row.get(7)?,
+        icon: row.get(6)?,
+        cover: row.get(7)?,
+        excerpt: row.get(8)?,
         updated: time::OffsetDateTime::parse(
             &updated,
             &time::format_description::well_known::Rfc3339,

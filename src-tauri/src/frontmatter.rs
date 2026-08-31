@@ -14,10 +14,74 @@ const FENCE: &str = "---";
 /// `Default::default()`". That matters because these files are hand-editable:
 /// someone will delete a line, and a missing `tags:` should give an empty list,
 /// not an error.
+/// What kind of note this is.
+///
+/// Never asked for up front. Everything starts as `Standard` and can be
+/// changed later, because deciding what a thought is before writing it down is
+/// exactly the friction capture is supposed to avoid.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum NoteType {
+    #[default]
+    Standard,
+    Literature,
+    Idea,
+    Question,
+    Experiment,
+    Project,
+    Meeting,
+    Task,
+    Daily,
+}
+
+impl NoteType {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Standard => "standard",
+            Self::Literature => "literature",
+            Self::Idea => "idea",
+            Self::Question => "question",
+            Self::Experiment => "experiment",
+            Self::Project => "project",
+            Self::Meeting => "meeting",
+            Self::Task => "task",
+            Self::Daily => "daily",
+        }
+    }
+
+    /// Infallible on purpose. A hand-edited `type: litrature` should leave the
+    /// note perfectly usable as a standard one, not make the file unreadable.
+    pub fn parse(raw: &str) -> Self {
+        match raw.trim().to_ascii_lowercase().as_str() {
+            "literature" => Self::Literature,
+            "idea" => Self::Idea,
+            "question" => Self::Question,
+            "experiment" => Self::Experiment,
+            "project" => Self::Project,
+            "meeting" => Self::Meeting,
+            "task" => Self::Task,
+            "daily" => Self::Daily,
+            _ => Self::Standard,
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for NoteType {
+    fn deserialize<D: serde::Deserializer<'de>>(
+        deserializer: D,
+    ) -> std::result::Result<Self, D::Error> {
+        Ok(Self::parse(&String::deserialize(deserializer)?))
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Frontmatter {
     /// ULID. Stable and permanent — the note's real identity.
     pub id: String,
+    /// Missing means `Standard`, which is what every note written before this
+    /// existed should be read as.
+    #[serde(rename = "type", default)]
+    pub note_type: NoteType,
     pub title: String,
     /// Dead: hierarchy is the folder a note sits in, not a claim the note
     /// makes about itself. Kept on the struct so an unmigrated vault's
@@ -60,6 +124,7 @@ impl Frontmatter {
         let now = now();
         Self {
             id,
+            note_type: NoteType::default(),
             title,
             parent: None,
             position: 0,
@@ -139,6 +204,7 @@ mod tests {
     fn sample() -> Frontmatter {
         Frontmatter {
             id: "01HQ3M8K2P".into(),
+            note_type: NoteType::Literature,
             title: "CVT runs".into(),
             parent: Some("01HQ3M8K1A".into()),
             position: 3,
@@ -208,5 +274,29 @@ mod tests {
         let file = join(&sample(), "Above\n\n---\n\nBelow").unwrap();
         let (_, body) = split(&file).unwrap();
         assert_eq!(body, "Above\n\n---\n\nBelow\n");
+    }
+
+    #[test]
+    fn a_note_type_round_trips_through_yaml() {
+        let text = join(&sample(), "body").unwrap();
+        assert!(text.contains("type: literature"), "{text}");
+        let (parsed, _) = split(&text).unwrap();
+        assert_eq!(parsed.unwrap().note_type, NoteType::Literature);
+    }
+
+    #[test]
+    fn a_note_written_before_types_existed_reads_as_standard() {
+        let text = "---\nid: x\ntitle: Old\ncreated: 2026-08-21T10:14:00Z\nupdated: 2026-08-21T10:14:00Z\n---\n\nbody\n";
+        let (parsed, _) = split(text).unwrap();
+        assert_eq!(parsed.unwrap().note_type, NoteType::Standard);
+    }
+
+    #[test]
+    fn a_misspelled_type_reads_as_standard_rather_than_breaking_the_note() {
+        // These files are hand-edited. `type: litrature` should cost the note
+        // its category, not its readability.
+        let text = "---\nid: x\ntype: litrature\ntitle: T\ncreated: 2026-08-21T10:14:00Z\nupdated: 2026-08-21T10:14:00Z\n---\n\nb\n";
+        let (parsed, _) = split(text).unwrap();
+        assert_eq!(parsed.unwrap().note_type, NoteType::Standard);
     }
 }

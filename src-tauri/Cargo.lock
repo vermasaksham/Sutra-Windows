@@ -3328,6 +3328,7 @@ dependencies = [
  "time",
  "ulid",
  "ureq",
+ "windows-sys 0.61.2",
  "zip 7.2.0",
 ]
 

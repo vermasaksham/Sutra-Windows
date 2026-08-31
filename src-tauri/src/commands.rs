@@ -9,6 +9,7 @@
 
 use crate::error::{Result, SutraError};
 use crate::export::ExportDocument;
+use crate::frontmatter::NoteType;
 use crate::index::{Backlink, SearchHit};
 use crate::state::AppState;
 use crate::vault::{MigrationPlan, NoteDoc, NoteSummary};
@@ -221,6 +222,35 @@ pub fn move_note(state: State<'_, AppState>, id: String, folder: String) -> Resu
         let summary = vault.move_note(&id, &folder)?;
         // The body has not changed, but the indexed row carries the folder, so
         // it has to be rewritten for folder filters to stay correct.
+        let doc = vault.read_note(&id)?;
+        index.upsert(&summary, &doc.body)?;
+        Ok(summary)
+    })
+}
+
+/// Capture a note without deciding where it belongs.
+///
+/// Its own command rather than `create_note` with a folder argument, because
+/// the Inbox's name is the vault's business, not the frontend's — and because
+/// this is the operation section 13 asks to be faster than organising.
+#[tauri::command]
+pub fn capture(state: State<'_, AppState>) -> Result<NoteDoc> {
+    state.with_both(|vault, index| {
+        let doc = vault.create_note("", Some(crate::vault::INBOX.to_string()))?;
+        index.upsert(&doc.summary, &doc.body)?;
+        Ok(doc)
+    })
+}
+
+/// Change what kind of note this is.
+#[tauri::command]
+pub fn set_note_type(
+    state: State<'_, AppState>,
+    id: String,
+    note_type: NoteType,
+) -> Result<NoteSummary> {
+    state.with_both(|vault, index| {
+        let summary = vault.set_type(&id, note_type)?;
         let doc = vault.read_note(&id)?;
         index.upsert(&summary, &doc.body)?;
         Ok(summary)

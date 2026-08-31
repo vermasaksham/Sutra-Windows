@@ -7,7 +7,7 @@
 //! vault having to change.
 
 use crate::error::{Result, SutraError};
-use crate::frontmatter::{self, Frontmatter};
+use crate::frontmatter::{self, Frontmatter, NoteType};
 use crate::note;
 use serde::Serialize;
 use std::collections::HashMap;
@@ -31,6 +31,12 @@ const ATTACHMENTS: &str = ".attachments";
 /// never written — an old vault's pictures have to keep working.
 const LEGACY_ATTACHMENTS: &str = "attachments";
 
+/// Where a capture lands when the user has not said where it belongs.
+///
+/// An ordinary folder, deliberately: it can be opened in Explorer, notes can be
+/// dragged out of it by hand, and nothing breaks if someone deletes it.
+pub const INBOX: &str = "Inbox";
+
 /// How deep a note may sit below the root. The brief asks for three or four
 /// levels; four is the cap. It is also roughly what keeps a Windows path under
 /// the 260-character default once a long title and a deep `Documents\...`
@@ -42,6 +48,8 @@ pub const MAX_DEPTH: usize = 4;
 #[derive(Debug, Clone, Serialize)]
 pub struct NoteSummary {
     pub id: String,
+    #[serde(rename = "type")]
+    pub note_type: NoteType,
     pub title: String,
     /// Vault-relative directory, `/`-separated. Empty string means the root.
     ///
@@ -103,6 +111,11 @@ impl Vault {
             return Err(SutraError::NotADirectory(root.display().to_string()));
         }
         fs::create_dir_all(root.join(SUTRA).join(TRASH))?;
+        fs::create_dir_all(root.join(INBOX))?;
+        // A leading dot means nothing to Windows Explorer, and this is a
+        // Windows-first application. Without this the app's own folder sits in
+        // the middle of the user's research vault looking like theirs.
+        hide_from_explorer(&root.join(SUTRA));
         let vault = Self {
             root,
             paths: RwLock::new(HashMap::new()),
@@ -340,6 +353,28 @@ impl Vault {
         Ok(summary_of(&fm, &body, folder_of(&relative)))
     }
 
+    /// Change what kind of note this is.
+    ///
+    /// Its own operation rather than another argument to `set_meta`, because
+    /// the type is not page decoration: it decides which views a note falls
+    /// into, and a call that changes it should say so.
+    pub fn set_type(&self, id: &str, note_type: NoteType) -> Result<NoteSummary> {
+        let relative = self.relative_for(id)?;
+        let path = self.root.join(&relative);
+        let contents = fs::read_to_string(&path)?;
+        let (parsed, body) = frontmatter::split(&contents)?;
+        let mut fm = parsed.unwrap_or_else(|| Self::synthesise(&relative));
+        if fm.id != id {
+            fm.id = id.to_string();
+        }
+        fm.note_type = note_type;
+        fm.updated = frontmatter::now();
+
+        let body = body.to_string();
+        note::write_atomic(&path, &frontmatter::join(&fm, &body)?)?;
+        Ok(summary_of(&fm, &body, folder_of(&relative)))
+    }
+
     /// Move a note to the trash rather than unlinking it.
     ///
     /// A rename, so it is atomic and instant regardless of file size, and the
@@ -387,6 +422,7 @@ impl Vault {
 
         let directory = self.root.join(&folder).join(ATTACHMENTS);
         fs::create_dir_all(&directory)?;
+        hide_from_explorer(&directory);
         fs::copy(source, directory.join(&name))?;
 
         // Forward slashes: this string goes into markdown, where the separator
@@ -773,6 +809,37 @@ fn ancestry(note: &LegacyNote, by_id: &HashMap<&str, &LegacyNote>) -> (Vec<Strin
     (chain, deep)
 }
 
+/// Mark a directory hidden, where the platform has such a concept.
+///
+/// On Unix a leading dot is the whole story and this does nothing. On Windows a
+/// dot is just a character — `.sutra` shows up in Explorer like any other
+/// folder — so the attribute has to be set explicitly.
+///
+/// Failure is ignored on purpose. A vault on a FAT volume, a network share, or
+/// a directory someone else owns may refuse, and a visible folder is a
+/// cosmetic problem, not a reason to fail opening the vault.
+#[cfg(windows)]
+fn hide_from_explorer(path: &Path) {
+    use std::os::windows::ffi::OsStrExt;
+    use windows_sys::Win32::Storage::FileSystem::{
+        FILE_ATTRIBUTE_HIDDEN, GetFileAttributesW, INVALID_FILE_ATTRIBUTES, SetFileAttributesW,
+    };
+
+    let wide: Vec<u16> = path.as_os_str().encode_wide().chain(Some(0)).collect();
+    // SAFETY: `wide` is a NUL-terminated UTF-16 buffer that outlives both calls,
+    // which is the whole contract of these two functions.
+    unsafe {
+        let current = GetFileAttributesW(wide.as_ptr());
+        if current == INVALID_FILE_ATTRIBUTES || current & FILE_ATTRIBUTE_HIDDEN != 0 {
+            return;
+        }
+        SetFileAttributesW(wide.as_ptr(), current | FILE_ATTRIBUTE_HIDDEN);
+    }
+}
+
+#[cfg(not(windows))]
+fn hide_from_explorer(_path: &Path) {}
+
 /// A path component that is an ordinary name — not `..`, not a root, not a
 /// Windows drive prefix.
 fn is_plain(component: Component<'_>) -> bool {
@@ -902,6 +969,7 @@ fn normalise_tags(tags: Vec<String>) -> Vec<String> {
 fn summary_of(fm: &Frontmatter, body: &str, folder: String) -> NoteSummary {
     NoteSummary {
         id: fm.id.clone(),
+        note_type: fm.note_type,
         title: fm.title.clone(),
         folder,
         position: fm.position,
@@ -1648,6 +1716,50 @@ mod tests {
         }
         println!("flattened: {:?}", plan.flattened);
         println!("moved {} files", vault.migrate().unwrap());
+    }
+
+    // ---- types and capture ---------------------------------------------------
+
+    #[test]
+    fn a_vault_always_has_an_inbox() {
+        let vault = TempVault::new();
+        assert!(vault.root().join(INBOX).is_dir());
+    }
+
+    #[test]
+    fn a_captured_note_needs_no_decisions() {
+        let vault = TempVault::new();
+        // No title, no folder, no type — that is the whole point.
+        let doc = vault.create_note("", Some(INBOX.to_string())).unwrap();
+        assert_eq!(doc.summary.folder, INBOX);
+        assert_eq!(doc.summary.note_type, NoteType::Standard);
+        assert!(vault.root().join("Inbox/Untitled.md").is_file());
+    }
+
+    #[test]
+    fn a_notes_type_can_be_changed_later() {
+        let vault = TempVault::new();
+        let note = vault.create_note("Zhou 2019", folder("Library")).unwrap();
+        let id = note.summary.id.clone();
+        vault
+            .save_note(&id, "Zhou 2019", "Quasi-1D ribbons.")
+            .unwrap();
+
+        let after = vault.set_type(&id, NoteType::Literature).unwrap();
+        assert_eq!(after.note_type, NoteType::Literature);
+
+        let read = vault.read_note(&id).unwrap();
+        assert_eq!(read.summary.note_type, NoteType::Literature);
+        assert_eq!(read.body, "Quasi-1D ribbons.\n", "the body is untouched");
+    }
+
+    #[test]
+    fn the_inbox_is_an_ordinary_folder_notes_can_leave() {
+        let vault = TempVault::new();
+        let doc = vault.create_note("", Some(INBOX.to_string())).unwrap();
+        let moved = vault.move_note(&doc.summary.id, "Research/Sb2Se3").unwrap();
+        assert_eq!(moved.folder, "Research/Sb2Se3");
+        assert!(!vault.root().join("Inbox/Untitled.md").exists());
     }
 
     // ---- migration -----------------------------------------------------------

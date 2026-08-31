@@ -11,8 +11,33 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 
 export type VaultInfo = { name: string };
 
+/** The nine kinds a note can be. Never asked for before writing. */
+export type NoteType =
+  | "standard"
+  | "literature"
+  | "idea"
+  | "question"
+  | "experiment"
+  | "project"
+  | "meeting"
+  | "task"
+  | "daily";
+
+export const NOTE_TYPES: ReadonlyArray<{ value: NoteType; label: string }> = [
+  { value: "standard", label: "Note" },
+  { value: "literature", label: "Literature" },
+  { value: "idea", label: "Idea" },
+  { value: "question", label: "Research question" },
+  { value: "experiment", label: "Experiment" },
+  { value: "project", label: "Project" },
+  { value: "meeting", label: "Meeting" },
+  { value: "task", label: "Task" },
+  { value: "daily", label: "Daily" },
+];
+
 export type NoteSummary = {
   id: string;
+  type: NoteType;
   title: string;
   /** Vault-relative directory, `/`-separated. "" is the root. */
   folder: string;
@@ -45,6 +70,10 @@ export const notesApi = {
   /** Move a note into another folder. Nothing that links to it changes. */
   move: (id: string, folder: string) =>
     invoke<NoteSummary>("move_note", { id, folder }),
+  /** A new, empty, untitled note in the Inbox. No decisions required. */
+  capture: () => invoke<NoteDoc>("capture"),
+  setType: (id: string, noteType: NoteType) =>
+    invoke<NoteSummary>("set_note_type", { id, noteType }),
   save: (id: string, title: string, body: string) =>
     invoke<NoteSummary>("save_note", { id, title, body }),
   remove: (id: string) => invoke<void>("delete_note", { id }),
