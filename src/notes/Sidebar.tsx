@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, type SVGProps } from "react";
 import { MOD, shortcut } from "../platform";
 import ThemeToggle from "../components/ThemeToggle";
 import { buildFolders, flattenFolders, type FolderNode } from "./tree";
@@ -34,6 +34,7 @@ export default function Sidebar({
   onNewFolder,
   onNewView,
   onManageTags,
+  onOpenSettings,
 }: {
   vaultName: string;
   notes: NoteSummary[];
@@ -49,6 +50,7 @@ export default function Sidebar({
   onNewFolder: (parent: string | null) => void;
   onNewView: () => void;
   onManageTags: () => void;
+  onOpenSettings: () => void;
 }) {
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [tagsCollapsed, setTagsCollapsed] = useState<Set<string>>(new Set());
@@ -234,10 +236,41 @@ export default function Sidebar({
         )}
       </div>
 
-      <div className="p-2">
+      {/* The quick light/dark switch stays here, because it is the one
+          appearance choice made often enough to deserve a permanent control.
+          Everything else, palettes included, is behind Settings. */}
+      <div className="flex items-center justify-between gap-2 p-2">
         <ThemeToggle />
+        <button
+          type="button"
+          onClick={onOpenSettings}
+          aria-label="Settings"
+          title="Settings"
+          className="rounded-md px-1.5 py-1 text-ink-muted transition-colors duration-150 ease-out hover:bg-row-hover hover:text-accent"
+        >
+          <GearIcon className="size-4" />
+        </button>
       </div>
     </nav>
+  );
+}
+
+/** A gear, drawn rather than imported: the app ships no icon library. */
+function GearIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.6"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+      {...props}
+    >
+      <circle cx="12" cy="12" r="3" />
+      <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9v0a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+    </svg>
   );
 }
 

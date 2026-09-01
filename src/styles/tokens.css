@@ -5,28 +5,86 @@
  * Components reference these variables, directly or through the Tailwind
  * aliases declared in index.css.
  *
- * Theming is one attribute: <html data-theme="light|dark">. `:root` carries
- * the light palette, and the dark block overrides the same names. Because the
- * names are identical, nothing downstream needs to know which theme is active.
- *
- * The neutrals are warm, not grey. That is deliberate — keep it.
- *
  * ---------------------------------------------------------------------------
- * A departure, stated plainly rather than slipped in.
+ * Two axes, two attributes.
  *
- * The original brief fixed indigo #4A45A8 for links and saffron #A6660F for
- * highlights and tags. That is no longer what these say. The app now asks for
- * three distinct grounds — rail, list, page — which the old three-colour set
- * could not supply, and the accent is drawn from the application icon so the
- * two belong to each other: persimmon from the red of the trail, teal from the
- * band beside it. Everything else stays neutral, which is what keeps two
- * saturated hues from fighting.
+ *   <html data-palette="sutra|indigo|slate|contrast" data-theme="light|dark">
  *
- * If the old palette is wanted back, it is this file and nothing else.
+ * A *palette* is which colours. A *theme* is light or dark. They are
+ * independent on purpose: every palette is defined in both, so choosing a
+ * palette never decides whether the app is light, and switching to dark never
+ * throws away the palette. "System" is a preference that resolves to one of
+ * the two concrete values before first paint, so `data-theme` is never absent
+ * and the CSS below needs no media query.
+ *
+ * Both attributes are always written by src/theme/theme.ts. That is what lets
+ * every palette rule carry the same specificity — `[data-palette][data-theme]`,
+ * (0,2,0) — so none of them can win or lose by source order. The bare `:root`
+ * block is only the pre-JavaScript fallback, and the inline script in
+ * index.html replaces it before anything is painted.
+ *
+ * Because these are attribute selectors rather than `:root` ones, they also
+ * apply to any *nested* element carrying the attributes. The palette previews
+ * in Settings rely on that: a swatch sets the two attributes on a wrapper and
+ * paints itself with ordinary `var(--accent)`, so even a preview of a palette
+ * you are not using contains no hardcoded colour.
  * ---------------------------------------------------------------------------
+ *
+ * The Sutra neutrals are warm, not grey. That is deliberate — keep it.
  */
 
+/* ---------------------------------------------------------------------------
+ * Fallback: Sutra light, for the instant before the inline script runs.
+ * ------------------------------------------------------------------------ */
 :root {
+  --rail: #ebe4d8;
+  --canvas: #f6f2ea;
+  --surface: #fffcf7;
+  --border: #e3dcce;
+  --row-hover: #e4dccd;
+  --row-active: #f6e2da;
+
+  --text-primary: #26221b;
+  --text-secondary: #6c645a;
+  --text-muted: #8b8375;
+
+  --accent: #b0472e;
+  --accent-bg: #f6e2da;
+
+  --highlight: #2d7d78;
+  --highlight-bg: #dfeeec;
+}
+
+/* ---------------------------------------------------------------------------
+ * Per-mode and palette-independent: depth, and what the OS draws.
+ *
+ * One shadow, used sparingly: overlays and the editor's floating controls,
+ * never on a row.
+ * ------------------------------------------------------------------------ */
+[data-theme="light"] {
+  --shadow: 0 1px 2px rgb(38 34 27 / 0.06), 0 8px 24px rgb(38 34 27 / 0.1);
+  color-scheme: light;
+}
+
+[data-theme="dark"] {
+  --shadow: 0 1px 2px rgb(0 0 0 / 0.4), 0 8px 24px rgb(0 0 0 / 0.45);
+  color-scheme: dark;
+}
+
+/* ---------------------------------------------------------------------------
+ * Sutra — persimmon and teal on warm paper. The default.
+ *
+ * A departure from the original brief, stated plainly rather than slipped in:
+ * the brief fixed indigo for links and saffron for highlights. The app asks
+ * for three distinct grounds — rail, list, page — which the old three-colour
+ * set could not supply, and this accent is drawn from the application icon so
+ * the two belong to each other: persimmon from the red of the trail, teal from
+ * the band beside it. Everything else stays neutral, which is what keeps two
+ * saturated hues from fighting.
+ *
+ * The brief's palette is not lost. It is Indigo, below.
+ * ------------------------------------------------------------------------ */
+[data-palette="sutra"][data-theme="light"] {
   /* Three grounds, darkest to lightest. The eye reads the stack as depth:
      rail behind list behind page. */
   --rail: #ebe4d8;
@@ -39,7 +97,6 @@
   --row-hover: #e4dccd;
   --row-active: #f6e2da;
 
-  /* Text */
   --text-primary: #26221b;
   --text-secondary: #6c645a;
   --text-muted: #8b8375;
@@ -51,16 +108,9 @@
   /* Teal — highlights and tags only. Nothing else. */
   --highlight: #2d7d78;
   --highlight-bg: #dfeeec;
-
-  /* Depth. One shadow, used sparingly: overlays and the editor's floating
-     controls, never on a row. */
-  --shadow: 0 1px 2px rgb(38 34 27 / 0.06), 0 8px 24px rgb(38 34 27 / 0.1);
-
-  /* Tells the OS to draw scrollbars and form controls to match. */
-  color-scheme: light;
 }
 
-[data-theme="dark"] {
+[data-palette="sutra"][data-theme="dark"] {
   --rail: #141310;
   --canvas: #1b1915;
   --surface: #211e19;
@@ -79,12 +129,155 @@
 
   --highlight: #6cc3bb;
   --highlight-bg: #16332f;
-
-  --shadow: 0 1px 2px rgb(0 0 0 / 0.4), 0 8px 24px rgb(0 0 0 / 0.45);
-
-  color-scheme: dark;
 }
 
+/* ---------------------------------------------------------------------------
+ * Indigo — the original brief, kept: indigo links, saffron highlights.
+ *
+ * The neutrals are cooler than Sutra's and carry a faint indigo bias, so the
+ * accent reads as belonging to the paper rather than sitting on top of it.
+ * ------------------------------------------------------------------------ */
+[data-palette="indigo"][data-theme="light"] {
+  --rail: #e7e6e3;
+  --canvas: #f3f2ef;
+  --surface: #fdfdfc;
+  --border: #dedcd6;
+
+  --row-hover: #e2e0da;
+  --row-active: #e5e4f2;
+
+  --text-primary: #23222a;
+  --text-secondary: #63616c;
+  --text-muted: #85838d;
+
+  --accent: #4a45a8;
+  --accent-bg: #e5e4f2;
+
+  --highlight: #a6660f;
+  --highlight-bg: #f6ebd9;
+}
+
+[data-palette="indigo"][data-theme="dark"] {
+  --rail: #121218;
+  --canvas: #191922;
+  --surface: #1f1f29;
+  --border: #2e2e3a;
+
+  --row-hover: #24242f;
+  --row-active: #2b2a48;
+
+  --text-primary: #e6e5ec;
+  --text-secondary: #a09eab;
+  --text-muted: #817f8c;
+
+  /* Lifted well off the brief's #4a45a8: that indigo is a link colour for
+     paper, and on a dark ground it reads as a bruise rather than a link. */
+  --accent: #9b95f0;
+  --accent-bg: #2b2a48;
+
+  --highlight: #e0a353;
+  --highlight-bg: #372a14;
+}
+
+/* ---------------------------------------------------------------------------
+ * Slate — cool neutrals and one quiet blue.
+ *
+ * For anyone who finds a warm ground tiring over a long day. Nearly
+ * monochrome: the accent is the only thing with any real saturation, so a
+ * screen full of notes reads as text rather than as interface.
+ * ------------------------------------------------------------------------ */
+[data-palette="slate"][data-theme="light"] {
+  --rail: #e4e7ea;
+  --canvas: #f1f3f5;
+  --surface: #fbfcfd;
+  --border: #d7dbe0;
+
+  --row-hover: #dde1e6;
+  --row-active: #dbe7f2;
+
+  --text-primary: #1c2126;
+  --text-secondary: #5a636c;
+  --text-muted: #7d868f;
+
+  --accent: #2f6f9f;
+  --accent-bg: #dbe7f2;
+
+  --highlight: #3f7d6a;
+  --highlight-bg: #ddeee8;
+}
+
+[data-palette="slate"][data-theme="dark"] {
+  --rail: #0f1316;
+  --canvas: #151a1e;
+  --surface: #1b2126;
+  --border: #29323a;
+
+  --row-hover: #202830;
+  --row-active: #1e3345;
+
+  --text-primary: #e2e8ed;
+  --text-secondary: #97a2ac;
+  --text-muted: #78838d;
+
+  --accent: #6fb4e8;
+  --accent-bg: #1e3345;
+
+  --highlight: #6dc0a6;
+  --highlight-bg: #16332c;
+}
+
+/* ---------------------------------------------------------------------------
+ * Contrast — maximum legibility.
+ *
+ * Pure grounds, black or white text, and borders heavy enough to survive a
+ * projector in a lit room. The one palette that spends contrast rather than
+ * saving it, which is why its edges look harder than the others: that is the
+ * point of it, not an oversight.
+ * ------------------------------------------------------------------------ */
+[data-palette="contrast"][data-theme="light"] {
+  --rail: #ececec;
+  --canvas: #f7f7f7;
+  --surface: #ffffff;
+  --border: #b8b8b8;
+
+  --row-hover: #e0e0e0;
+  --row-active: #ffe3d6;
+
+  --text-primary: #000000;
+  --text-secondary: #333333;
+  --text-muted: #555555;
+
+  --accent: #b02000;
+  --accent-bg: #ffe3d6;
+
+  --highlight: #00564e;
+  --highlight-bg: #d6efec;
+}
+
+[data-palette="contrast"][data-theme="dark"] {
+  --rail: #000000;
+  --canvas: #0a0a0a;
+  --surface: #141414;
+  --border: #5a5a5a;
+
+  --row-hover: #1f1f1f;
+  --row-active: #3d1b10;
+
+  --text-primary: #ffffff;
+  --text-secondary: #d0d0d0;
+  --text-muted: #a8a8a8;
+
+  --accent: #ff9166;
+  --accent-bg: #3d1b10;
+
+  --highlight: #5fd9c9;
+  --highlight-bg: #0d332f;
+}
+
+/* ---------------------------------------------------------------------------
+ * Everything that is not a colour, and so varies with neither palette nor
+ * theme.
+ * ------------------------------------------------------------------------ */
 :root {
   /* Typography — Notion/Apple Notes density. */
   --font-body:

@@ -7,6 +7,7 @@ import ContextPanel from "./notes/ContextPanel";
 import DuplicateReview from "./notes/DuplicateReview";
 import DuplicateList from "./notes/DuplicateList";
 import AiSettingsDialog from "./notes/AiSettings";
+import SettingsDialog from "./notes/Settings";
 import { citedRefs } from "./notes/citedRefs";
 import SourceDetails from "./notes/SourceDetails";
 import ExportMenu from "./notes/ExportMenu";
@@ -105,6 +106,7 @@ export default function App() {
   /** Whether assistance is on, and what it would use. Never the key. */
   const [ai, setAi] = useState<AiStatus | null>(null);
   const [aiSettingsOpen, setAiSettingsOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [duplicatesOpen, setDuplicatesOpen] = useState(false);
   const [comparing, setComparing] = useState<{
     left: string;
@@ -726,6 +728,7 @@ export default function App() {
           onNewView={() => void editView(null)}
           onCapture={() => void capture()}
           onManageTags={() => setTagsOpen(true)}
+          onOpenSettings={() => setSettingsOpen(true)}
           onNewFolder={(parent) => {
             const name = window.prompt(
               parent
@@ -951,6 +954,14 @@ export default function App() {
         />
       )}
 
+      {settingsOpen && (
+        <SettingsDialog
+          aiEnabled={ai?.enabled ?? false}
+          onOpenAiSettings={() => setAiSettingsOpen(true)}
+          onClose={() => setSettingsOpen(false)}
+        />
+      )}
+
       {aiSettingsOpen && ai && (
         <AiSettingsDialog
           status={ai}
@@ -1018,6 +1029,7 @@ export default function App() {
           onFindDuplicates={() => setDuplicatesOpen(true)}
           aiEnabled={ai?.enabled ?? false}
           onAiSettings={() => setAiSettingsOpen(true)}
+          onOpenSettings={() => setSettingsOpen(true)}
           currentSearch={query}
           onSaveSearchAsView={() =>
             setEditingView({

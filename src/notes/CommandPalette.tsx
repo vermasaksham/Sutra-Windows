@@ -47,6 +47,7 @@ type Props = {
   /** Whether assistance is switched on, so the command can say which way. */
   aiEnabled: boolean;
   onAiSettings: () => void;
+  onOpenSettings: () => void;
   /** What the list's search field holds, so it can be saved as a view. */
   currentSearch: string;
   onSaveSearchAsView: () => void;
@@ -73,6 +74,7 @@ export default function CommandPalette({
   onFindDuplicates,
   aiEnabled,
   onAiSettings,
+  onOpenSettings,
   currentSearch,
   onSaveSearchAsView,
   legacyCitations,
@@ -176,6 +178,14 @@ export default function CommandPalette({
     }
 
     out.push({
+      id: "settings",
+      label: "Settings — appearance and themes",
+      group: "Vault",
+      hint: "light or dark, and four palettes",
+      run: onOpenSettings,
+    });
+
+    out.push({
       id: "ai",
       label: aiEnabled ? "Assistance settings" : "Turn on assistance",
       group: "Vault",
@@ -200,6 +210,7 @@ export default function CommandPalette({
     onSetType,
     onExportDocx,
     onExportPdf,
+    onOpenSettings,
     onManageTags,
     onNewView,
     onFindDuplicates,

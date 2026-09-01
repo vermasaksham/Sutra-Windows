@@ -25,11 +25,12 @@ says so rather than leaving you to find out.
 12. [Duplicates and numbers that differ](#12-duplicates-and-numbers-that-differ)
 13. [Export](#13-export)
 14. [Assistance (optional AI)](#14-assistance-optional-ai)
-15. [Keyboard shortcuts](#15-keyboard-shortcuts)
-16. [The command palette](#16-the-command-palette)
-17. [What is on disk, and where](#17-what-is-on-disk-and-where)
-18. [When something goes wrong](#18-when-something-goes-wrong)
-19. [Known limits](#19-known-limits)
+15. [Appearance — themes and dark mode](#15-appearance--themes-and-dark-mode)
+16. [Keyboard shortcuts](#16-keyboard-shortcuts)
+17. [The command palette](#17-the-command-palette)
+18. [What is on disk, and where](#18-what-is-on-disk-and-where)
+19. [When something goes wrong](#19-when-something-goes-wrong)
+20. [Known limits](#20-known-limits)
 
 ---
 
@@ -62,6 +63,9 @@ opened.
   a long title and a `Documents\…` prefix are accounted for.
 - **Views** — saved queries. See [§10](#10-views--saved-questions-about-the-vault).
 - **Tags** — every tag in use, with counts.
+
+At the foot of the rail: the Light / Dark / System switch, and a gear that
+opens Settings ([§15](#15-appearance--themes-and-dark-mode)).
 
 **The list** (middle) shows the notes in whatever you selected, with a search
 field at the top (`Ctrl+Shift+F`). Search runs over the full text of every
@@ -343,7 +347,7 @@ your machine.
 Turn it on with `Ctrl+K` → _Turn on assistance_. You need an Anthropic API key,
 supplied either in the settings panel or in the `ANTHROPIC_API_KEY`
 environment variable — the environment wins where both are set, and is the
-better place for it (see [§19](#19-known-limits)).
+better place for it (see [§20](#20-known-limits)).
 
 Three things it will do, for the note you have open:
 
@@ -363,7 +367,44 @@ The model defaults to Claude Opus 5 and can be changed in the same panel.
 
 ---
 
-## 15. Keyboard shortcuts
+## 15. Appearance — themes and dark mode
+
+Two separate choices, and neither decides the other.
+
+**Mode** — Light, Dark, or System. System follows Windows and changes with it,
+including when Windows switches on a schedule.
+
+**Palette** — which colours. Every palette is drawn for both light and dark, so
+switching to dark never throws away your palette and choosing a palette never
+decides whether the app is light.
+
+| Palette      | What it is                                                    |
+| ------------ | ------------------------------------------------------------- |
+| **Sutra**    | Persimmon and teal on warm paper. The default.                |
+| **Indigo**   | The original design brief — indigo links, saffron highlights. |
+| **Slate**    | Cool neutrals and one quiet blue. Nearly monochrome.          |
+| **Contrast** | Pure grounds and heavy edges, for a lit room or a projector.  |
+
+Open **Settings** with the gear at the bottom of the rail, or `Ctrl+K` →
+_Settings — appearance and themes_. Each palette is previewed in its own
+colours, in whichever mode you are currently in, so the swatches show what the
+window would actually look like rather than a generic sample.
+
+The quick Light / Dark / System switch stays at the bottom of the rail, since
+that is the one appearance choice made often enough to deserve a permanent
+control.
+
+**Two things worth knowing.**
+
+Your choice is remembered per machine, in the app's own storage rather than in
+the vault. It is a property of the screen you are looking at, not of your
+notes, so syncing a vault between a desktop and a laptop does not drag one
+machine's theme onto the other.
+
+Printing and Word export ignore the theme entirely. Both always produce black
+text on white, so exporting from dark mode does not hand you a black page.
+
+## 16. Keyboard shortcuts
 
 These are the app's own. The editor keeps all its usual ones — bold, italic,
 lists, undo — unchanged.
@@ -385,7 +426,7 @@ still gets you there.
 
 ---
 
-## 16. The command palette
+## 17. The command palette
 
 `Ctrl+K`. Type to filter; it searches both commands and your notes by title,
 so it doubles as a jump-to-note.
@@ -397,12 +438,12 @@ Export as Word (.docx) · Print, or save as PDF
 
 **Vault** — Manage tags · Find notes written twice · New view · Save this
 search as a view _(when there is a search to save)_ · Turn Zotero citations
-into sources _(when there are any)_ · Assistance settings · Rebuild the search
-index
+into sources _(when there are any)_ · Settings — appearance and themes ·
+Assistance settings · Rebuild the search index
 
 ---
 
-## 17. What is on disk, and where
+## 18. What is on disk, and where
 
 **In your vault folder:**
 
@@ -463,7 +504,7 @@ not also exist in a markdown file.
 
 ---
 
-## 18. When something goes wrong
+## 19. When something goes wrong
 
 **"… changed on disk".** The file was edited by something else — another
 editor, a sync client — while you had unsaved edits here. Choose which version
@@ -485,7 +526,7 @@ elsewhere on the disk.
 
 ---
 
-## 19. Known limits
+## 20. Known limits
 
 Stated plainly, so none of them is a surprise:
 
