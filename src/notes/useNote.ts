@@ -8,6 +8,19 @@ import {
 
 const AUTOSAVE_DELAY = 600;
 
+/**
+ * Whether two versions of a note's text say the same thing.
+ *
+ * Only trailing whitespace is forgiven. Sutra writes a trailing newline that
+ * the editor's buffer does not carry, so a byte comparison would call the file
+ * different from what we just wrote to it. Anything a person could actually
+ * have typed still counts as a difference — including leading whitespace and
+ * whitespace in the middle.
+ */
+export function sameText(a: string, b: string): boolean {
+  return a.replace(/\s+$/, "") === b.replace(/\s+$/, "");
+}
+
 export type SaveState = "saved" | "dirty" | "saving" | "error";
 
 /**
@@ -206,11 +219,19 @@ export function useNote(id: string | null, onSaved: () => void) {
       }
 
       // Our own save, echoed back by the watcher. Compare contents rather than
-      // relying on a timing window: a slow disk would defeat a timer, and this
-      // cannot produce a false positive.
+      // relying on a timing window: a slow disk would defeat a timer.
+      //
+      // Trailing whitespace is ignored, and that is the whole point. What we
+      // record in `written` is the buffer the editor produced; what comes back
+      // is the markdown parsed out of the file, and the file ends with a
+      // newline the buffer never had. Comparing them exactly never matched, so
+      // *every* autosave looked like somebody else editing the note: a clean
+      // buffer was silently re-adopted, remounting the editor mid-keystroke —
+      // which closed the slash menu and threw the caret back to the top — and
+      // a dirty one raised the conflict prompt against our own writing.
       if (
-        disk.body === written.current.body &&
-        disk.title === written.current.title
+        sameText(disk.body, written.current.body) &&
+        sameText(disk.title, written.current.title)
       ) {
         return;
       }

@@ -584,7 +584,10 @@ blockquote.sutra-voice-source {
 
 .sutra-cover {
   position: relative;
-  margin: -1.5rem -1.5rem 1rem;
+  /* Bleeds sideways, never upward. A negative top margin pulled the cover
+     over the folder breadcrumb above it, so adding a cover picture hid the
+     one control that says where the note lives. */
+  margin: 0 -1.5rem 1rem;
   height: 11rem;
   overflow: hidden;
   border-radius: 0 0 10px 10px;

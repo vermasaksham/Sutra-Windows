@@ -323,21 +323,28 @@ function Row({
       onClick={onClick}
       aria-current={active ? "true" : undefined}
       className={[
-        "flex w-full items-center gap-1 rounded-md px-2 py-1 text-left text-sm transition-colors duration-150 ease-out",
+        "flex w-full items-center rounded-md py-1 pr-2 text-left text-sm transition-colors duration-150 ease-out",
         active
           ? "bg-row-active font-medium text-accent"
           : "text-ink-soft hover:bg-row-hover hover:text-ink",
       ].join(" ")}
     >
+      {/*
+        Stands in for the chevron a folder or tag row carries, so every label
+        in the rail begins on the same vertical line. Without it these rows
+        started 8px to the left of the tree below them, which reads as the
+        list being crooked rather than as two kinds of row.
+      */}
+      <span className="size-4 shrink-0" aria-hidden />
       {hash && (
-        <span className="text-highlight" aria-hidden>
+        <span className="mr-0.5 text-highlight" aria-hidden>
           #
         </span>
       )}
       <span className="min-w-0 flex-1 truncate">{label}</span>
       <span
         className={[
-          "shrink-0 text-xs tabular-nums",
+          "shrink-0 pl-1 text-xs tabular-nums",
           emphasis && !active ? "text-accent" : "text-ink-muted",
         ].join(" ")}
       >
