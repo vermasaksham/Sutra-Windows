@@ -120,8 +120,16 @@ export function suggestTags(
   limit = 6,
 ): string[] {
   const needle = squash(draft);
-  if (needle === "") return [];
   const taken = new Set(already);
+  // Nothing typed yet: offer the vault's most-used tags rather than nothing.
+  //
+  // The caller passes them usage-sorted, so this is the shortlist a person
+  // would have picked from anyway — and an empty box that only responds once
+  // you have guessed the first letter of a tag you already have is a box that
+  // makes you retype tags you thought you were reusing.
+  if (needle === "") {
+    return all.filter((tag) => !taken.has(tag)).slice(0, limit);
+  }
   return all
     .filter((tag) => !taken.has(tag) && squash(tag).includes(needle))
     .sort((a, b) => {

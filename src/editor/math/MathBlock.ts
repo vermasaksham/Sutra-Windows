@@ -1,4 +1,4 @@
-import { Node, mergeAttributes } from "@tiptap/core";
+import { InputRule, Node, mergeAttributes } from "@tiptap/core";
 import type { MarkdownToken } from "@tiptap/core";
 import { ReactNodeViewRenderer } from "@tiptap/react";
 import MathBlockView from "./MathBlockView";
@@ -47,6 +47,28 @@ export const MathBlock = Node.create({
 
   addNodeView() {
     return ReactNodeViewRenderer(MathBlockView);
+  },
+
+  /**
+   * `$$` at the start of a line opens an empty display formula.
+   *
+   * Typed rather than pasted: the block tokenizer above only runs when
+   * markdown is read from disk, so without this the fence had to be typed,
+   * saved and reopened before it became a formula. An empty node is right —
+   * the editor puts the caret in it, which is where the LaTeX goes.
+   */
+  addInputRules() {
+    return [
+      new InputRule({
+        find: /^\$\$$/,
+        handler: ({ chain, range }) => {
+          chain()
+            .deleteRange(range)
+            .insertContent({ type: this.name, attrs: { latex: "" } })
+            .run();
+        },
+      }),
+    ];
   },
 
   markdownTokenizer: {

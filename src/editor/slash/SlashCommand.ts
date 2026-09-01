@@ -35,7 +35,7 @@ export const SlashCommand = Extension.create({
         // wikilink autocomplete also using Suggestion, both need their own.
         pluginKey: new PluginKey("sutraSlashCommand"),
         char: "/",
-        items: ({ query }) => filterItems(query),
+        items: ({ query, editor }) => filterItems(query, editor),
 
         render: () => {
           let renderer: ReactRenderer<SlashMenuHandle, MenuProps> | null = null;

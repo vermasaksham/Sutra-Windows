@@ -134,7 +134,25 @@ describe("suggestTags", () => {
     expect(suggestTags("cvt", all, ["cvt"])).toEqual([]);
   });
 
-  it("offers nothing for an empty draft", () => {
-    expect(suggestTags("  ", all, [])).toEqual([]);
+  it("offers the most-used tags before anything is typed", () => {
+    // This used to return nothing, on the reasoning that a suggestion list
+    // should answer a query. Using the app said otherwise: opening the tag
+    // box and seeing an empty panel reads as "this vault has no tags", so
+    // people retype tags they meant to reuse — which is the duplicate the
+    // whole feature exists to prevent. `all` arrives most-used first.
+    expect(suggestTags("  ", all, [])).toEqual(all);
+    expect(suggestTags("", all, [])).toEqual(all);
+  });
+
+  it("never offers a tag the note already carries, typed or not", () => {
+    expect(suggestTags("", all, ["thermodynamics", "cvt"])).toEqual([
+      "thermal-conductivity",
+      "research/thermodynamics",
+    ]);
+  });
+
+  it("keeps the list short enough to read at a glance", () => {
+    const many = Array.from({ length: 40 }, (_, i) => `tag-${i}`);
+    expect(suggestTags("", many, []).length).toBe(6);
   });
 });
