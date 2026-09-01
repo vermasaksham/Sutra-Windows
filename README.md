@@ -19,16 +19,16 @@ renaming a note never breaks a link.
 
 ## Stack
 
-| Layer | Choice |
-| --- | --- |
-| Shell | Tauri v2 |
-| Backend | Rust |
-| Frontend | React + TypeScript + Vite |
-| Styling | Tailwind CSS v4 |
-| Editor | TipTap (ProseMirror) |
-| Maths | KaTeX + mhchem |
-| Index | SQLite |
-| Target | Windows 10+ primarily; macOS kept working where free |
+| Layer    | Choice                                               |
+| -------- | ---------------------------------------------------- |
+| Shell    | Tauri v2                                             |
+| Backend  | Rust                                                 |
+| Frontend | React + TypeScript + Vite                            |
+| Styling  | Tailwind CSS v4                                      |
+| Editor   | TipTap (ProseMirror)                                 |
+| Maths    | KaTeX + mhchem                                       |
+| Index    | SQLite                                               |
+| Target   | Windows 10+ primarily; macOS kept working where free |
 
 Rust owns the filesystem, frontmatter, the SQLite index, search, backlinks,
 file watching, and export. React owns everything visual, editor state,
@@ -46,6 +46,11 @@ between them. Measured before adopting: all twelve supported block types
 round-trip stably, eleven of twelve byte-identically. Rust still reads raw
 markdown for the Phase 4 index — extracting search text and `[[id]]` links —
 but that is extraction, never re-serialisation.
+
+## Using it
+
+The manual — everything the app does and how to make it do it — is in
+[`docs/manual.md`](docs/manual.md).
 
 ## Getting started
 
@@ -247,13 +252,13 @@ to sound plausible.
 
 Five signals feed it:
 
-| Signal | Reads as | Why it is weighted where it is |
-| --- | --- | --- |
-| Shared source | `cites Zhou 2019 too` | The strongest ordinary signal. Two notes citing one paper is a deliberate act by one person about one paper; it cannot happen by accident. |
-| Shared tag | `shares #sb2se3` | Weighted by inverse document frequency, so a tag on three notes says far more than one on half the vault — and scaled, or two ordinary tags would outrank a citation. |
-| Shared project | `both in PhD Thesis` | A project is a note and belonging to one is linking to it, so this falls out of the link table with no project field anywhere in the data model. |
-| Shared link | `both link to Phonon transport` | Co-citation, in the bibliometric sense. |
-| Shared prose | `shares 7 distinctive words` | The weakest and noisiest, so it is scaled down and capped — a long note shares words with everything, and without a ceiling length alone would decide the ranking. |
+| Signal         | Reads as                        | Why it is weighted where it is                                                                                                                                        |
+| -------------- | ------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Shared source  | `cites Zhou 2019 too`           | The strongest ordinary signal. Two notes citing one paper is a deliberate act by one person about one paper; it cannot happen by accident.                            |
+| Shared tag     | `shares #sb2se3`                | Weighted by inverse document frequency, so a tag on three notes says far more than one on half the vault — and scaled, or two ordinary tags would outrank a citation. |
+| Shared project | `both in PhD Thesis`            | A project is a note and belonging to one is linking to it, so this falls out of the link table with no project field anywhere in the data model.                      |
+| Shared link    | `both link to Phonon transport` | Co-citation, in the bibliometric sense.                                                                                                                               |
+| Shared prose   | `shares 7 distinctive words`    | The weakest and noisiest, so it is scaled down and capped — a long note shares words with everything, and without a ceiling length alone would decide the ranking.    |
 
 "Distinctive" is read from FTS5's own term dictionary rather than guessed at: a
 word in no other note finds nothing, a word in a quarter of them says nothing,
@@ -289,8 +294,8 @@ orders by, and would be the same rows in a second place.
 
 Every suggestion in Sutra has a deterministic implementation first, and AI
 comes last. That order is the argument, not a schedule: related notes,
-duplicates and differing numbers can show their working — *these two share four
-terms and a tag* — and a model's guess cannot. For a vault holding years of
+duplicates and differing numbers can show their working — _these two share four
+terms and a tag_ — and a model's guess cannot. For a vault holding years of
 research, explainable beats clever, and the failure most worth avoiding is
 inventing something that reads like a finding.
 
@@ -309,7 +314,7 @@ the app has exactly one road to a file.
 but the prompt is not the guarantee — the test that proves this passes with a
 stub that fabricates a citation every time.
 
-**Off by default.** Off is a *type*: with assistance switched off, or switched
+**Off by default.** Off is a _type_: with assistance switched off, or switched
 on with no key, `state::choose` returns `ai::Off`, and the object that could
 reach the network is never constructed. It is not a boolean somebody has to
 remember to check.
@@ -389,7 +394,7 @@ vault. It is a command and never a background nag.
 **Not contradiction detection.** Deciding that two passages of prose disagree
 is a research problem; deciding that two numbers written as the same quantity
 in the same unit differ by a factor is arithmetic. Only the arithmetic ships,
-and the panel says only that: *two numeric claims differ*, with both quoted as
+and the panel says only that: _two numeric claims differ_, with both quoted as
 written and the ratio between them. Which is right — or whether they are even
 about the same measurement — is not knowable from the text and is not claimed.
 
