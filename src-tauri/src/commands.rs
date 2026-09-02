@@ -22,7 +22,6 @@ use crate::state::{self, AiSettings, AiStatus, AppState};
 use crate::tags::Suggestion;
 use crate::vault::{MigrationPlan, NoteDoc, NoteSummary, Retag, TagChange};
 use crate::views::Query;
-use crate::zotero::Zotero;
 use serde::Serialize;
 use std::collections::HashMap;
 use tauri::{AppHandle, State};
@@ -191,14 +190,14 @@ pub fn export_docx(app: AppHandle, document: ExportDocument) -> Result<Option<St
 /// no longer exists is worse than asking again. Zotero is on the loopback
 /// interface, so the round trip is cheap.
 #[tauri::command]
-pub fn zotero_search(query: String) -> Result<Vec<Reference>> {
-    Zotero::default().search(&query, 20)
+pub fn zotero_search(app: AppHandle, query: String) -> Result<Vec<Reference>> {
+    crate::state::provider(&app).search(&query, 20)
 }
 
 /// Resolve citation keys to references, so `[@KEY]` can render a label.
 #[tauri::command]
-pub fn zotero_by_keys(keys: Vec<String>) -> Result<Vec<Reference>> {
-    Zotero::default().items(&keys)
+pub fn zotero_by_keys(app: AppHandle, keys: Vec<String>) -> Result<Vec<Reference>> {
+    crate::state::provider(&app).items(&keys)
 }
 
 /// Whether the reference manager is reachable, and why not when it is not.
@@ -208,20 +207,109 @@ pub fn zotero_by_keys(keys: Vec<String>) -> Result<Vec<Reference>> {
 /// line rather than an error toast. Notes, sources, evidence and citations all
 /// keep working from cached metadata regardless of what this returns.
 #[tauri::command]
-pub fn reference_status() -> Availability {
-    Zotero::default().availability()
+pub fn reference_status(app: AppHandle) -> Availability {
+    crate::state::provider(&app).availability()
+}
+
+/// The stored connection and style, with the key withheld.
+#[tauri::command]
+pub fn reference_config(app: AppHandle) -> crate::state::ReferenceConfig {
+    crate::state::reference_config(&app)
+}
+
+/// Save the connection and the citation style.
+#[tauri::command]
+pub fn configure_references(
+    app: AppHandle,
+    account: bool,
+    user_id: Option<String>,
+    api_key: Option<String>,
+    style: String,
+    locale: String,
+) -> crate::state::ReferenceConfig {
+    crate::state::set_reference_settings(&app, account, user_id, api_key, style, locale)
+}
+
+/// Re-render every linked source in the current style.
+///
+/// Needed because the styled forms are a cache: switching style leaves every
+/// existing source holding the old one. Returns how many were restyled, so the
+/// UI can say something true rather than "done".
+///
+/// Sources the library cannot render — it does not have that style, the item
+/// is gone — are left exactly as they were rather than blanked. A citation
+/// that still reads correctly in the previous style beats one that reads
+/// "Untitled".
+#[tauri::command]
+pub fn restyle_sources(app: AppHandle, state: State<'_, AppState>) -> Result<usize> {
+    let settings = crate::state::reference_settings(&app);
+    let style = settings.style.trim().to_string();
+    if style.is_empty() {
+        return Ok(0);
+    }
+
+    let linked = state.with_vault(|vault| vault.linked_sources())?;
+    if linked.is_empty() {
+        return Ok(0);
+    }
+
+    let provider = crate::state::provider(&app);
+    let keys: Vec<String> = linked.iter().map(|(_, key)| key.clone()).collect();
+
+    let mut done = 0;
+    // In batches: a library of four hundred papers is one URL Zotero will
+    // refuse, and asking one item at a time is four hundred round trips.
+    for chunk in keys.chunks(STYLE_BATCH) {
+        let rendered = provider.styled(chunk, &style, &settings.locale)?;
+        state.with_vault(|vault| {
+            for (key, styled) in &rendered {
+                if let Some((id, _)) = linked.iter().find(|(_, k)| k == key) {
+                    vault.cache_style(id, &style, styled.clone())?;
+                    done += 1;
+                }
+            }
+            Ok(())
+        })?;
+    }
+    Ok(done)
+}
+
+/// How many items to ask Zotero to render at once.
+const STYLE_BATCH: usize = 25;
+
+/// Cache the current style for one freshly imported source.
+///
+/// Best-effort on purpose. A source that imported cleanly but could not be
+/// rendered — no such style, the library went away between the two requests —
+/// is still a perfectly good source note, and failing the import over its
+/// formatting would be losing the paper to save the punctuation.
+fn cache_current_style(app: &AppHandle, vault: &crate::vault::Vault, id: &str, key: &str) {
+    let settings = crate::state::reference_settings(app);
+    let style = settings.style.trim();
+    if style.is_empty() {
+        return;
+    }
+    let provider = crate::state::provider(app);
+    if let Ok(rendered) = provider.styled(
+        std::slice::from_ref(&key.to_string()),
+        style,
+        &settings.locale,
+    ) && let Some((_, styled)) = rendered.into_iter().next()
+    {
+        let _ = vault.cache_style(id, style, styled);
+    }
 }
 
 /// Everything about one item, collections and attachments included.
 #[tauri::command]
-pub fn zotero_detail(key: String) -> Result<ItemDetail> {
-    Zotero::default().detail(&key)
+pub fn zotero_detail(app: AppHandle, key: String) -> Result<ItemDetail> {
+    crate::state::provider(&app).detail(&key)
 }
 
 /// Show the item in Zotero's own window.
 #[tauri::command]
-pub fn zotero_open(key: String) -> Result<()> {
-    Zotero::default().open(&key)
+pub fn zotero_open(app: AppHandle, key: String) -> Result<()> {
+    crate::state::provider(&app).open(&key)
 }
 
 /// Copy a file into the vault's attachments folder.
@@ -284,7 +372,7 @@ pub struct CitationMigration {
 /// stand for. After this the vault does not need Zotero again — which is the
 /// entire point of doing it.
 #[tauri::command]
-pub fn migrate_citations(state: State<'_, AppState>) -> Result<CitationMigration> {
+pub fn migrate_citations(app: AppHandle, state: State<'_, AppState>) -> Result<CitationMigration> {
     let counts = state.with_vault(|vault| vault.legacy_citations())?;
     let mut keys: Vec<String> = counts.into_keys().collect();
     keys.sort();
@@ -296,7 +384,7 @@ pub fn migrate_citations(state: State<'_, AppState>) -> Result<CitationMigration
         });
     }
 
-    let found = Zotero::default().items(&keys)?;
+    let found = crate::state::provider(&app).items(&keys)?;
     let mut mapping = HashMap::new();
     let mut migrated = Vec::new();
 
@@ -394,8 +482,12 @@ pub fn citing_notes(state: State<'_, AppState>, id: String) -> Result<Vec<Citing
 /// shown. That is the difference between a citation that still means something
 /// in ten years and one that stops working when Zotero is uninstalled.
 #[tauri::command]
-pub fn import_zotero_source(state: State<'_, AppState>, key: String) -> Result<NoteSummary> {
-    let found = Zotero::default().items(std::slice::from_ref(&key))?;
+pub fn import_zotero_source(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    key: String,
+) -> Result<NoteSummary> {
+    let found = crate::state::provider(&app).items(std::slice::from_ref(&key))?;
     let reference = found
         .into_iter()
         .next()
@@ -403,6 +495,7 @@ pub fn import_zotero_source(state: State<'_, AppState>, key: String) -> Result<N
 
     state.with_both(|vault, index| {
         let summary = vault.import_source(&reference.title, reference.to_source())?;
+        cache_current_style(&app, vault, &summary.id, &key);
         let doc = vault.read_note(&summary.id)?;
         index.upsert(&summary, &doc.body)?;
         Ok(summary)
@@ -423,11 +516,12 @@ pub fn import_zotero_source(state: State<'_, AppState>, key: String) -> Result<N
 /// provider has none, the note simply has none: nothing here composes one.
 #[tauri::command]
 pub fn create_literature_note(
+    app: AppHandle,
     state: State<'_, AppState>,
     key: String,
     folder: Option<String>,
 ) -> Result<NoteSummary> {
-    let zotero = Zotero::default();
+    let zotero = crate::state::provider(&app);
 
     // `detail` also brings collections and attachments; if that half fails —
     // an older Zotero, a permissions oddity — fall back to the plain item
@@ -459,6 +553,7 @@ pub fn create_literature_note(
 
     state.with_both(|vault, index| {
         let source = vault.import_source(&title, meta.clone())?;
+        cache_current_style(&app, vault, &source.id, &key);
         let source_doc = vault.read_note(&source.id)?;
         index.upsert(&source, &source_doc.body)?;
 

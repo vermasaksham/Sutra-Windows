@@ -2,6 +2,7 @@
 
 use crate::error::{Result, SutraError};
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 use time::OffsetDateTime;
 
 /// The delimiter line. A frontmatter block opens and closes with exactly this.
@@ -168,6 +169,19 @@ pub struct SourceMeta {
     /// is never copied.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pdf: Option<String>,
+    /// This paper as the reference manager rendered it, keyed by CSL style id.
+    ///
+    /// A cache, and a deliberate one. Formatting is Zotero's job and the app
+    /// asks Zotero for it — but a thesis draft is written on trains, and a
+    /// citation that reads "(Ko et al., 2024)" only while a program is running
+    /// is not a citation you can rely on. Keeping every style ever fetched,
+    /// rather than only the current one, means switching back to a style used
+    /// before needs no network at all.
+    ///
+    /// A `BTreeMap` so the YAML comes out in a stable order and a note is not
+    /// rewritten by a re-serialisation that only changed the order of a map.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub styled: BTreeMap<String, crate::references::StyledCitation>,
 }
 
 /// One note citing one source, at one place in it.

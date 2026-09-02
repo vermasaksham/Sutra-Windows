@@ -5,6 +5,7 @@ use crate::error::{Result, SutraError};
 use crate::index::Index;
 use crate::vault::Vault;
 use crate::watcher::VaultWatcher;
+use crate::zotero::Zotero;
 use serde::{Deserialize, Serialize};
 use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
@@ -20,6 +21,77 @@ struct Config {
     vault: Option<PathBuf>,
     #[serde(default)]
     ai: AiSettings,
+    #[serde(default)]
+    references: ReferenceSettings,
+}
+
+/// Which Zotero to talk to, and how citations should read.
+///
+/// Here rather than in the vault for the same reason as the assistant's key: a
+/// credential belongs to this machine, and a vault is a folder people sync,
+/// back up and copy to a second computer.
+///
+/// The *style* is arguably vault-shaped — a thesis has one citation style, not
+/// one per laptop — but it is kept here beside the connection that produces it,
+/// because a style is only meaningful with a library that can render it and
+/// splitting the pair across two files makes neither half explicable.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ReferenceSettings {
+    /// Off by default, which means the local connector: nothing leaves.
+    #[serde(default)]
+    pub account: bool,
+    /// The numeric user id from zotero.org/settings/keys. Not the username.
+    #[serde(default)]
+    pub user_id: Option<String>,
+    /// Stored in the app config directory as plain text, like the assistant's.
+    /// Leaving it unset and exporting `ZOTERO_API_KEY` stores nothing at all.
+    #[serde(default)]
+    pub api_key: Option<String>,
+    /// A Zotero Style Repository id, or the URL of a CSL file. Empty means
+    /// citations show the source's own label and no bibliography is offered.
+    #[serde(default = "default_style")]
+    pub style: String,
+    #[serde(default = "default_locale")]
+    pub locale: String,
+}
+
+/// The American Chemical Society, because this is an app for a
+/// materials-chemistry researcher and ACS is what their journals want. Wrong
+/// for a historian, and changed in one dropdown.
+fn default_style() -> String {
+    "american-chemical-society".to_string()
+}
+
+fn default_locale() -> String {
+    "en-US".to_string()
+}
+
+impl Default for ReferenceSettings {
+    fn default() -> Self {
+        Self {
+            account: false,
+            user_id: None,
+            api_key: None,
+            style: default_style(),
+            locale: default_locale(),
+        }
+    }
+}
+
+/// What the frontend may know about the reference connection.
+///
+/// The key never comes back out, for the same reason the assistant's does not.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReferenceConfig {
+    pub account: bool,
+    pub user_id: Option<String>,
+    pub has_key: bool,
+    /// True when the key came from the environment, where it is not stored by
+    /// this app at all.
+    pub key_in_environment: bool,
+    pub style: String,
+    pub locale: String,
 }
 
 /// Whether the optional assistant is switched on, and how to reach it.
@@ -233,6 +305,95 @@ fn choose(settings: &AiSettings, env_key: Option<String>) -> Box<dyn ai::Assista
     }
 }
 
+/// Which library these settings call for.
+///
+/// Pure, and separate from reading the config file, for the same reason
+/// `choose` is: "account" has to mean the request actually goes to zotero.org
+/// and "local" has to mean it cannot, and that deserves a test rather than a
+/// reading of the code.
+///
+/// Falling back to local when the account is half-configured is deliberate.
+/// A user who has ticked the box but not yet pasted a key should get the
+/// connector they had before, not an error on every keystroke — and the
+/// settings panel tells them what is missing.
+pub fn provider_for(settings: &ReferenceSettings, env_key: Option<String>) -> Zotero {
+    if !settings.account {
+        return Zotero::local();
+    }
+    // The environment first, so someone who would rather not have a secret in
+    // a config file simply does not put one there.
+    let key = env_key
+        .filter(|k| !k.trim().is_empty())
+        .or_else(|| settings.api_key.clone())
+        .filter(|k| !k.trim().is_empty());
+    let user = settings.user_id.clone().filter(|u| !u.trim().is_empty());
+
+    match (user, key) {
+        (Some(user), Some(key)) => Zotero::account(user.trim().to_string(), key.trim().to_string()),
+        _ => Zotero::local(),
+    }
+}
+
+/// The stored reference settings, or the defaults when there are none.
+pub fn reference_settings(app: &AppHandle) -> ReferenceSettings {
+    read_config(app).unwrap_or_default().references
+}
+
+/// The provider the current settings call for.
+pub fn provider(app: &AppHandle) -> Zotero {
+    provider_for(
+        &reference_settings(app),
+        std::env::var("ZOTERO_API_KEY").ok(),
+    )
+}
+
+/// What the frontend may see about the connection.
+pub fn reference_config(app: &AppHandle) -> ReferenceConfig {
+    let settings = reference_settings(app);
+    let env_key = std::env::var("ZOTERO_API_KEY")
+        .ok()
+        .filter(|k| !k.trim().is_empty());
+    ReferenceConfig {
+        account: settings.account,
+        user_id: settings.user_id.clone(),
+        has_key: env_key.is_some()
+            || settings
+                .api_key
+                .as_ref()
+                .is_some_and(|k| !k.trim().is_empty()),
+        key_in_environment: env_key.is_some(),
+        style: settings.style.clone(),
+        locale: settings.locale.clone(),
+    }
+}
+
+/// Save the connection and style. An untouched key box leaves the stored key
+/// alone; `Some("")` clears it.
+pub fn set_reference_settings(
+    app: &AppHandle,
+    account: bool,
+    user_id: Option<String>,
+    api_key: Option<String>,
+    style: String,
+    locale: String,
+) -> ReferenceConfig {
+    let mut config = read_config(app).unwrap_or_default();
+    let existing = config.references.api_key.clone();
+    config.references = ReferenceSettings {
+        account,
+        user_id,
+        api_key: match api_key {
+            Some(key) if key.trim().is_empty() => None,
+            Some(key) => Some(key),
+            None => existing,
+        },
+        style,
+        locale,
+    };
+    save_config(app, &config);
+    reference_config(app)
+}
+
 /// The stored AI settings, or the defaults when there are none.
 fn load_settings(app: &AppHandle) -> AiSettings {
     read_config(app).unwrap_or_default().ai
@@ -417,6 +578,107 @@ mod tests {
             )
             .label(),
             ai::DEFAULT_MODEL
+        );
+    }
+
+    // ---- which library ------------------------------------------------------
+
+    use crate::references::ReferenceProvider as _;
+
+    fn account_settings() -> ReferenceSettings {
+        ReferenceSettings {
+            account: true,
+            user_id: Some("48291".into()),
+            api_key: Some("stored-key".into()),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn the_default_is_the_local_connector() {
+        // The claim the whole local path makes is that nothing leaves this
+        // machine. That has to be what a fresh install does, not what a
+        // default the user might have drifted off does.
+        let chosen = provider_for(&ReferenceSettings::default(), None);
+        assert_eq!(chosen.id(), "zotero-local");
+    }
+
+    #[test]
+    fn the_account_is_used_only_when_it_is_switched_on_and_complete() {
+        assert_eq!(
+            provider_for(&account_settings(), None).id(),
+            "zotero-account"
+        );
+
+        // Ticked the box, pasted nothing yet.
+        let half = ReferenceSettings {
+            api_key: None,
+            ..account_settings()
+        };
+        assert_eq!(
+            provider_for(&half, None).id(),
+            "zotero-local",
+            "a half-configured account must not become a request to zotero.org"
+        );
+
+        let no_user = ReferenceSettings {
+            user_id: None,
+            ..account_settings()
+        };
+        assert_eq!(provider_for(&no_user, None).id(), "zotero-local");
+
+        // Filled in with whitespace is filled in with nothing.
+        let blank = ReferenceSettings {
+            user_id: Some("  ".into()),
+            ..account_settings()
+        };
+        assert_eq!(provider_for(&blank, None).id(), "zotero-local");
+    }
+
+    #[test]
+    fn switching_the_account_off_stops_using_it_even_with_a_key_stored() {
+        // Unticking the box has to mean the requests stop, not merely that the
+        // panel looks off. A key left behind in the file is not consent.
+        let off = ReferenceSettings {
+            account: false,
+            ..account_settings()
+        };
+        assert_eq!(
+            provider_for(&off, Some("env-key".into())).id(),
+            "zotero-local"
+        );
+    }
+
+    #[test]
+    fn the_environment_key_wins_over_the_stored_one() {
+        // So somebody who would rather not have a credential in a config file
+        // simply does not put one there.
+        let no_stored = ReferenceSettings {
+            api_key: None,
+            ..account_settings()
+        };
+        assert_eq!(
+            provider_for(&no_stored, Some("env-key".into())).id(),
+            "zotero-account"
+        );
+        // An empty environment variable is not a key.
+        assert_eq!(
+            provider_for(&no_stored, Some("   ".into())).id(),
+            "zotero-local"
+        );
+    }
+
+    #[test]
+    fn the_default_style_is_a_real_zotero_style_id() {
+        // Not cosmetic: this string is sent to Zotero as `style=`, and a name
+        // that is not in the Style Repository renders nothing at all.
+        let settings = ReferenceSettings::default();
+        assert_eq!(settings.style, "american-chemical-society");
+        assert_eq!(settings.locale, "en-US");
+        assert!(!settings.style.contains(' '), "a CSL id is hyphenated");
+        assert!(
+            !settings.style.ends_with(".csl"),
+            "the id omits the extension"
         );
     }
 }

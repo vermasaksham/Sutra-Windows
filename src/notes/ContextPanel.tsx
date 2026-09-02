@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import Bibliography from "./Bibliography";
 import SourcesPanel from "./SourcesPanel";
 import BacklinksPanel from "./BacklinksPanel";
 import AiPanel from "./AiPanel";
@@ -108,6 +109,14 @@ export default function ContextPanel({
             onChange={onChangeCitations}
             onOpen={onOpen}
             onReport={onReport}
+          />
+        )}
+
+        {showSources && citations.length > 0 && (
+          <Bibliography
+            citations={citations}
+            sources={sources}
+            onOpen={onOpen}
           />
         )}
 

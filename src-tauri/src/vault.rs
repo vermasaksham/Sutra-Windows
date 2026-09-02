@@ -723,6 +723,46 @@ impl Vault {
         })
     }
 
+    /// Every source note that came from the reference manager.
+    ///
+    /// Returns the note id beside the library key, because restyling needs
+    /// both: the key to ask the library about, and the id to write the answer
+    /// back to.
+    pub fn linked_sources(&self) -> Result<Vec<(String, String)>> {
+        Ok(self
+            .list_notes()?
+            .into_iter()
+            .filter(|n| n.note_type == NoteType::Source)
+            .filter_map(|n| {
+                n.source
+                    .as_ref()
+                    .and_then(|meta| meta.zotero.clone())
+                    .map(|key| (n.id.clone(), key))
+            })
+            .collect())
+    }
+
+    /// Cache one rendered citation on a source note.
+    ///
+    /// Additive: a style already cached under another id is left alone, so
+    /// switching style and switching back costs nothing. `updated` is
+    /// deliberately not stamped — caching how a paper is *formatted* is not an
+    /// edit to the note, and a vault whose timestamps move because someone
+    /// changed a dropdown has lost real information about when the work
+    /// happened.
+    pub fn cache_style(
+        &self,
+        id: &str,
+        style: &str,
+        styled: crate::references::StyledCitation,
+    ) -> Result<()> {
+        self.amend(id, |fm| {
+            if let Some(meta) = fm.source.as_mut() {
+                meta.styled.insert(style.to_string(), styled.clone());
+            }
+        })
+    }
+
     /// Replace what a source note records about its paper.
     ///
     /// Every note citing it shows the new details immediately, because none of

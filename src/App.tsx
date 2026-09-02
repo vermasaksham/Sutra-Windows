@@ -9,6 +9,7 @@ import DuplicateList from "./notes/DuplicateList";
 import AiSettingsDialog from "./notes/AiSettings";
 import SettingsDialog from "./notes/Settings";
 import ZoteroPicker from "./notes/ZoteroPicker";
+import { setCitationStyle } from "./notes/citationStyle";
 import { citedRefs } from "./notes/citedRefs";
 import SourceDetails from "./notes/SourceDetails";
 import ExportMenu from "./notes/ExportMenu";
@@ -250,6 +251,17 @@ export default function App() {
       .then(setAi)
       .catch(() => setAi(null));
   }, []);
+
+  // The citation style, mirrored into the store the editor and the context
+  // panel both read. Loaded once here rather than asked for per citation: a
+  // note with forty citations would otherwise make forty identical calls
+  // across the Tauri bridge to learn one string.
+  useEffect(() => {
+    zoteroApi
+      .config()
+      .then((config) => setCitationStyle(config.style))
+      .catch(() => setCitationStyle(""));
+  }, [settingsOpen]);
 
   /**
    * Load what is near the open note.
@@ -984,6 +996,7 @@ export default function App() {
       {settingsOpen && (
         <SettingsDialog
           aiEnabled={ai?.enabled ?? false}
+          onReport={report}
           onOpenAiSettings={() => setAiSettingsOpen(true)}
           onClose={() => setSettingsOpen(false)}
         />

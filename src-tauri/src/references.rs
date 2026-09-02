@@ -80,6 +80,7 @@ impl Reference {
             added: self.date_added.clone(),
             collections: Vec::new(),
             pdf: None,
+            styled: Default::default(),
         }
     }
 }
@@ -122,6 +123,35 @@ pub struct ItemDetail {
     /// which is a real state and not an error.
     pub collections: Vec<String>,
     pub attachments: Vec<Attachment>,
+}
+
+/// One reference rendered by a CSL style: the inline form and the entry.
+///
+/// Produced by the reference manager, never by us. Formatting a citation
+/// correctly is the Citation Style Language, an entire specification with
+/// hundreds of styles, and Zotero already contains a complete implementation
+/// of it. Reimplementing that here would be a second, worse engine that
+/// disagrees with the one the user's supervisor reads — so the app asks
+/// Zotero and caches the answer.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct StyledCitation {
+    /// "(Ko et al., 2024)" — what goes in the sentence.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub citation: Option<String>,
+    /// "Ko, J.; ... Nature Energy 2024, 14, 221–230." — what goes in the list.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bib: Option<String>,
+}
+
+impl StyledCitation {
+    /// Whether this is worth storing at all.
+    ///
+    /// A style the provider could not apply comes back with both halves empty,
+    /// and caching that would be caching a failure — the next lookup would
+    /// find an entry, believe the question answered, and never ask again.
+    pub fn is_empty(&self) -> bool {
+        self.citation.is_none() && self.bib.is_none()
+    }
 }
 
 /// Whether the provider can be reached right now.
@@ -173,4 +203,19 @@ pub trait ReferenceProvider: Send + Sync {
 
     /// Show the item in the reference manager's own window.
     fn open(&self, key: &str) -> Result<()>;
+
+    /// Ask the provider to render these items in a CSL style.
+    ///
+    /// `style` is a Zotero Style Repository id — "american-chemical-society",
+    /// "nature", "apa" — or the URL of a CSL file. `locale` is a BCP-47 tag.
+    /// Returns only the items it could render: a style the provider does not
+    /// have yields fewer entries rather than an error, because a missing
+    /// styled form falls back to a plain label and losing the whole lookup
+    /// would lose the ones that did work.
+    fn styled(
+        &self,
+        keys: &[String],
+        style: &str,
+        locale: &str,
+    ) -> Result<Vec<(String, StyledCitation)>>;
 }

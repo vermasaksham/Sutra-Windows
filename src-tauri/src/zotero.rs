@@ -1,13 +1,23 @@
 //! Zotero, as a [`ReferenceProvider`].
 //!
-//! Talks to the local HTTP API Zotero exposes on 127.0.0.1:23119 when "Allow
-//! other applications on this computer to communicate with Zotero" is on. No
-//! API key, no web service, nothing leaves the machine — which is the whole
-//! reason this is the local API rather than zotero.org.
+//! Two ways in, one implementation. Zotero's local connector and its web
+//! service speak the same API — same paths, same parameters, same JSON — so
+//! the only differences are the root URL and an auth header, and those are the
+//! only things [`Flavour`] carries.
+//!
+//! **Local** talks to 127.0.0.1:23119, which Zotero opens when "Allow other
+//! applications on this computer to communicate with Zotero" is on. No API
+//! key, no web service, nothing leaves the machine. It is the default for
+//! exactly that reason.
+//!
+//! **Account** talks to api.zotero.org with the user\'s API key. It works when
+//! Zotero is not running and on a machine where it is not installed, and it is
+//! the only path here that sends anything off this computer — which is why it
+//! is off unless configured and says so where it is configured.
 //!
 //! Everything Zotero-shaped is confined to this file: the port, the JSON field
-//! names, the `zotero://` URI scheme. What leaves it is the provider-agnostic
-//! types in references.rs.
+//! names, the `zotero://` URI scheme, the header name. What leaves it is the
+//! provider-agnostic types in references.rs.
 
 use std::time::Duration;
 
@@ -15,11 +25,18 @@ use serde::Deserialize;
 
 use crate::error::{Result, SutraError};
 use crate::references::{
-    Attachment, Availability, Collection, ItemDetail, Reference, ReferenceProvider, blank_to_none,
+    Attachment, Availability, Collection, ItemDetail, Reference, ReferenceProvider, StyledCitation,
+    blank_to_none,
 };
 
 /// Where Zotero listens. The port is fixed and not configurable in Zotero.
 const LOCAL_BASE: &str = "http://127.0.0.1:23119";
+
+/// Zotero\'s web service.
+const WEB_BASE: &str = "https://api.zotero.org";
+
+/// The header Zotero\'s web API authenticates with.
+const KEY_HEADER: &str = "Zotero-API-Key";
 
 /// Long enough for a large library, short enough that a wedged Zotero does not
 /// hang the editor.
@@ -29,21 +46,52 @@ const TIMEOUT: Duration = Duration::from_secs(5);
 /// four hundred annotations is not worth walking to answer "is there a PDF".
 const CHILD_LIMIT: usize = 50;
 
+/// Which Zotero this is talking to.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Flavour {
+    /// The connector on this machine. No key, nothing leaves.
+    Local,
+    /// zotero.org, with the user\'s numeric id and API key.
+    Account { user_id: String, api_key: String },
+}
+
 pub struct Zotero {
     base: String,
+    flavour: Flavour,
 }
 
 impl Default for Zotero {
     fn default() -> Self {
-        Self::new(LOCAL_BASE.to_string())
+        Self::local()
     }
 }
 
 impl Zotero {
-    /// Takes the base URL so tests can point it at a stub server. Production
-    /// always uses `Default`.
-    pub fn new(base: String) -> Self {
-        Self { base }
+    /// The connector on this machine.
+    pub fn local() -> Self {
+        Self::new(LOCAL_BASE.to_string(), Flavour::Local)
+    }
+
+    /// The web service, for a library this machine cannot reach locally.
+    pub fn account(user_id: String, api_key: String) -> Self {
+        Self::new(WEB_BASE.to_string(), Flavour::Account { user_id, api_key })
+    }
+
+    /// Takes the base URL so tests can point either flavour at a stub server.
+    pub fn new(base: String, flavour: Flavour) -> Self {
+        Self { base, flavour }
+    }
+
+    /// Everything before `/items`.
+    ///
+    /// The local connector serves the API under `/api` and calls every library
+    /// user 0, since there is only ever one. The web service has no prefix and
+    /// needs the real numeric id.
+    fn root(&self) -> String {
+        match &self.flavour {
+            Flavour::Local => format!("{}/api/users/0", self.base),
+            Flavour::Account { user_id, .. } => format!("{}/users/{}", self.base, user_id),
+        }
     }
 
     fn agent(&self) -> ureq::Agent {
@@ -54,10 +102,14 @@ impl Zotero {
     }
 
     fn body(&self, url: &str) -> Result<String> {
-        self.agent()
-            .get(url)
+        let request = self.agent().get(url);
+        let request = match &self.flavour {
+            Flavour::Local => request,
+            Flavour::Account { api_key, .. } => request.header(KEY_HEADER, api_key),
+        };
+        request
             .call()
-            .map_err(|e| SutraError::Zotero(describe(&e)))?
+            .map_err(|e| SutraError::Zotero(describe(&e, &self.flavour)))?
             .body_mut()
             .read_to_string()
             .map_err(|e| SutraError::Zotero(e.to_string()))
@@ -80,11 +132,17 @@ impl Zotero {
 
 impl ReferenceProvider for Zotero {
     fn id(&self) -> &'static str {
-        "zotero"
+        match self.flavour {
+            Flavour::Local => "zotero-local",
+            Flavour::Account { .. } => "zotero-account",
+        }
     }
 
     fn label(&self) -> &'static str {
-        "Zotero"
+        match self.flavour {
+            Flavour::Local => "Zotero",
+            Flavour::Account { .. } => "Zotero account",
+        }
     }
 
     /// A cheap request that succeeds only if Zotero is actually answering.
@@ -93,7 +151,7 @@ impl ReferenceProvider for Zotero {
     /// response the items endpoint can give, and it exercises the same path
     /// the picker will use a moment later.
     fn availability(&self) -> Availability {
-        let url = format!("{}/api/users/0/items?limit=1&format=json", self.base);
+        let url = format!("{}/items?limit=1&format=json", self.root());
         match self.body(&url) {
             Ok(_) => Availability {
                 ready: true,
@@ -123,8 +181,8 @@ impl ReferenceProvider for Zotero {
         }
 
         let url = format!(
-            "{}/api/users/0/items?q={}&qmode=titleCreatorYear&itemType=-attachment%20||%20note&limit={}&format=json",
-            self.base,
+            "{}/items?q={}&qmode=titleCreatorYear&itemType=-attachment%20||%20note&limit={}&format=json",
+            self.root(),
             urlencode(query),
             limit
         );
@@ -136,8 +194,8 @@ impl ReferenceProvider for Zotero {
             return Ok(Vec::new());
         }
         let url = format!(
-            "{}/api/users/0/items?itemKey={}&format=json",
-            self.base,
+            "{}/items?itemKey={}&format=json",
+            self.root(),
             keys.join(",")
         );
         self.fetch(&url)
@@ -162,8 +220,8 @@ impl ReferenceProvider for Zotero {
 
     fn attachments(&self, key: &str) -> Result<Vec<Attachment>> {
         let url = format!(
-            "{}/api/users/0/items/{}/children?limit={}&format=json",
-            self.base,
+            "{}/items/{}/children?limit={}&format=json",
+            self.root(),
             urlencode(key),
             CHILD_LIMIT
         );
@@ -196,11 +254,7 @@ impl ReferenceProvider for Zotero {
     /// and DOI but not whether there is a PDF is far more useful than an
     /// error.
     fn detail(&self, key: &str) -> Result<ItemDetail> {
-        let url = format!(
-            "{}/api/users/0/items/{}?format=json",
-            self.base,
-            urlencode(key)
-        );
+        let url = format!("{}/items/{}?format=json", self.root(), urlencode(key));
         let body = self.body(&url)?;
         // The single-item endpoint returns an object; the list endpoints return
         // an array. Accept either, so a future Zotero that changes its mind
@@ -236,6 +290,55 @@ impl ReferenceProvider for Zotero {
             collections: names,
             attachments: self.attachments(key).unwrap_or_default(),
         })
+    }
+
+    /// Ask Zotero to render these items in a CSL style.
+    ///
+    /// `include=citation,bib` is the whole feature: Zotero runs its own CSL
+    /// engine over the items and hands back the formatted strings. Every style
+    /// in the Zotero Style Repository works, because it is Zotero's repository
+    /// being consulted, and the result agrees with what the same library would
+    /// produce in Word — which a second engine written here would not.
+    ///
+    /// The strings come back as HTML and are flattened to markdown, because
+    /// they are going into a markdown file and a note full of `<i>` tags is not
+    /// a note anyone wants to open in another editor.
+    fn styled(
+        &self,
+        keys: &[String],
+        style: &str,
+        locale: &str,
+    ) -> Result<Vec<(String, StyledCitation)>> {
+        if keys.is_empty() || style.trim().is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let url = format!(
+            "{}/items?itemKey={}&format=json&include=citation,bib&style={}&locale={}",
+            self.root(),
+            keys.join(","),
+            urlencode(style.trim()),
+            urlencode(locale.trim()),
+        );
+
+        let body = self.body(&url)?;
+        let items: Vec<StyledItem> =
+            serde_json::from_str(&body).map_err(|e| SutraError::Zotero(e.to_string()))?;
+
+        Ok(items
+            .into_iter()
+            .filter_map(|item| {
+                let styled = StyledCitation {
+                    citation: item.citation.as_deref().map(html_to_markdown),
+                    bib: item.bib.as_deref().map(html_to_markdown),
+                };
+                // A style Zotero could not apply comes back with both halves
+                // absent. Caching that would cache a failure: the next lookup
+                // would find an entry, take the question as answered, and never
+                // ask again.
+                (!styled.is_empty()).then_some((item.key, styled))
+            })
+            .collect())
     }
 
     /// Show the item in Zotero's own window.
@@ -375,16 +478,117 @@ fn reference_from(item: ZoteroItem) -> Reference {
     }
 }
 
+/// What `include=citation,bib` adds beside the item data.
+#[derive(Debug, Deserialize)]
+struct StyledItem {
+    key: String,
+    #[serde(default)]
+    citation: Option<String>,
+    #[serde(default)]
+    bib: Option<String>,
+}
+
+/// Flatten Zotero's rendered HTML to markdown.
+///
+/// Zotero wraps a citation in spans and a bibliography entry in nested divs,
+/// and italicises the journal or book title — which carries real meaning in
+/// every style that uses it, so it is kept as markdown emphasis rather than
+/// discarded with the rest of the tags.
+///
+/// Deliberately not a general HTML parser. The input is one program's citation
+/// output, not the web; anything unexpected degrades to its own text, which is
+/// still a usable citation.
+pub fn html_to_markdown(html: &str) -> String {
+    let mut out = String::with_capacity(html.len());
+    let mut chars = html.chars().peekable();
+
+    while let Some(c) = chars.next() {
+        match c {
+            '<' => {
+                let mut tag = String::new();
+                for t in chars.by_ref() {
+                    if t == '>' {
+                        break;
+                    }
+                    tag.push(t);
+                }
+                let name = tag.trim_start_matches('/').trim();
+                let name = name.split([' ', '\t']).next().unwrap_or("").to_lowercase();
+                // Emphasis survives; everything else is structure that has no
+                // meaning once this is markdown.
+                if matches!(name.as_str(), "i" | "em") {
+                    out.push('*');
+                } else if matches!(name.as_str(), "b" | "strong") {
+                    out.push_str("**");
+                } else if matches!(name.as_str(), "div" | "p" | "br") && !out.ends_with(' ') {
+                    out.push(' ');
+                }
+            }
+            '&' => {
+                let mut entity = String::new();
+                while let Some(&next) = chars.peek() {
+                    chars.next();
+                    if next == ';' {
+                        break;
+                    }
+                    entity.push(next);
+                    if entity.len() > 8 {
+                        break;
+                    }
+                }
+                out.push_str(&decode_entity(&entity));
+            }
+            _ => out.push(c),
+        }
+    }
+
+    // Zotero indents its nested divs, so once the tags are gone the text is
+    // full of runs of spaces and newlines that never meant anything.
+    out.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+fn decode_entity(entity: &str) -> String {
+    match entity {
+        "amp" => "&".to_string(),
+        "lt" => "<".to_string(),
+        "gt" => ">".to_string(),
+        "quot" => "\"".to_string(),
+        "apos" | "#39" => "'".to_string(),
+        "nbsp" | "#160" => " ".to_string(),
+        other => {
+            // A numeric entity we have no name for is still recoverable, and
+            // citations are full of en dashes.
+            if let Some(digits) = other.strip_prefix('#') {
+                if let Ok(code) = digits.parse::<u32>() {
+                    if let Some(c) = char::from_u32(code) {
+                        return c.to_string();
+                    }
+                }
+            }
+            // Not an entity after all — put back exactly what was consumed.
+            format!("&{other};")
+        }
+    }
+}
+
 /// Turn a connection failure into something a user can act on.
-fn describe(error: &ureq::Error) -> String {
+fn describe(error: &ureq::Error, flavour: &Flavour) -> String {
     match error {
         // The overwhelmingly likely cause, and the two fixes are different, so
         // name both rather than reporting "connection refused".
-        ureq::Error::ConnectionFailed | ureq::Error::Io(_) => {
-            "could not reach Zotero. Is it running, and is \"Allow other \
-             applications on this computer to communicate with Zotero\" enabled \
-             in Settings → Advanced?"
-                .to_string()
+        ureq::Error::ConnectionFailed | ureq::Error::Io(_) => match flavour {
+            Flavour::Local => "could not reach Zotero. Is it running, and is \"Allow other \
+                 applications on this computer to communicate with Zotero\" enabled in \
+                 Settings → Advanced?"
+                .to_string(),
+            Flavour::Account { .. } => {
+                "could not reach zotero.org. Check the network connection.".to_string()
+            }
+        },
+        // A wrong or revoked key is the likely cause and the message from the
+        // server is not obviously about that, so say it.
+        ureq::Error::StatusCode(403) => {
+            "Zotero refused the API key. Check the key and the user ID in Settings.".to_string()
         }
         other => other.to_string(),
     }
@@ -450,7 +654,9 @@ mod tests {
     #[test]
     fn search_parses_items() {
         let (base, handle) = stub(TWO_ITEMS);
-        let found = Zotero::new(base).search("sb2se3", 20).unwrap();
+        let found = Zotero::new(base, Flavour::Local)
+            .search("sb2se3", 20)
+            .unwrap();
         handle.join().unwrap();
 
         assert_eq!(found.len(), 2);
@@ -467,7 +673,9 @@ mod tests {
     #[test]
     fn the_query_is_encoded_and_scoped() {
         let (base, handle) = stub("[]");
-        Zotero::new(base).search("Sb2Se3 & CVT", 20).unwrap();
+        Zotero::new(base, Flavour::Local)
+            .search("Sb2Se3 & CVT", 20)
+            .unwrap();
         let request = handle.join().unwrap();
 
         // A bare & would start a new query parameter and truncate the search.
@@ -481,7 +689,7 @@ mod tests {
     #[test]
     fn an_empty_query_does_not_hit_the_network() {
         // No stub server at all: if this tried to connect it would fail.
-        let found = Zotero::new("http://127.0.0.1:1".into())
+        let found = Zotero::new("http://127.0.0.1:1".into(), Flavour::Local)
             .search("   ", 20)
             .unwrap();
         assert!(found.is_empty());
@@ -490,7 +698,7 @@ mod tests {
     #[test]
     fn items_missing_fields_still_parse() {
         let (base, handle) = stub(r#"[{"key":"K1","data":{},"meta":{}}]"#);
-        let found = Zotero::new(base).search("x", 5).unwrap();
+        let found = Zotero::new(base, Flavour::Local).search("x", 5).unwrap();
         handle.join().unwrap();
 
         // The endpoint is only semi-documented, so a sparse item must degrade
@@ -504,7 +712,7 @@ mod tests {
     #[test]
     fn by_keys_asks_for_exactly_those_items() {
         let (base, handle) = stub(TWO_ITEMS);
-        let found = Zotero::new(base)
+        let found = Zotero::new(base, Flavour::Local)
             .items(&["ABCD1234".into(), "EFGH5678".into()])
             .unwrap();
         let request = handle.join().unwrap();
@@ -562,14 +770,16 @@ mod tests {
 
     #[test]
     fn no_keys_means_no_request() {
-        let found = Zotero::new("http://127.0.0.1:1".into()).items(&[]).unwrap();
+        let found = Zotero::new("http://127.0.0.1:1".into(), Flavour::Local)
+            .items(&[])
+            .unwrap();
         assert!(found.is_empty());
     }
 
     #[test]
     fn an_unreachable_zotero_says_what_to_do_about_it() {
         // Port 1 is not going to be listening.
-        let error = Zotero::new("http://127.0.0.1:1".into())
+        let error = Zotero::new("http://127.0.0.1:1".into(), Flavour::Local)
             .search("anything", 5)
             .unwrap_err()
             .to_string();
@@ -631,7 +841,9 @@ mod tests {
     #[test]
     fn the_citation_key_and_abstract_are_read_when_present() {
         let (base, handle) = stub(RICH_ITEM);
-        let found = Zotero::new(base).search("sb2se3", 20).unwrap();
+        let found = Zotero::new(base, Flavour::Local)
+            .search("sb2se3", 20)
+            .unwrap();
         handle.join().unwrap();
 
         assert_eq!(found[0].citation_key.as_deref(), Some("Ko2024"));
@@ -650,7 +862,7 @@ mod tests {
         // at all. There is no code path that fills this in — this test is what
         // stops one being added.
         let (base, handle) = stub(TWO_ITEMS);
-        let found = Zotero::new(base).search("x", 20).unwrap();
+        let found = Zotero::new(base, Flavour::Local).search("x", 20).unwrap();
         handle.join().unwrap();
 
         assert_eq!(found[0].citation_key, None);
@@ -665,7 +877,7 @@ mod tests {
         // a key and is not one.
         let (base, handle) =
             stub(r#"[{"key":"K","data":{"citationKey":"  ","abstractNote":""},"meta":{}}]"#);
-        let found = Zotero::new(base).search("x", 5).unwrap();
+        let found = Zotero::new(base, Flavour::Local).search("x", 5).unwrap();
         handle.join().unwrap();
 
         assert_eq!(found[0].citation_key, None);
@@ -676,10 +888,10 @@ mod tests {
     fn availability_reports_the_reason_rather_than_failing() {
         // Zotero being closed is an ordinary state of the world, not an error
         // the user should see as a broken app. Nothing here returns Err.
-        let status = Zotero::new("http://127.0.0.1:1".into()).availability();
+        let status = Zotero::new("http://127.0.0.1:1".into(), Flavour::Local).availability();
         assert!(!status.ready);
         assert_eq!(status.provider, "Zotero");
-        assert_eq!(status.provider_id, "zotero");
+        assert_eq!(status.provider_id, "zotero-local");
         let reason = status.reason.unwrap();
         // The two fixes are different, so the message names both.
         assert!(reason.contains("Is it running"), "got {reason}");
@@ -695,7 +907,9 @@ mod tests {
               {"key":"N1","data":{"itemType":"note","title":"a note"}}
             ]"#,
         );
-        let found = Zotero::new(base).attachments("KO2024").unwrap();
+        let found = Zotero::new(base, Flavour::Local)
+            .attachments("KO2024")
+            .unwrap();
         let request = handle.join().unwrap();
 
         assert!(request.contains("/items/KO2024/children"), "got {request}");
@@ -736,5 +950,149 @@ mod tests {
         assert_eq!(source.doi.as_deref(), Some("10.1000/abc"));
         assert_eq!(source.item_type.as_deref(), Some("journalArticle"));
         assert_eq!(source.added.as_deref(), Some("2024-03-04T09:00:00Z"));
+    }
+
+    #[test]
+    fn the_account_flavour_signs_its_requests_and_uses_the_real_user_id() {
+        let (base, handle) = stub(TWO_ITEMS);
+        let zotero = Zotero::new(
+            base,
+            Flavour::Account {
+                user_id: "48291".into(),
+                api_key: "P9NiFoyLeZu2bZNvvuQPDWsd".into(),
+            },
+        );
+        zotero.search("sb2se3", 20).unwrap();
+        let request = handle.join().unwrap();
+
+        // The web service has no /api prefix and needs the numeric id; the
+        // connector serves /api and calls every library user 0. Getting either
+        // wrong is a 404 that reads like an empty library.
+        assert!(request.contains("GET /users/48291/items"), "got {request}");
+        assert!(!request.contains("/api/users/0"), "got {request}");
+        // Header names are case-insensitive on the wire and ureq lowercases
+        // them, so this looks for the value under either spelling rather than
+        // pinning a casing the HTTP layer is free to choose.
+        let lowered = request.to_lowercase();
+        assert!(
+            lowered.contains("zotero-api-key: p9nifoylezu2bznvvuqpdwsd"),
+            "the key must be sent, and in a header rather than the query \
+             string where it would end up in server logs: {request}"
+        );
+        assert!(
+            !request.contains("key=P9NiFoyLeZu2bZNvvuQPDWsd"),
+            "the key must not be in the URL: {request}"
+        );
+    }
+
+    #[test]
+    fn the_local_flavour_sends_no_key_at_all() {
+        let (base, handle) = stub(TWO_ITEMS);
+        Zotero::new(base, Flavour::Local).search("x", 5).unwrap();
+        let request = handle.join().unwrap();
+
+        // The whole claim of the local path is that nothing leaves and no
+        // credential exists. A key header here would be a lie in the docs.
+        assert!(!request.contains("Zotero-API-Key"), "got {request}");
+        assert!(request.contains("GET /api/users/0/items"), "got {request}");
+    }
+
+    #[test]
+    fn the_two_flavours_are_named_apart() {
+        // The frontend branches on these, and a status line that says "Zotero"
+        // when the request is going to zotero.org would hide the one fact the
+        // user most needs.
+        assert_eq!(Zotero::local().id(), "zotero-local");
+        assert_eq!(
+            Zotero::account("1".into(), "k".into()).id(),
+            "zotero-account"
+        );
+        assert_eq!(Zotero::local().label(), "Zotero");
+        assert_eq!(
+            Zotero::account("1".into(), "k".into()).label(),
+            "Zotero account"
+        );
+    }
+
+    #[test]
+    fn styled_asks_zotero_to_do_the_formatting() {
+        let (base, handle) = stub(
+            r#"[{"key":"KO2024","citation":"<span>(1)</span>",
+                 "bib":"<div class=\"csl-bib-body\"><div class=\"csl-entry\">Ko, J. Thermal conductivity. <i>Nature Energy</i> <b>2024</b>, 14, 221&#8211;230.</div></div>"}]"#,
+        );
+        let found = Zotero::new(base, Flavour::Local)
+            .styled(&["KO2024".into()], "american-chemical-society", "en-US")
+            .unwrap();
+        let request = handle.join().unwrap();
+
+        // This is the whole feature: Zotero owns CSL, so the app asks for the
+        // rendered strings rather than growing a second citation engine.
+        assert!(request.contains("include=citation,bib"), "got {request}");
+        assert!(
+            request.contains("style=american-chemical-society"),
+            "got {request}"
+        );
+        assert!(request.contains("locale=en-US"), "got {request}");
+
+        assert_eq!(found.len(), 1);
+        let (key, styled) = &found[0];
+        assert_eq!(key, "KO2024");
+        assert_eq!(styled.citation.as_deref(), Some("(1)"));
+        // Italics carry meaning in every style that uses them, so they survive
+        // as markdown; the divs and the entity do not.
+        assert_eq!(
+            styled.bib.as_deref(),
+            Some("Ko, J. Thermal conductivity. *Nature Energy* **2024**, 14, 221–230.")
+        );
+    }
+
+    #[test]
+    fn a_style_zotero_cannot_apply_is_not_cached_as_an_answer() {
+        // Both halves absent means Zotero declined. Storing that would store a
+        // failure: the next lookup would find an entry, take the question as
+        // answered, and never ask again.
+        let (base, handle) = stub(r#"[{"key":"KO2024"}]"#);
+        let found = Zotero::new(base, Flavour::Local)
+            .styled(&["KO2024".into()], "no-such-style", "en-US")
+            .unwrap();
+        handle.join().unwrap();
+        assert!(found.is_empty());
+    }
+
+    #[test]
+    fn styling_nothing_does_not_hit_the_network() {
+        // No stub server: connecting would fail.
+        let zotero = Zotero::new("http://127.0.0.1:1".into(), Flavour::Local);
+        assert!(zotero.styled(&[], "apa", "en-US").unwrap().is_empty());
+        // An empty style is "label only", which is a real setting, not a query.
+        assert!(
+            zotero
+                .styled(&["K".into()], "  ", "en-US")
+                .unwrap()
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn rendered_html_becomes_readable_markdown() {
+        assert_eq!(
+            html_to_markdown("<span>(Ko et al., 2024)</span>"),
+            "(Ko et al., 2024)"
+        );
+        assert_eq!(html_to_markdown("A <i>B</i> C"), "A *B* C");
+        assert_eq!(html_to_markdown("<b>2024</b>"), "**2024**");
+        // Entities citations are actually full of.
+        assert_eq!(html_to_markdown("221&#8211;230"), "221–230");
+        assert_eq!(html_to_markdown("Smith &amp; Jones"), "Smith & Jones");
+        assert_eq!(html_to_markdown("a&nbsp;b"), "a b");
+        // Zotero indents its nested divs; none of that whitespace means
+        // anything once the tags are gone.
+        assert_eq!(
+            html_to_markdown("<div>\n  <div>Ko, J.</div>\n</div>"),
+            "Ko, J."
+        );
+        // Something that only looks like an entity is left alone rather than
+        // silently eaten.
+        assert_eq!(html_to_markdown("cost &lt; 5"), "cost < 5");
     }
 }

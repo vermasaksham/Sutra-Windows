@@ -1,5 +1,6 @@
 import { useSyncExternalStore } from "react";
 import { zoteroApi, type NoteSummary, type Reference } from "../../vault/api";
+import { currentStyle, styledFor } from "../../notes/citationStyle";
 import { sourceLabel } from "../../notes/sourceLabel";
 
 /**
@@ -205,18 +206,25 @@ export function resolved(refs: string[]): Cited[] {
 
 function fromSource(source: NoteSummary): Cited {
   const meta = source.source;
+  // The library's own rendering when we have it, the vault's plain label
+  // otherwise. Falling back rather than blanking is the rule everywhere the
+  // styled forms are used: an unstyled citation is imperfect, an empty one is
+  // a broken draft.
+  const rendered = styledFor(meta, currentStyle());
   return {
-    label: sourceLabel(source),
+    label: rendered?.citation ?? sourceLabel(source),
     title: source.title,
-    detail: [
-      meta?.authors,
-      meta?.year && `(${meta.year})`,
-      source.title,
-      meta?.container,
-      meta?.doi && `doi:${meta.doi}`,
-    ]
-      .filter(Boolean)
-      .join(" "),
+    detail:
+      rendered?.bib ??
+      [
+        meta?.authors,
+        meta?.year && `(${meta.year})`,
+        source.title,
+        meta?.container,
+        meta?.doi && `doi:${meta.doi}`,
+      ]
+        .filter(Boolean)
+        .join(" "),
     legacy: false,
   };
 }

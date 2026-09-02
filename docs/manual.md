@@ -237,9 +237,24 @@ DOI or journal. Each result offers three different things:
 | **Add as source**   | Brings the paper in so it can be cited, and stops there.         |
 | **Open in Zotero**  | Raises the item in Zotero itself.                                |
 
-Zotero must be running, with **Allow other applications on this computer to
-communicate with Zotero** switched on in its Settings → Advanced. Nothing goes
-over the internet: this is Zotero's local connector, on your own machine.
+### Two ways to connect
+
+**Settings → References** offers a choice, and it matters:
+
+| Connection                  | What it needs                                                                  | What leaves your machine                                   |
+| --------------------------- | ------------------------------------------------------------------------------ | ---------------------------------------------------------- |
+| **Zotero on this computer** | Zotero running, with _Allow other applications…_ on in its Settings → Advanced | Nothing. This is the default.                              |
+| **My Zotero account**       | Your numeric user ID and an API key from `zotero.org/settings/keys`            | Your search terms, and the library entries that come back. |
+
+The account connection works with Zotero closed, and on a machine where it is
+not installed at all — which is the point of it. It is off unless you configure
+it, and a half-configured account (box ticked, key not yet pasted) quietly keeps
+using the local connector rather than failing on every keystroke.
+
+A key typed into the panel is stored in plain text in the app's config file.
+Setting the `ZOTERO_API_KEY` environment variable instead stores nothing at all,
+and takes precedence over anything typed. Read-only permission on the key is
+enough — Sutra never writes to your library.
 
 ### Two notes, not one
 
@@ -276,6 +291,60 @@ Type `@` in the body and a menu opens covering both the sources already in your
 vault and your Zotero library. Picking a Zotero item brings it in first, so a
 citation always points at a note in your vault rather than at an item in
 another program.
+
+### Citation styles
+
+**Sutra does not format citations. Zotero does.**
+
+That is the whole design. Formatting a citation correctly is the Citation Style
+Language — a full specification with thousands of styles — and Zotero already
+contains a complete implementation of it. So Sutra asks Zotero to render each
+paper and caches the answer, which means every style in
+`zotero.org/styles` works and the result matches what the same library produces
+in Word.
+
+Pick one in **Settings → References**:
+
+| Style         | For                                     |
+| ------------- | --------------------------------------- |
+| **ACS**       | American Chemical Society. The default. |
+| **RSC**       | Royal Society of Chemistry              |
+| **Nature**    | Nature journals                         |
+| **IEEE**      | Engineering                             |
+| **APA 7th**   | Social sciences                         |
+| **Vancouver** | Medicine                                |
+| **Chicago**   | Notes and bibliography                  |
+| **Harvard**   | Cite Them Right                         |
+
+Any other CSL id works too — choose _Another style…_ and type it, for example
+`elsevier-harvard`.
+
+**The rendered citations are cached**, per style, on the source note. Three
+consequences worth knowing:
+
+- A styled citation still reads correctly with Zotero closed and no network.
+- Switching to a style you have used before costs nothing and needs no
+  connection.
+- Changing the style only affects sources imported afterwards. **Settings →
+  References → Restyle existing sources** brings the rest over, and tells you
+  how many it re-rendered.
+
+Anything not yet rendered in the current style falls back to a plain
+`Author, Year` label and is marked as a fallback rather than passed off as the
+style — because a citation that looks finished and is not is worse than one
+that admits it.
+
+### Bibliography
+
+The context panel shows the reference list for the note, in the chosen style,
+in **citation order** — not alphabetical, because ACS and Nature number by
+first appearance and sorting would make the list disagree with the numbers in
+your prose. One paper appears once however many times you cite it: three pages
+of Ko 2024 is three pieces of evidence and one reference.
+
+**copy** puts the whole list on the clipboard. Entries the library has not
+rendered in this style are flagged in the list itself, so nothing unfinished
+reaches a manuscript unnoticed.
 
 ### Evidence: the page, and their words
 
@@ -629,5 +698,10 @@ Stated plainly, so none of them is a surprise:
 - **No mobile app, and no sync of its own.** Sync the vault folder with
   whatever you already use.
 - **Folders go four levels deep**, no further.
-- **Citations are not styled.** A citation shows the source's label; there is
-  no bibliography generator and no CSL styles.
+- **The bibliography is a list, not a laid-out document.** The reference list
+  is rendered by Zotero in your chosen style and can be copied, but Word export
+  does not place a formatted bibliography section for you — paste it where you
+  want it.
+- **A styled citation needs the library once.** Until a source has been
+  rendered, its citation falls back to a plain `Author, Year` label. Settings →
+  References → Restyle existing sources fixes that in one go.

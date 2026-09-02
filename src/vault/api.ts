@@ -87,6 +87,9 @@ export type SourceMeta = {
    *  never copied — this only lets the note say a PDF exists while Zotero is
    *  closed. */
   pdf?: string | null;
+  /** This paper as the library rendered it, keyed by CSL style id. A cache, so
+   *  a styled citation still reads correctly with Zotero closed. */
+  styled?: Record<string, StyledCitation>;
 };
 
 /**
@@ -317,6 +320,46 @@ export type ReferenceStatus = {
   reason: string | null;
 };
 
+/**
+ * Citation styles offered by name.
+ *
+ * The ids are Zotero Style Repository filenames without `.csl`, because that
+ * is literally what gets sent as `style=`. Any other id works too — the
+ * settings panel accepts one typed in — so this list is a shortcut for the
+ * styles a materials-chemistry group actually submits to, not a limit.
+ */
+export const CITATION_STYLES: ReadonlyArray<{ id: string; label: string }> = [
+  { id: "american-chemical-society", label: "ACS (American Chemical Society)" },
+  {
+    id: "royal-society-of-chemistry",
+    label: "RSC (Royal Society of Chemistry)",
+  },
+  { id: "nature", label: "Nature" },
+  { id: "ieee", label: "IEEE" },
+  { id: "apa", label: "APA 7th" },
+  { id: "vancouver", label: "Vancouver" },
+  { id: "chicago-note-bibliography", label: "Chicago (notes & bibliography)" },
+  { id: "harvard-cite-them-right", label: "Harvard (Cite Them Right)" },
+];
+
+/** One reference as the reference manager rendered it. */
+export type StyledCitation = {
+  /** "(Ko et al., 2024)" — what goes in the sentence. */
+  citation?: string | null;
+  /** The bibliography entry. */
+  bib?: string | null;
+};
+
+/** The stored reference connection. The key never comes back out. */
+export type ReferenceConfig = {
+  account: boolean;
+  userId: string | null;
+  hasKey: boolean;
+  keyInEnvironment: boolean;
+  style: string;
+  locale: string;
+};
+
 /** The kinds of evidence the UI offers. A stored kind outside this list is
  *  kept as written rather than dropped, the same as an unknown view term. */
 export const EVIDENCE_KINDS = [
@@ -348,6 +391,25 @@ export const zoteroApi = {
   /** A source note for the paper, plus a literature note that cites it. */
   literatureNote: (key: string, folder: string | null) =>
     invoke<NoteSummary>("create_literature_note", { key, folder }),
+  /** The stored connection and style. */
+  config: () => invoke<ReferenceConfig>("reference_config"),
+  /** Save it. An undefined key leaves the stored one alone; "" clears it. */
+  configure: (
+    account: boolean,
+    userId: string | null,
+    apiKey: string | null,
+    style: string,
+    locale: string,
+  ) =>
+    invoke<ReferenceConfig>("configure_references", {
+      account,
+      userId,
+      apiKey,
+      style,
+      locale,
+    }),
+  /** Re-render every linked source in the current style. Returns how many. */
+  restyle: () => invoke<number>("restyle_sources"),
 };
 
 export type VaultChanged = { changed: string[] };
