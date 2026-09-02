@@ -15,6 +15,7 @@ mod index;
 mod links;
 mod note;
 mod protocol;
+mod references;
 mod related;
 mod state;
 mod tags;
@@ -63,6 +64,9 @@ fn main() {
             commands::export_docx,
             commands::zotero_search,
             commands::zotero_by_keys,
+            commands::reference_status,
+            commands::zotero_detail,
+            commands::zotero_open,
             commands::attach_file,
             commands::move_note,
             commands::list_folders,
@@ -82,6 +86,7 @@ fn main() {
             commands::list_sources,
             commands::citing_notes,
             commands::import_zotero_source,
+            commands::create_literature_note,
             commands::legacy_citations,
             commands::migrate_citations,
             commands::list_views,

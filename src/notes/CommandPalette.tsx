@@ -48,6 +48,7 @@ type Props = {
   aiEnabled: boolean;
   onAiSettings: () => void;
   onOpenSettings: () => void;
+  onOpenZotero: () => void;
   /** What the list's search field holds, so it can be saved as a view. */
   currentSearch: string;
   onSaveSearchAsView: () => void;
@@ -75,6 +76,7 @@ export default function CommandPalette({
   aiEnabled,
   onAiSettings,
   onOpenSettings,
+  onOpenZotero,
   currentSearch,
   onSaveSearchAsView,
   legacyCitations,
@@ -177,6 +179,16 @@ export default function CommandPalette({
       });
     }
 
+    // Named for what it is rather than for Zotero, because someone who has
+    // not connected a library yet is looking for "cite", not for a product.
+    out.push({
+      id: "zotero",
+      label: "Cite a paper — search Zotero",
+      group: "Create",
+      hint: shortcut(MOD, SHIFT, "Z"),
+      run: onOpenZotero,
+    });
+
     out.push({
       id: "settings",
       label: "Settings — appearance and themes",
@@ -211,6 +223,7 @@ export default function CommandPalette({
     onExportDocx,
     onExportPdf,
     onOpenSettings,
+    onOpenZotero,
     onManageTags,
     onNewView,
     onFindDuplicates,

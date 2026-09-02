@@ -1387,6 +1387,7 @@ mod tests {
                         page: Some(page.to_string()),
                         quote: Some(format!("what it says on {page}")),
                         captured: Some(crate::frontmatter::now()),
+                        ..Default::default()
                     }],
                 )
                 .unwrap();
@@ -1452,6 +1453,7 @@ mod tests {
                     page: Some("6".into()),
                     quote: None,
                     captured: None,
+                    ..Default::default()
                 }],
             )
             .unwrap();
@@ -1478,6 +1480,7 @@ mod tests {
                     page: None,
                     quote: None,
                     captured: None,
+                    ..Default::default()
                 }],
             )
             .unwrap();
@@ -1667,6 +1670,7 @@ mod tests {
                     page: Some("S12".into()),
                     quote: None,
                     captured: None,
+                    ..Default::default()
                 }],
             )
             .unwrap();
@@ -1889,6 +1893,7 @@ mod tests {
                         page: None,
                         quote: None,
                         captured: None,
+                        ..Default::default()
                     }],
                 )
                 .unwrap();
@@ -2259,6 +2264,7 @@ mod tests {
                         page: Some(page.into()),
                         quote: None,
                         captured: None,
+                        ..Default::default()
                     }],
                 )
                 .unwrap();
@@ -2585,6 +2591,7 @@ mod tests {
                     page: Some("112".into()),
                     quote: None,
                     captured: None,
+                    ..Default::default()
                 }],
             )
             .unwrap();

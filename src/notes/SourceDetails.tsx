@@ -1,5 +1,10 @@
 import { useEffect, useState } from "react";
-import { sourcesApi, type CitingNote, type SourceMeta } from "../vault/api";
+import {
+  sourcesApi,
+  zoteroApi,
+  type CitingNote,
+  type SourceMeta,
+} from "../vault/api";
 
 /**
  * The paper a source note stands for, and what has been built on it.
@@ -39,6 +44,7 @@ export default function SourceDetails({
   onOpen: (noteId: string) => void;
 }) {
   const [citing, setCiting] = useState<CitingNote[]>([]);
+  const [failed, setFailed] = useState(false);
 
   useEffect(() => {
     sourcesApi
@@ -68,10 +74,78 @@ export default function SourceDetails({
         ))}
       </dl>
 
+      {/*
+        Everything the library told us, and nothing it did not. A missing
+        citation key says "none in Zotero" rather than showing a generated one:
+        an invented key reads correctly in a draft and fails at the
+        bibliography, which is the worst way for it to be wrong.
+      */}
+      {(meta.citationKey ||
+        meta.itemType ||
+        (meta.collections?.length ?? 0) > 0 ||
+        meta.pdf) && (
+        <dl className="mt-2 grid grid-cols-[7rem_minmax(0,1fr)] gap-x-3 gap-y-1 border-t border-border pt-2 text-sm">
+          <dt className="text-xs text-ink-muted">Citation key</dt>
+          <dd className="min-w-0 font-mono text-xs text-ink-soft">
+            {meta.citationKey ? `@${meta.citationKey}` : "None in Zotero"}
+          </dd>
+          {meta.itemType && (
+            <>
+              <dt className="text-xs text-ink-muted">Type</dt>
+              <dd className="min-w-0 text-xs text-ink-soft">{meta.itemType}</dd>
+            </>
+          )}
+          {(meta.collections?.length ?? 0) > 0 && (
+            <>
+              <dt className="text-xs text-ink-muted">Collections</dt>
+              <dd className="min-w-0 text-xs text-ink-soft">
+                {meta.collections?.join(" · ")}
+              </dd>
+            </>
+          )}
+          <dt className="text-xs text-ink-muted">PDF</dt>
+          <dd className="min-w-0 text-xs text-ink-soft">
+            {/* Named, never copied: the file stays Zotero's, and this only
+                lets the note say one exists while Zotero is closed. */}
+            {meta.pdf ? `${meta.pdf} — in Zotero` : "Not available"}
+          </dd>
+        </dl>
+      )}
+
+      {meta.abstractText && (
+        <div className="mt-2 border-t border-border pt-2">
+          <p className="text-[0.65rem] font-semibold tracking-wide text-highlight uppercase">
+            Abstract — as published
+          </p>
+          <p className="mt-0.5 border-l-2 border-highlight bg-highlight-bg/40 px-2 py-1 text-sm text-ink-soft italic">
+            {meta.abstractText}
+          </p>
+        </div>
+      )}
+
       {meta.zotero && (
-        <p className="mt-2 text-xs text-ink-muted">
-          Imported from Zotero ({meta.zotero}). These details live here now — a
-          citation of this source keeps working whether or not Zotero does.
+        <div className="mt-2 flex flex-wrap items-center gap-2 border-t border-border pt-2">
+          <p className="min-w-0 flex-1 text-xs text-ink-muted">
+            Imported from Zotero ({meta.zotero}). These details live here now —
+            a citation of this source keeps working whether or not Zotero does.
+          </p>
+          <button
+            type="button"
+            onClick={() => {
+              const key = meta.zotero;
+              if (key) void zoteroApi.open(key).catch(() => setFailed(true));
+            }}
+            className="sutra-no-print shrink-0 rounded-lg border border-border px-2 py-1 text-xs text-ink-soft transition-colors duration-150 ease-out hover:border-accent hover:text-accent"
+          >
+            Open in Zotero
+          </button>
+        </div>
+      )}
+
+      {failed && (
+        <p className="mt-1 text-xs text-highlight">
+          Zotero did not open. Everything above is cached here and is
+          unaffected.
         </p>
       )}
 

@@ -1,6 +1,11 @@
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { linksAsTitles } from "../editor/wikilink/titleStore";
-import type { NoteSummary, SearchHit } from "../vault/api";
+import {
+  zoteroApi,
+  type NoteSummary,
+  type Reference,
+  type SearchHit,
+} from "../vault/api";
 
 /**
  * The middle column: which note.
@@ -34,6 +39,8 @@ type Props = {
   hits: SearchHit[] | null;
   query: string;
   onQuery: (query: string) => void;
+  /** Make a literature note from a reference-manager item. */
+  onLiteratureNote: (key: string) => void;
   /** Names what is being listed, e.g. "All notes" or a folder. */
   heading: string;
   /** True when rows can come from different folders, so each says where it is. */
@@ -65,6 +72,7 @@ export default function NoteList({
   notes,
   hits,
   query,
+  onLiteratureNote,
   onQuery,
   heading,
   showFolders,
@@ -84,6 +92,31 @@ export default function NoteList({
   }, [focusSearch]);
 
   const searching = hits !== null;
+
+  // The library is searched alongside the vault, because "have I read anything
+  // about this?" and "have I written anything about this?" are the same
+  // question asked twice, and answering only the second is how a paper gets
+  // read for a third time. Debounced and guarded like every other live search;
+  // a closed Zotero simply yields nothing and is not an error here.
+  const [papers, setPapers] = useState<Reference[]>([]);
+  useEffect(() => {
+    const text = query.trim();
+    if (text === "") {
+      setPapers([]);
+      return;
+    }
+    let live = true;
+    const timer = setTimeout(() => {
+      zoteroApi
+        .search(text)
+        .then((found) => live && setPapers(found.slice(0, 5)))
+        .catch(() => live && setPapers([]));
+    }, 250);
+    return () => {
+      live = false;
+      clearTimeout(timer);
+    };
+  }, [query]);
   const rows = useMemo(
     () => (hits ? hitRows(hits, notes) : listRows(notes)),
     [hits, notes],
@@ -163,7 +196,11 @@ export default function NoteList({
         </div>
       )}
 
-      {rows.length === 0 ? (
+      {rows.length === 0 && papers.length > 0 ? (
+        <p className="px-3.5 py-2 text-sm text-ink-muted">
+          Nothing written about this yet — but your library has something.
+        </p>
+      ) : rows.length === 0 ? (
         <p className="px-3.5 py-2 text-sm text-ink-muted">
           {searching
             ? "No matches."
@@ -173,21 +210,91 @@ export default function NoteList({
                 ? "Nothing matches this view."
                 : "Nothing here yet."}
         </p>
-      ) : (
-        <ul className="min-h-0 flex-1 overflow-y-auto px-1.5 pb-2">
-          {rows.map((row) => (
-            <Row
-              key={row.id}
-              row={row}
-              active={row.id === selectedId}
-              showFolder={showFolders}
-              onSelect={() => onSelect(row.id)}
-              onDelete={() => onDelete(row.id)}
-            />
-          ))}
-        </ul>
-      )}
+      ) : null}
+
+      <div className="min-h-0 flex-1 overflow-y-auto pb-2">
+        {rows.length > 0 && (
+          <>
+            {/* Only labelled when there is something to tell it apart from.
+                A heading over the only group on screen is noise. */}
+            {papers.length > 0 && <GroupLabel>Notes</GroupLabel>}
+            <ul className="px-1.5">
+              {rows.map((row) => (
+                <Row
+                  key={row.id}
+                  row={row}
+                  active={row.id === selectedId}
+                  showFolder={showFolders}
+                  onSelect={() => onSelect(row.id)}
+                  onDelete={() => onDelete(row.id)}
+                />
+              ))}
+            </ul>
+          </>
+        )}
+
+        {papers.length > 0 && (
+          <>
+            <GroupLabel>In your Zotero library</GroupLabel>
+            <ul className="px-1.5">
+              {papers.map((paper) => (
+                <PaperRow
+                  key={paper.key}
+                  paper={paper}
+                  onLiteratureNote={() => onLiteratureNote(paper.key)}
+                />
+              ))}
+            </ul>
+          </>
+        )}
+      </div>
     </div>
+  );
+}
+
+function GroupLabel({ children }: { children: React.ReactNode }) {
+  return (
+    <p className="px-3.5 pt-2 pb-1 text-[0.6875rem] font-semibold tracking-wide text-ink-muted uppercase">
+      {children}
+    </p>
+  );
+}
+
+/**
+ * A paper from the library, in the note list but never disguised as a note.
+ *
+ * Section 18 asks that source results be clearly distinguished from notes, and
+ * the distinction here is structural rather than decorative: a different group
+ * with its own heading, a different border, and an action that says what it
+ * would create. Nothing about this row can be mistaken for something already
+ * written — because nothing has been.
+ */
+function PaperRow({
+  paper,
+  onLiteratureNote,
+}: {
+  paper: Reference;
+  onLiteratureNote: () => void;
+}) {
+  const detail = [paper.creators, paper.year, paper.container]
+    .map((part) => part?.trim())
+    .filter((part): part is string => !!part)
+    .join(" · ");
+
+  return (
+    <li className="mb-1 rounded-lg border border-dashed border-highlight/50 px-2.5 py-2">
+      <p className="text-sm text-ink">{paper.title}</p>
+      <p className="mt-0.5 truncate text-xs text-ink-muted">
+        {detail || "No author or year in Zotero"}
+      </p>
+      <button
+        type="button"
+        onClick={onLiteratureNote}
+        className="mt-1.5 text-xs text-highlight transition-opacity duration-150 ease-out hover:opacity-80"
+      >
+        Read it into a literature note →
+      </button>
+    </li>
   );
 }
 

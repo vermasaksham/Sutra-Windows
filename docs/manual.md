@@ -19,7 +19,7 @@ says so rather than leaving you to find out.
 6. [Links between notes](#6-links-between-notes)
 7. [Tags](#7-tags)
 8. [Note types](#8-note-types)
-9. [Sources and citations](#9-sources-and-citations)
+9. [Zotero, sources and citations](#9-zotero-sources-and-citations)
 10. [Views — saved questions about the vault](#10-views--saved-questions-about-the-vault)
 11. [The context panel](#11-the-context-panel)
 12. [Duplicates and numbers that differ](#12-duplicates-and-numbers-that-differ)
@@ -216,31 +216,117 @@ nothing to run — views are made by saving a query.
 
 ---
 
-## 9. Sources and citations
+## 9. Zotero, sources and citations
 
-A **source** is an ordinary note of type _Source_ that stands for a paper. It
-records authors, year, container (journal, book, proceedings), DOI and URL.
-New ones are put in a `Library` folder by convention; a source works from
-anywhere.
+Zotero stores the literature. Sutra stores what you think about it. The two
+are kept apart on purpose, and this section is the bridge between them.
 
-**Citing.** Type `@` in the body and a menu of your sources opens. The
-citation renders as the source's label and, in the context panel, gains two
-fields:
+```
+Zotero item  →  Source note  →  Evidence  →  Interpretation  →  Question
+```
 
-- **Page** — where in the source
-- **Quote** — "what it actually says, in its own words"
+### The fastest way in
 
-**Importing from Zotero.** With Zotero running on the same machine, Sutra can
-read its library over Zotero's local connector and turn items into source
-notes. The details are **copied into the vault once**, not looked up each time
-they are shown — which is what makes a citation survive Zotero being
-uninstalled, the vault being opened on another machine, or the library being
-reorganised. The Zotero item key comes along, so re-importing updates the same
-source note rather than making a second one.
+`Ctrl+Shift+Z`, or **Cite a paper** at the foot of the rail, or `Ctrl+K` →
+_Cite a paper — search Zotero_. Search your library by title, author, year,
+DOI or journal. Each result offers three different things:
 
-If your vault has citations from an older build that still point at Zotero,
-the command palette offers **Turn Zotero citations into sources**, with a count
-of how many are left.
+| Action              | What it does                                                     |
+| ------------------- | ---------------------------------------------------------------- |
+| **Literature note** | The note you write _about_ the paper, plus the source behind it. |
+| **Add as source**   | Brings the paper in so it can be cited, and stops there.         |
+| **Open in Zotero**  | Raises the item in Zotero itself.                                |
+
+Zotero must be running, with **Allow other applications on this computer to
+communicate with Zotero** switched on in its Settings → Advanced. Nothing goes
+over the internet: this is Zotero's local connector, on your own machine.
+
+### Two notes, not one
+
+Asking for a literature note creates **two** things, and the split is the whole
+point:
+
+- A **source note** holds the paper's details — authors, year, journal, DOI,
+  abstract, citation key, item type, Zotero collections, and whether a PDF
+  exists. Copied in once, so they survive Zotero being closed, uninstalled, or
+  never installed on this machine again.
+- A **literature note** holds your reading of it, cites the source, and starts
+  as empty headings: Summary, Key Evidence, Important Quotes, My
+  Interpretation, Research Questions, Limitations, Related Notes.
+
+Nothing in those headings is filled in for you. The app supplies the shape of a
+reading, never the reading.
+
+### The abstract, and everything else Zotero said
+
+The abstract is included, marked **as published** and set off from your own
+text — so a summary the publisher wrote can never be mistaken at a glance for
+one you wrote.
+
+Everything shown about a paper is what Zotero actually returned. Nothing is
+guessed at. If your library has no citation key — Zotero only has them when
+Better BibTeX is installed — the source says **None in Zotero** rather than
+showing an invented one, because a fabricated `@Ko2024` reads correctly in a
+draft and then fails at the bibliography. The same rule holds for the DOI, the
+year, the journal and the PDF: present, or plainly marked absent.
+
+### Citing in the text
+
+Type `@` in the body and a menu opens covering both the sources already in your
+vault and your Zotero library. Picking a Zotero item brings it in first, so a
+citation always points at a note in your vault rather than at an item in
+another program.
+
+### Evidence: the page, and their words
+
+In the context panel (`Ctrl+\`), each citation carries:
+
+- **Page** — a string, because "S12", "6-8" and "iv" are all real page
+  references
+- **Source evidence — their words** — the quote, marked and set off, because it
+  is the one piece of text in the note that is not yours
+- **Evidence** — what kind it is: experimental, computational, theoretical,
+  review or observation
+
+That is the provenance record. "Ko 2024 says thermal conductivity is low" is
+not traceable; "Ko 2024, p. 6, _κ = 0.037 W m⁻¹K⁻¹_, experimental" is.
+
+### Three voices, never mixed
+
+A heading opening with **Source**, **Key Evidence**, **Important Quotes** or
+**Abstract** is the paper's voice. One opening with **My interpretation** is
+yours. One opening with **Research questions** or **My question** is what you
+want to know. The editor renders the three differently, and they are ordinary
+markdown headings, so the separation survives export and this program not
+existing.
+
+### Searching your library from the note list
+
+Search the vault and any matching papers in your Zotero library appear
+underneath, in their own group with a dashed border, never disguised as notes
+you have already written. "Have I read anything about this?" and "have I
+written anything about this?" are the same question asked twice.
+
+### When Zotero is not running
+
+Everything already imported keeps working: metadata, citation keys, evidence,
+page references, quotes, and every note relationship. Nothing is deleted and
+nothing is hidden. Only the live library is missing, and the app says so in
+those words.
+
+### Zotero collections are not folders
+
+An item can sit in three Zotero collections while your notes about it live in
+one folder somewhere else. Sutra records which collections a paper is in and
+never mirrors them into your folder tree — the two hierarchies are independent,
+and making either follow the other destroys that.
+
+### What Sutra never does to your library
+
+It reads. It does not edit your Zotero data, does not copy PDFs into the vault,
+and does not generate bibliographies. If you had citations from an older build
+that still point at Zotero keys, the command palette offers **Turn Zotero
+citations into sources**, with a count of how many are left.
 
 ---
 
@@ -431,7 +517,7 @@ still gets you there.
 `Ctrl+K`. Type to filter; it searches both commands and your notes by title,
 so it doubles as a jump-to-note.
 
-**Create** — Capture to Inbox · New note in the current folder
+**Create** — Capture to Inbox · New note in the current folder · Cite a paper — search Zotero
 
 **This note** _(when one is open)_ — Set type to … (each of the ten kinds) ·
 Export as Word (.docx) · Print, or save as PDF

@@ -1,7 +1,7 @@
 import { useState } from "react";
 import SourcePicker, { describe } from "./SourcePicker";
 import { useCitation } from "../editor/citation/citationStore";
-import type { Citation, NoteSummary } from "../vault/api";
+import { EVIDENCE_KINDS, type Citation, type NoteSummary } from "../vault/api";
 
 /**
  * What this note draws on, and where in it.
@@ -122,6 +122,19 @@ export default function SourcesPanel({
                   </p>
                 )}
 
+                {/*
+                  Marked, not merely indented. Section 11 asks that the
+                  source's words, the reader's interpretation and the reader's
+                  questions never be visually mixed; the other two live in the
+                  note body under their own headings, and this is the one place
+                  in the interface holding text that is not the author's. It
+                  says so in words rather than relying on the italics, which a
+                  reader skimming at midnight will not register as meaning
+                  "somebody else wrote this".
+                */}
+                <p className="mt-2 text-[0.65rem] font-semibold tracking-wide text-highlight uppercase">
+                  Source evidence — their words
+                </p>
                 <textarea
                   value={citation.quote ?? ""}
                   onChange={(event) =>
@@ -130,8 +143,36 @@ export default function SourcesPanel({
                   placeholder="What it actually says, in its own words"
                   aria-label="Quote"
                   rows={citation.quote ? 2 : 1}
-                  className="sutra-quote mt-1.5 w-full resize-y rounded bg-row-hover px-2 py-1 text-sm text-ink-soft italic outline-none placeholder:text-ink-muted placeholder:not-italic"
+                  className="sutra-quote mt-0.5 w-full resize-y rounded border-l-2 border-highlight bg-highlight-bg/40 px-2 py-1 text-sm text-ink-soft italic outline-none placeholder:text-ink-muted placeholder:not-italic"
                 />
+
+                <label className="sutra-no-print mt-1.5 flex items-center gap-1.5 text-xs text-ink-muted">
+                  Evidence
+                  <select
+                    value={citation.kind ?? ""}
+                    onChange={(event) =>
+                      update(index, { kind: event.target.value || null })
+                    }
+                    aria-label="Kind of evidence"
+                    className="rounded border border-border bg-surface px-1 py-0.5 text-xs text-ink"
+                  >
+                    <option value="">unspecified</option>
+                    {/* A kind written by a newer build is kept and shown,
+                        rather than being silently reset to "unspecified" by an
+                        older one — the same rule as an unknown view term. */}
+                    {citation.kind &&
+                      !EVIDENCE_KINDS.includes(
+                        citation.kind as (typeof EVIDENCE_KINDS)[number],
+                      ) && (
+                        <option value={citation.kind}>{citation.kind}</option>
+                      )}
+                    {EVIDENCE_KINDS.map((kind) => (
+                      <option key={kind} value={kind}>
+                        {kind}
+                      </option>
+                    ))}
+                  </select>
+                </label>
               </li>
             );
           })}

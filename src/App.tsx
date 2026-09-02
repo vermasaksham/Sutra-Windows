@@ -8,6 +8,7 @@ import DuplicateReview from "./notes/DuplicateReview";
 import DuplicateList from "./notes/DuplicateList";
 import AiSettingsDialog from "./notes/AiSettings";
 import SettingsDialog from "./notes/Settings";
+import ZoteroPicker from "./notes/ZoteroPicker";
 import { citedRefs } from "./notes/citedRefs";
 import SourceDetails from "./notes/SourceDetails";
 import ExportMenu from "./notes/ExportMenu";
@@ -46,6 +47,7 @@ import {
   sourcesApi,
   vaultApi,
   viewsApi,
+  zoteroApi,
   type Backlink,
   type Citation,
   type MigrationPlan,
@@ -107,6 +109,7 @@ export default function App() {
   const [ai, setAi] = useState<AiStatus | null>(null);
   const [aiSettingsOpen, setAiSettingsOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [zoteroOpen, setZoteroOpen] = useState(false);
   const [duplicatesOpen, setDuplicatesOpen] = useState(false);
   const [comparing, setComparing] = useState<{
     left: string;
@@ -586,6 +589,7 @@ export default function App() {
     search: () => setFocusSearch((n) => n + 1),
     capture: () => void capture(),
     context: () => setContextOpen((open) => !open),
+    references: () => setZoteroOpen(true),
     save: () => void note.flush(),
   });
 
@@ -729,6 +733,7 @@ export default function App() {
           onCapture={() => void capture()}
           onManageTags={() => setTagsOpen(true)}
           onOpenSettings={() => setSettingsOpen(true)}
+          onOpenZotero={() => setZoteroOpen(true)}
           onNewFolder={(parent) => {
             const name = window.prompt(
               parent
@@ -743,6 +748,19 @@ export default function App() {
         />
 
         <NoteList
+          onLiteratureNote={(key) => {
+            void (async () => {
+              try {
+                const summary = await zoteroApi.literatureNote(
+                  key,
+                  activeFolder,
+                );
+                await select(summary.id);
+              } catch (cause) {
+                report("Could not create the literature note", cause);
+              }
+            })();
+          }}
           notes={listed}
           hits={hits}
           query={query}
@@ -954,6 +972,15 @@ export default function App() {
         />
       )}
 
+      {zoteroOpen && (
+        <ZoteroPicker
+          folder={activeFolder}
+          onOpenNote={(id) => void select(id)}
+          onClose={() => setZoteroOpen(false)}
+          onReport={report}
+        />
+      )}
+
       {settingsOpen && (
         <SettingsDialog
           aiEnabled={ai?.enabled ?? false}
@@ -1030,6 +1057,7 @@ export default function App() {
           aiEnabled={ai?.enabled ?? false}
           onAiSettings={() => setAiSettingsOpen(true)}
           onOpenSettings={() => setSettingsOpen(true)}
+          onOpenZotero={() => setZoteroOpen(true)}
           currentSearch={query}
           onSaveSearchAsView={() =>
             setEditingView({

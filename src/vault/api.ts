@@ -73,6 +73,20 @@ export type SourceMeta = {
   url?: string | null;
   /** The Zotero item key it was imported from, so re-import updates it. */
   zotero?: string | null;
+  /** The library's citation key, when it has one. Never generated. */
+  citationKey?: string | null;
+  /** The abstract as published. Never a generated summary. */
+  abstractText?: string | null;
+  /** "journalArticle", "book", "thesis" — the library's own word. */
+  itemType?: string | null;
+  /** When it entered the library. */
+  added?: string | null;
+  /** Collection names in the reference manager, recorded not mirrored. */
+  collections?: string[];
+  /** The PDF attachment's title, when the library has one. The file itself is
+   *  never copied — this only lets the note say a PDF exists while Zotero is
+   *  closed. */
+  pdf?: string | null;
 };
 
 /**
@@ -87,6 +101,9 @@ export type Citation = {
   /** A string: "S12", "6-8" and "iv" are all real page references. */
   page?: string | null;
   quote?: string | null;
+  /** What kind of evidence this is — see `EVIDENCE_KINDS`. A value outside
+   *  that list is kept as written rather than dropped. */
+  kind?: string | null;
   /** RFC3339. */
   captured?: string | null;
 };
@@ -258,7 +275,57 @@ export type Reference = {
   /** Journal, book or proceedings — whatever it appeared in. */
   container: string | null;
   url: string | null;
+  /**
+   * The citation key, when the library has one.
+   *
+   * Zotero only has these with Better BibTeX installed. `null` means the
+   * library has none — it is never replaced by a generated one, because an
+   * invented key reads correctly in a draft and then fails at the
+   * bibliography.
+   */
+  citationKey: string | null;
+  /** The abstract as published. Never a generated summary. */
+  abstractText: string | null;
+  dateAdded: string | null;
 };
+
+export type Attachment = {
+  key: string;
+  title: string;
+  contentType: string | null;
+  isPdf: boolean;
+};
+
+/** One item with everything that costs extra requests to learn. */
+export type ItemDetail = Reference & {
+  /** Collection names in the reference manager. Read, never mirrored into
+   *  folders — the two hierarchies are independent. */
+  collections: string[];
+  attachments: Attachment[];
+};
+
+/**
+ * Whether the reference manager can be reached.
+ *
+ * Never an error: a closed Zotero is an ordinary state of the world, and the
+ * app keeps working from cached metadata either way.
+ */
+export type ReferenceStatus = {
+  ready: boolean;
+  providerId: string;
+  provider: string;
+  reason: string | null;
+};
+
+/** The kinds of evidence the UI offers. A stored kind outside this list is
+ *  kept as written rather than dropped, the same as an unknown view term. */
+export const EVIDENCE_KINDS = [
+  "experimental",
+  "computational",
+  "theoretical",
+  "review",
+  "observation",
+] as const;
 
 export const exportApi = {
   /** Write the note as .docx. Opens a save dialog in Rust; resolves the chosen
@@ -272,6 +339,15 @@ export const zoteroApi = {
    *  is not running or the local API is switched off. */
   search: (query: string) => invoke<Reference[]>("zotero_search", { query }),
   byKeys: (keys: string[]) => invoke<Reference[]>("zotero_by_keys", { keys }),
+  /** Whether the library is reachable. Resolves either way — never rejects. */
+  status: () => invoke<ReferenceStatus>("reference_status"),
+  /** One item, with its collections and attachments. */
+  detail: (key: string) => invoke<ItemDetail>("zotero_detail", { key }),
+  /** Show the item in Zotero's own window. */
+  open: (key: string) => invoke<void>("zotero_open", { key }),
+  /** A source note for the paper, plus a literature note that cites it. */
+  literatureNote: (key: string, folder: string | null) =>
+    invoke<NoteSummary>("create_literature_note", { key, folder }),
 };
 
 export type VaultChanged = { changed: string[] };

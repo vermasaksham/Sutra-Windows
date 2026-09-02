@@ -137,6 +137,37 @@ pub struct SourceMeta {
     /// by hand, which must remain a perfectly ordinary thing to do.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub zotero: Option<String>,
+    /// The citation key, when the reference manager has one.
+    ///
+    /// Zotero only has these with Better BibTeX installed. `None` means the
+    /// library has none, and is never replaced by a plausible-looking guess:
+    /// an invented `@Ko2024` reads correctly in a draft and fails silently at
+    /// the bibliography, which is the worst of both.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub citation_key: Option<String>,
+    /// The abstract as published. Never a generated summary — a reader must be
+    /// able to trust that everything in this struct came from the publisher or
+    /// from the person typing.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub abstract_text: Option<String>,
+    /// "journalArticle", "book", "thesis" — the reference manager's own word.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub item_type: Option<String>,
+    /// When it entered the library, which is often the only clue to why.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub added: Option<String>,
+    /// The reference manager's collections this item sits in, by name.
+    ///
+    /// Recorded, never mirrored into folders: an item can be in three
+    /// collections while the notes about it live in one folder elsewhere, and
+    /// making either follow the other destroys that independence.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub collections: Vec<String>,
+    /// The title of the PDF attachment, when the library has one. Recorded so
+    /// the note can say a PDF exists while Zotero is closed; the file itself
+    /// is never copied.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pdf: Option<String>,
 }
 
 /// One note citing one source, at one place in it.
@@ -145,7 +176,7 @@ pub struct SourceMeta {
 /// note's own frontmatter rather than in the index — so it survives being
 /// copied to another machine, opened in another editor, or read in ten years
 /// with none of this software installed.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct Citation {
     /// The source note's ULID. Not a Zotero key: a source is a note in the
     /// vault, so a citation keeps working whether or not Zotero ever exists
@@ -159,6 +190,15 @@ pub struct Citation {
     /// the author's claim separate from the reader's reading of it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub quote: Option<String>,
+    /// What kind of evidence this is: "experimental", "computational",
+    /// "theoretical", "review", "observation".
+    ///
+    /// A string rather than an enum, for the same reason a view's unknown term
+    /// is kept verbatim: a kind written by a newer build must survive being
+    /// read and written back by an older one rather than being quietly
+    /// dropped. The UI offers the known list and accepts what it finds.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kind: Option<String>,
     #[serde(
         default,
         skip_serializing_if = "Option::is_none",

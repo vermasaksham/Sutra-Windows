@@ -16,12 +16,13 @@ use crate::frontmatter::NoteType;
 use crate::frontmatter::{Citation, SourceMeta};
 use crate::index::CitingNote;
 use crate::index::{Backlink, DuplicatePair, SearchHit, ViewResult};
+use crate::references::{Availability, ItemDetail, Reference, ReferenceProvider};
 use crate::related::Related;
 use crate::state::{self, AiSettings, AiStatus, AppState};
 use crate::tags::Suggestion;
 use crate::vault::{MigrationPlan, NoteDoc, NoteSummary, Retag, TagChange};
 use crate::views::Query;
-use crate::zotero::{Reference, Zotero};
+use crate::zotero::Zotero;
 use serde::Serialize;
 use std::collections::HashMap;
 use tauri::{AppHandle, State};
@@ -197,7 +198,30 @@ pub fn zotero_search(query: String) -> Result<Vec<Reference>> {
 /// Resolve citation keys to references, so `[@KEY]` can render a label.
 #[tauri::command]
 pub fn zotero_by_keys(keys: Vec<String>) -> Result<Vec<Reference>> {
-    Zotero::default().by_keys(&keys)
+    Zotero::default().items(&keys)
+}
+
+/// Whether the reference manager is reachable, and why not when it is not.
+///
+/// Deliberately never an error: "Zotero is closed" is an ordinary state of the
+/// world, not a failure of the app, and the caller needs to render a status
+/// line rather than an error toast. Notes, sources, evidence and citations all
+/// keep working from cached metadata regardless of what this returns.
+#[tauri::command]
+pub fn reference_status() -> Availability {
+    Zotero::default().availability()
+}
+
+/// Everything about one item, collections and attachments included.
+#[tauri::command]
+pub fn zotero_detail(key: String) -> Result<ItemDetail> {
+    Zotero::default().detail(&key)
+}
+
+/// Show the item in Zotero's own window.
+#[tauri::command]
+pub fn zotero_open(key: String) -> Result<()> {
+    Zotero::default().open(&key)
 }
 
 /// Copy a file into the vault's attachments folder.
@@ -272,7 +296,7 @@ pub fn migrate_citations(state: State<'_, AppState>) -> Result<CitationMigration
         });
     }
 
-    let found = Zotero::default().by_keys(&keys)?;
+    let found = Zotero::default().items(&keys)?;
     let mut mapping = HashMap::new();
     let mut migrated = Vec::new();
 
@@ -371,7 +395,7 @@ pub fn citing_notes(state: State<'_, AppState>, id: String) -> Result<Vec<Citing
 /// in ten years and one that stops working when Zotero is uninstalled.
 #[tauri::command]
 pub fn import_zotero_source(state: State<'_, AppState>, key: String) -> Result<NoteSummary> {
-    let found = Zotero::default().by_keys(std::slice::from_ref(&key))?;
+    let found = Zotero::default().items(std::slice::from_ref(&key))?;
     let reference = found
         .into_iter()
         .next()
@@ -382,6 +406,70 @@ pub fn import_zotero_source(state: State<'_, AppState>, key: String) -> Result<N
         let doc = vault.read_note(&summary.id)?;
         index.upsert(&summary, &doc.body)?;
         Ok(summary)
+    })
+}
+
+/// Create a literature note from a reference-manager item.
+///
+/// Two notes come out of this, deliberately. The *source* note holds the
+/// paper's details, cached so they survive Zotero being closed or uninstalled.
+/// The *literature* note holds the reading of it, cites the source, and starts
+/// as empty headings. Keeping them apart is what lets the question "where did
+/// this come from?" always have an answer: every claim in the literature note
+/// sits under a heading the researcher wrote, and every bibliographic fact
+/// sits on a source note that names the item it was copied from.
+///
+/// The abstract is asked of the provider and passed through untouched. If the
+/// provider has none, the note simply has none: nothing here composes one.
+#[tauri::command]
+pub fn create_literature_note(
+    state: State<'_, AppState>,
+    key: String,
+    folder: Option<String>,
+) -> Result<NoteSummary> {
+    let zotero = Zotero::default();
+
+    // `detail` also brings collections and attachments; if that half fails —
+    // an older Zotero, a permissions oddity — fall back to the plain item
+    // rather than refusing to make the note.
+    let (reference, collections, pdf) = match zotero.detail(&key) {
+        Ok(detail) => {
+            let pdf = detail
+                .attachments
+                .iter()
+                .find(|a| a.is_pdf)
+                .map(|a| a.title.clone());
+            (detail.reference, detail.collections, pdf)
+        }
+        Err(_) => {
+            let found = zotero.items(std::slice::from_ref(&key))?;
+            let reference = found
+                .into_iter()
+                .next()
+                .ok_or_else(|| SutraError::Zotero(format!("Zotero has no item {key}")))?;
+            (reference, Vec::new(), None)
+        }
+    };
+
+    let mut meta = reference.to_source();
+    meta.collections = collections;
+    meta.pdf = pdf;
+    let abstract_text = reference.abstract_text.clone();
+    let title = reference.title.clone();
+
+    state.with_both(|vault, index| {
+        let source = vault.import_source(&title, meta.clone())?;
+        let source_doc = vault.read_note(&source.id)?;
+        index.upsert(&source, &source_doc.body)?;
+
+        let doc = vault.create_literature_note(
+            &title,
+            folder.clone(),
+            &source.id,
+            abstract_text.as_deref(),
+        )?;
+        index.upsert(&doc.summary, &doc.body)?;
+        Ok(doc.summary)
     })
 }
 

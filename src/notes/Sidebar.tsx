@@ -1,5 +1,5 @@
 import { useState, type SVGProps } from "react";
-import { MOD, shortcut } from "../platform";
+import { MOD, SHIFT, shortcut } from "../platform";
 import ThemeToggle from "../components/ThemeToggle";
 import { buildFolders, flattenFolders, type FolderNode } from "./tree";
 import { buildTagTree, flattenTags, type TagNode } from "./tags";
@@ -35,6 +35,7 @@ export default function Sidebar({
   onNewView,
   onManageTags,
   onOpenSettings,
+  onOpenZotero,
 }: {
   vaultName: string;
   notes: NoteSummary[];
@@ -51,6 +52,7 @@ export default function Sidebar({
   onNewView: () => void;
   onManageTags: () => void;
   onOpenSettings: () => void;
+  onOpenZotero: () => void;
 }) {
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [tagsCollapsed, setTagsCollapsed] = useState<Set<string>>(new Set());
@@ -236,6 +238,21 @@ export default function Sidebar({
         )}
       </div>
 
+      {/* Citing was the least discoverable thing in the app: it lived behind
+          `@` in the editor and nowhere else, so a reasonable person concluded
+          there was no Zotero support at all. A named button fixes that. */}
+      <div className="px-2 pb-1">
+        <button
+          type="button"
+          onClick={onOpenZotero}
+          title={`Cite a paper (${shortcut(MOD, SHIFT, "Z")})`}
+          className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-sm text-ink-soft transition-colors duration-150 ease-out hover:bg-row-hover hover:text-accent"
+        >
+          <QuoteMarkIcon className="size-4 shrink-0" />
+          <span>Cite a paper</span>
+        </button>
+      </div>
+
       {/* The quick light/dark switch stays here, because it is the one
           appearance choice made often enough to deserve a permanent control.
           Everything else, palettes included, is behind Settings. */}
@@ -252,6 +269,25 @@ export default function Sidebar({
         </button>
       </div>
     </nav>
+  );
+}
+
+/** Quotation marks, for citing. Drawn, like the rest. */
+function QuoteMarkIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.6"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+      {...props}
+    >
+      <path d="M7 7h4v4c0 2.5-1.5 4.5-4 5" />
+      <path d="M15 7h4v4c0 2.5-1.5 4.5-4 5" />
+    </svg>
   );
 }
 

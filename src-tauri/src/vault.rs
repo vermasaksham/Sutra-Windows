@@ -685,6 +685,44 @@ impl Vault {
         })
     }
 
+    /// Create a literature note about a source.
+    ///
+    /// The note is the researcher's, not the paper's: it holds their reading,
+    /// and the paper's own details stay on the source note it cites. That
+    /// separation is the point of the whole feature — a summary a person wrote
+    /// and a summary a publisher wrote must never end up in the same paragraph
+    /// with no way to tell them apart.
+    ///
+    /// So the body is headings and nothing else, except the abstract, which is
+    /// included because reading a literature note offline without the paper's
+    /// own claim in front of you is most of the value gone — and which is
+    /// marked, in the body, as the publisher's words. Nothing here is ever
+    /// filled in on the user's behalf.
+    pub fn create_literature_note(
+        &self,
+        title: &str,
+        folder: Option<String>,
+        source_id: &str,
+        abstract_text: Option<&str>,
+    ) -> Result<NoteDoc> {
+        let doc = self.create_note(title, folder)?;
+        let body = literature_body(abstract_text);
+        self.edit(&doc.summary.id, |fm| {
+            fm.note_type = NoteType::Literature;
+            fm.sources = vec![Citation {
+                id: source_id.to_string(),
+                captured: Some(frontmatter::now()),
+                ..Default::default()
+            }];
+        })?;
+        let summary = self.save_note(&doc.summary.id, title, &body)?;
+        Ok(NoteDoc {
+            summary,
+            body,
+            adopted: false,
+        })
+    }
+
     /// Replace what a source note records about its paper.
     ///
     /// Every note citing it shows the new details immediately, because none of
@@ -1389,6 +1427,41 @@ fn folder_of(relative: &str) -> String {
         Some((folder, _)) => folder.to_string(),
         None => String::new(),
     }
+}
+
+/// The sections a literature note starts with.
+///
+/// Section 7's list, in its order. Empty on purpose: the app supplies the
+/// shape of a reading, never the reading. An assistant may later offer text
+/// for Summary or Key Evidence, but it arrives as a draft the user accepts,
+/// and it is never written here at creation time where it would be
+/// indistinguishable from something they wrote themselves.
+fn literature_body(abstract_text: Option<&str>) -> String {
+    let mut out = String::new();
+
+    // The publisher's words, marked as such. A blockquote rather than a
+    // paragraph because the distinction between what the paper claims and what
+    // the reader concluded has to survive being skim-read at midnight.
+    if let Some(text) = abstract_text.map(str::trim).filter(|t| !t.is_empty()) {
+        out.push_str("> **Abstract, as published.** ");
+        out.push_str(&text.replace('\n', " "));
+        out.push_str("\n\n");
+    }
+
+    for heading in [
+        "Summary",
+        "Key Evidence",
+        "Important Quotes",
+        "My Interpretation",
+        "Research Questions",
+        "Limitations",
+        "Related Notes",
+    ] {
+        out.push_str("## ");
+        out.push_str(heading);
+        out.push_str("\n\n");
+    }
+    out
 }
 
 fn join_relative(folder: &str, name: &str) -> String {
@@ -2716,6 +2789,7 @@ mod tests {
             doi: Some(doi.into()),
             url: None,
             zotero: Some("ABCD1234".into()),
+            ..Default::default()
         }
     }
 
@@ -2725,6 +2799,7 @@ mod tests {
             page: Some(page.to_string()),
             quote: Some(format!("what it says on {page}")),
             captured: Some(frontmatter::now()),
+            ..Default::default()
         }
     }
 
