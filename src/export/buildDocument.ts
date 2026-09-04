@@ -1,5 +1,6 @@
 import type { JSONContent } from "@tiptap/core";
 import { resolved } from "../editor/citation/citationStore";
+import { emphasisRuns } from "../notes/citationStyle";
 import { mathToImage } from "./mathToImage";
 import { encodeSvg, rasterise } from "./rasterise";
 import { attachmentUrl } from "../editor/image/attachmentUrl";
@@ -55,7 +56,7 @@ export type ExportDocument = {
   title: string;
   blocks: Block[];
   /** Formatted bibliography lines, if the note cites anything. */
-  references: string[];
+  references: Run[][];
 };
 
 const MARKS: Record<string, keyof Run> = {
@@ -323,7 +324,19 @@ export async function buildDocument(
   const blocks: Block[] = [];
   await walk(doc, blocks);
 
-  const references = resolved(citedRefs).map((cited) => cited.detail);
+  // Split each entry into runs so italics survive into Word.
+  //
+  // A styled bibliography comes back from Zotero as HTML and is flattened to
+  // markdown, which is how a journal name reaches here as *Nature Energy*. Sent
+  // as one flat string, Word showed the asterisks — the one place in the app
+  // where markup leaked into a finished document. `emphasisRuns` is the same
+  // function the bibliography panel uses, so the two cannot drift.
+  const references = resolved(citedRefs).map((cited) =>
+    emphasisRuns(cited.detail).map((run) => ({
+      text: run.text,
+      italic: run.emphasis,
+    })),
+  );
 
   return { title, blocks, references };
 }

@@ -512,7 +512,9 @@ claimed. Units are compared after normalisation, so `W m⁻¹K⁻¹`, `W/mK` and
 The export menu on a note offers two routes, and they are genuinely different:
 
 - **Word (.docx)** — writes a file. Equations become images (both a raster and
-  a vector copy, so they stay sharp when printed). Pictures come along.
+  a vector copy, so they stay sharp when printed). Pictures come along, and a
+  References section is placed at the end in your chosen style, in citation
+  order, italics and all.
 - **PDF** — hands off to the system print dialog. Choose _Save as PDF_ there.
 
 ---
@@ -798,10 +800,12 @@ Stated plainly, so none of them is a surprise:
 - **No mobile app, and no sync of its own.** Sync the vault folder with
   whatever you already use.
 - **Folders go four levels deep**, no further.
-- **The bibliography is a list, not a laid-out document.** The reference list
-  is rendered by Zotero in your chosen style and can be copied, but Word export
-  does not place a formatted bibliography section for you — paste it where you
-  want it.
+- **The bibliography is placed, but not numbered.** Word export writes a
+  References section at the end, in your chosen style and in citation order,
+  with the italics Zotero asked for. What it does not do is renumber `[1]`,
+  `[2]` in the prose to match — in a numeric style the list is in the right
+  order, and the in-text markers are still the author-year labels you see on
+  screen.
 - **A styled citation needs the library once.** Until a source has been
   rendered, its citation falls back to a plain `Author, Year` label. Settings →
   References → Restyle existing sources fixes that in one go.
