@@ -68,6 +68,26 @@ jobs:
       - name: Frontend tests
         run: npm test
 
+      # The app driven in a real browser, against the production bundle. Types,
+      # lint and unit tests all pass happily while the editor is broken; until
+      # this existed, nothing in CI could tell the difference.
+      - name: Install the browser
+        run: npx playwright install --with-deps chromium
+
+      - name: End-to-end tests
+        run: npm run e2e
+
+      - name: Keep the traces from a failed run
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: |
+            playwright-report/
+            test-results/
+          retention-days: 7
+          if-no-files-found: ignore
+
       - name: Rust formatting
         run: cargo fmt --check
         working-directory: src-tauri

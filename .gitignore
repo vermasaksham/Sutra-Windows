@@ -14,3 +14,7 @@ Thumbs.db
 
 # Sutra
 *.sutra-vault-local
+
+# Playwright's own output.
+/playwright-report/
+/test-results/
