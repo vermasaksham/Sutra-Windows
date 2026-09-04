@@ -1,5 +1,10 @@
 import { useMemo, useState } from "react";
-import { bibliography, emphasisRuns, useCitationStyle } from "./citationStyle";
+import {
+  bibliography,
+  citationOrder,
+  emphasisRuns,
+  useCitationStyle,
+} from "./citationStyle";
 import { CITATION_STYLES, type Citation, type NoteSummary } from "../vault/api";
 
 /**
@@ -8,13 +13,21 @@ import { CITATION_STYLES, type Citation, type NoteSummary } from "../vault/api";
  * Rendered by Zotero, not here — see citationStyle.ts. This component's whole
  * job is to put the strings in citation order, say which of them are the real
  * style and which are a fallback, and let them be copied into a manuscript.
+ *
+ * "Citation order" is the order the prose names them, not the order the
+ * frontmatter happens to list them in. In a numbering style the position in
+ * this list *is* the number printed in the text, so the two have to be built
+ * from one list.
  */
 export default function Bibliography({
   citations,
+  inlineRefs,
   sources,
   onOpen,
 }: {
   citations: Citation[];
+  /** The refs in the prose, in order of first appearance. */
+  inlineRefs: string[];
   sources: NoteSummary[];
   onOpen: (id: string) => void;
 }) {
@@ -24,11 +37,17 @@ export default function Bibliography({
   const entries = useMemo(
     () =>
       bibliography(
-        citations.map((c) => c.id),
+        // The same order the in-text markers are numbered from. Ordering these
+        // separately is how "[3]" and the third entry stopped being the same
+        // paper.
+        citationOrder(
+          inlineRefs,
+          citations.map((c) => c.id),
+        ),
         sources,
         style,
       ),
-    [citations, sources, style],
+    [citations, inlineRefs, sources, style],
   );
 
   if (entries.length === 0) return null;

@@ -316,6 +316,25 @@ vault and your Zotero library. Picking a Zotero item brings it in first, so a
 citation always points at a note in your vault rather than at an item in
 another program.
 
+### How a citation reads in the text
+
+In a numbering style — ACS, RSC, Nature, IEEE, Vancouver — a citation appears
+as its number in the reference list: the first paper you cite is `(1)`, the
+second `(2)`, and citing the first one again is `(1)` again. Insert a citation
+ahead of another and both renumber as you type.
+
+The numbering is Sutra's, not Zotero's, and it has to be: Zotero renders one
+item at a time and has no way of knowing what else this note cites, so it
+returns the same number for every paper. What Sutra takes from Zotero is the
+_shape_ — a style that writes `(1)` gets `(3)`, one that writes `[1]` gets
+`[3]`.
+
+In an author-date style — APA, Harvard, Chicago — the citation reads exactly as
+the library rendered it: `(Zhou et al., 2019)`.
+
+Either way, if the library has not rendered that source yet, you get the
+vault's own `(Author, Year)` label rather than a blank.
+
 ### Citation styles
 
 **Sutra does not format citations. Zotero does.**
@@ -819,12 +838,10 @@ Stated plainly, so none of them is a surprise:
 - **No mobile app, and no sync of its own.** Sync the vault folder with
   whatever you already use.
 - **Folders go four levels deep**, no further.
-- **The bibliography is placed, but not numbered.** Word export writes a
-  References section at the end, in your chosen style and in citation order,
-  with the italics Zotero asked for. What it does not do is renumber `[1]`,
-  `[2]` in the prose to match — in a numeric style the list is in the right
-  order, and the in-text markers are still the author-year labels you see on
-  screen.
+- **A numbered citation is numbered by this note, not by your whole thesis.**
+  In ACS or Nature the marker is the paper's position in _this_ note's
+  reference list. Two notes each citing one paper both say `(1)`, which is
+  correct for each note and something to renumber when you assemble a chapter.
 - **A styled citation needs the library once.** Until a source has been
   rendered, its citation falls back to a plain `Author, Year` label. Settings →
   References → Restyle existing sources fixes that in one go.

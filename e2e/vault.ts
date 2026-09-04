@@ -21,6 +21,16 @@ export type Note = {
   folder?: string;
   tags?: string[];
   body: string;
+  /** What a source note records about its paper, including what the library
+   *  has rendered for it. `styled` is keyed by style id. */
+  source?: {
+    authors?: string;
+    year?: string;
+    doi?: string | null;
+    styled?: Record<string, { citation?: string; bib?: string }>;
+  };
+  /** The note's recorded citations, as frontmatter holds them. */
+  sources?: Array<{ id: string; page?: string; quote?: string }>;
 };
 
 export type Reference = {
@@ -42,6 +52,9 @@ export type VaultOptions = {
   palette?: string;
   /** Which edge the editing toolbar starts on. */
   dock?: "top" | "bottom" | "left" | "right";
+  /** The citation style in force. Must match the keys in a note's
+   *  `source.styled` for the library's rendering to be used. */
+  style?: string;
   /** Source note id -> how many notes cite it, for the research overview. */
   citations?: Record<string, number>;
   withPage?: number;
@@ -68,7 +81,8 @@ export async function useVault(page: Page, options: VaultOptions) {
       excerpt: n.body.slice(0, 60),
       updated: "2026-08-21T10:14:00Z",
       body: n.body,
-      source: undefined as undefined | Record<string, unknown>,
+      source: n.source as undefined | Record<string, unknown>,
+      sources: n.sources ?? [],
     }));
 
     if (opts.theme) localStorage.setItem("sutra.theme", opts.theme);
@@ -193,7 +207,7 @@ export async function useVault(page: Page, options: VaultOptions) {
             return {
               provider: "local",
               userId: "",
-              style: "acs",
+              style: opts.style ?? "acs",
               locale: "en-US",
               hasKey: false,
             };

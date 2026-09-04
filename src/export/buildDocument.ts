@@ -1,6 +1,6 @@
 import type { JSONContent } from "@tiptap/core";
-import { resolved } from "../editor/citation/citationStore";
-import { emphasisRuns } from "../notes/citationStyle";
+import { positionOf, resolved } from "../editor/citation/citationStore";
+import { emphasisRuns, marker } from "../notes/citationStyle";
 import { mathToImage } from "./mathToImage";
 import { encodeSvg, rasterise } from "./rasterise";
 import { attachmentUrl } from "../editor/image/attachmentUrl";
@@ -86,7 +86,13 @@ function runsFrom(nodes: JSONContent[] | undefined): Run[] {
       const [cited] = resolved([ref]);
       // An unresolved citation exports as its ref rather than vanishing: the
       // reference is in the file, and a silently dropped one is worse.
-      runs.push({ text: cited ? `(${cited.label})` : `(${ref})` });
+      // Same marker as on screen, from the same function, so an exported
+      // document numbers its citations exactly as the editor showed them.
+      runs.push({
+        text: cited
+          ? marker(cited.styled, cited.label, positionOf(ref))
+          : `(${ref})`,
+      });
     } else if (node.type === "hardBreak") {
       runs.push({ text: "\n" });
     }

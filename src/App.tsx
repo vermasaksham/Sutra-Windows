@@ -4,7 +4,7 @@ import ResearchOverview from "./notes/ResearchOverview";
 import { BOTTOM_RESERVE, SIDE_RESERVE, useDock } from "./editor/toolbarDock";
 import Toast from "./components/Toast";
 import { setNavigate, setTitles } from "./editor/wikilink/titleStore";
-import { setSources } from "./editor/citation/citationStore";
+import { setCitationOrder, setSources } from "./editor/citation/citationStore";
 import ContextPanel from "./notes/ContextPanel";
 import DuplicateReview from "./notes/DuplicateReview";
 import DuplicateList from "./notes/DuplicateList";
@@ -14,6 +14,7 @@ import ZoteroPicker from "./notes/ZoteroPicker";
 import { setCitationStyle } from "./notes/citationStyle";
 import { setTypography, typographyApi } from "./notes/typography";
 import { citedRefs } from "./notes/citedRefs";
+import { citationOrder } from "./notes/citationStyle";
 import SourceDetails from "./notes/SourceDetails";
 import ExportMenu from "./notes/ExportMenu";
 import FolderBar from "./notes/FolderBar";
@@ -106,6 +107,7 @@ export default function App() {
   const [citationPromptOpen, setCitationPromptOpen] = useState(false);
   const [tagsOpen, setTagsOpen] = useState(false);
   const [overviewOpen, setOverviewOpen] = useState(false);
+
   /** Notes near the open one, with the reason each is near. */
   const [related, setRelated] = useState<RelatedNote[]>([]);
   const [siblings, setSiblings] = useState<NoteSummary[]>([]);
@@ -175,6 +177,39 @@ export default function App() {
   }, [report]);
 
   const note = useNote(selectedId, refresh);
+  // Numbering for a numbering style, and the order the bibliography is built
+  // in — one value, because in ACS or Nature "[3]" *is* the third entry, and
+  // computing the two separately is how they stop agreeing.
+  //
+  // Driven by what the editor produces rather than by `note.doc.body`, which
+  // does not change as you type: `setBody` writes to a buffer so a keystroke
+  // does not re-render the editor. Reading it here would freeze the numbering
+  // at whatever the note said when it opened.
+  const [citeOrder, setCiteOrder] = useState<string[]>([]);
+  const recorded = (note.doc?.sources ?? []).map((c) => c.id).join(",");
+  const trackCitations = useCallback(
+    (body: string) => {
+      const order = citationOrder(
+        citedRefs(body),
+        recorded ? recorded.split(",") : [],
+      );
+      // The module store is what the citation node views read; they are
+      // mounted by ProseMirror and cannot be handed a prop.
+      setCitationOrder(order);
+      setCiteOrder((current) =>
+        current.length === order.length &&
+        current.every((r, i) => r === order[i])
+          ? current
+          : order,
+      );
+    },
+    [recorded],
+  );
+
+  const openedBody = note.doc?.body;
+  useEffect(() => {
+    trackCitations(openedBody ?? "");
+  }, [openedBody, trackCitations]);
   // Unconditionally, because it is a hook: `contextOpen && useWideEnough()`
   // would skip the call whenever the panel is closed, which is exactly the
   // rule-of-hooks violation that breaks on the next render.
@@ -943,7 +978,10 @@ export default function App() {
             <Editor
               key={`${note.doc.id}:${note.revision}`}
               body={note.doc.body}
-              onChange={note.setBody}
+              onChange={(markdown) => {
+                note.setBody(markdown);
+                trackCitations(markdown);
+              }}
               onReady={setEditor}
             />
           </div>
@@ -978,7 +1016,7 @@ export default function App() {
         <ContextPanel
           citations={note.doc.sources ?? []}
           sources={sources}
-          inlineRefs={citedRefs(note.doc.body)}
+          inlineRefs={citeOrder}
           // A source note shows its paper above the editor instead; a list of
           // what it draws on would be asking the wrong question of it.
           showSources={note.doc.type !== "source"}

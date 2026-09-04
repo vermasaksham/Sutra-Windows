@@ -131,8 +131,16 @@ function squash(text: string): string {
 
 /** What a citation resolved to, whichever kind it was. */
 export type Cited = {
-  /** "Zhou et al., 2019" — what goes in the brackets. */
+  /** "Zhou et al., 2019" — the vault's own label, used when the library has
+   *  rendered nothing. */
   label: string;
+  /** Exactly what the library rendered inline, or null when it has not.
+   *
+   *  Kept apart from `label` because choosing between them is `marker`'s job,
+   *  and because a numeric style's rendering is the right *shape* with the
+   *  wrong number in it: Zotero renders one item at a time and cannot know
+   *  what else this note cites. */
+  styled: string | null;
   /** The full title, for a tooltip. */
   title: string;
   /** A bibliography line: everything known about it. */
@@ -145,6 +153,39 @@ export type CitationState =
   | { status: "loading" }
   | { status: "missing"; legacy: boolean }
   | { status: "found"; cited: Cited };
+
+/**
+ * The open note's citation order, so a numeric style can say which number a
+ * citation is.
+ *
+ * Kept here rather than passed down because a citation node view is mounted by
+ * ProseMirror, not by our component tree — the same reason the titles and
+ * sources live in module stores. It is the note's order, so it is replaced
+ * wholesale whenever the note or its prose changes.
+ */
+let order: readonly string[] = [];
+
+export function setCitationOrder(next: readonly string[]) {
+  if (next.length === order.length && next.every((r, i) => r === order[i])) {
+    return;
+  }
+  order = next;
+  for (const listener of listeners) listener();
+}
+
+/** Where this reference sits, 1-based, or null if the note does not cite it. */
+export function positionOf(ref: string): number | null {
+  const at = order.indexOf(ref);
+  return at === -1 ? null : at + 1;
+}
+
+export function useCitationPosition(ref: string): number | null {
+  return useSyncExternalStore(
+    subscribe,
+    () => positionOf(ref),
+    () => null,
+  );
+}
 
 /**
  * Resolve one reference.
@@ -212,7 +253,8 @@ function fromSource(source: NoteSummary): Cited {
   // a broken draft.
   const rendered = styledFor(meta, currentStyle());
   return {
-    label: rendered?.citation ?? sourceLabel(source),
+    styled: rendered?.citation ?? null,
+    label: sourceLabel(source),
     title: source.title,
     detail:
       rendered?.bib ??
@@ -232,6 +274,9 @@ function fromSource(source: NoteSummary): Cited {
 function fromReference(reference: Reference): Cited {
   const who = reference.creators || "Unknown";
   return {
+    // A Zotero item has never been through the style engine — that happens
+    // when it becomes a source note — so there is nothing rendered to prefer.
+    styled: null,
     label: reference.year ? `${who}, ${reference.year}` : who,
     title: reference.title,
     detail: [

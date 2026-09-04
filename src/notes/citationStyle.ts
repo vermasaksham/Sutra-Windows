@@ -168,3 +168,81 @@ export function emphasisRuns(
 
   return runs.filter((run) => run.text.length > 0);
 }
+
+/**
+ * The order citations are numbered in.
+ *
+ * First appearance in the prose, then any source the note records but no
+ * longer names — a citation whose marker was deleted while its page and quote
+ * were kept is still evidence, and dropping it from the reference list would
+ * quietly discard provenance.
+ *
+ * One list, used for both the in-text numbers and the bibliography, because
+ * the whole point of a numeric style is that "[3]" and the third entry are the
+ * same paper. Computing them separately is how they drift.
+ */
+export function citationOrder(
+  inlineRefs: readonly string[],
+  recorded: readonly string[],
+): string[] {
+  const order: string[] = [];
+  for (const ref of [...inlineRefs, ...recorded]) {
+    if (!order.includes(ref)) order.push(ref);
+  }
+  return order;
+}
+
+/** A citation the library rendered as a bare number: "1", "(1)", "[1]". */
+const NUMERIC = /^([[(]?)\s*\d+\s*([\])]?)$/;
+
+/**
+ * Is this style one that numbers its citations?
+ *
+ * Asked of the library's own output rather than a list of style names, so any
+ * CSL id works — including one typed into "Another style…". Zotero renders
+ * each item on its own, so in a numeric style every citation comes back as
+ * *the same* number; that shape is the signal, and the number in it is
+ * meaningless.
+ */
+export function isNumeric(styled: string | null | undefined): boolean {
+  const match = styled && NUMERIC.exec(styled.trim());
+  if (!match) return false;
+  // "(2019)" is a source with a year and no author, not the two-thousand-and-
+  // nineteenth reference. No document numbers past a few hundred references;
+  // every year is four digits and at least a thousand.
+  return Number(match[0].replace(/\D/g, "")) < 1000;
+}
+
+/**
+ * How an in-text citation reads.
+ *
+ * Three cases, in order:
+ *
+ * - A numeric style: the position in this note's citation order, so the marker
+ *   agrees with the reference list. Zotero cannot supply this — it renders one
+ *   item at a time and has no idea what else the note cites — so the number is
+ *   ours and the *shape* is the library's. A style that wrote "(1)" gets
+ *   "(3)"; one that wrote a bare "1" gets "[3]", because a bare number inline
+ *   reads as part of the sentence.
+ * - An author-date style: exactly what the library rendered, delimiters and
+ *   all. Wrapping it again is how "(Zhou et al., 2019)" became "((Zhou et al.,
+ *   2019))".
+ * - Nothing rendered yet: the vault's own label, in parentheses. Imperfect and
+ *   recognisable beats correct and absent.
+ */
+export function marker(
+  styled: string | null | undefined,
+  fallback: string,
+  position: number | null,
+): string {
+  const rendered = styled?.trim();
+  if (rendered && isNumeric(rendered)) {
+    // Until the order is known, the library's number would be wrong for every
+    // citation but the first. The label is at least true.
+    if (position === null) return `(${fallback})`;
+    const [, open, close] = NUMERIC.exec(rendered)!;
+    return open && close ? `${open}${position}${close}` : `[${position}]`;
+  }
+  if (rendered) return rendered;
+  return `(${fallback})`;
+}
