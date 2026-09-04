@@ -223,6 +223,26 @@ export const sourcesApi = {
     invoke<NoteSummary>("import_zotero_source", { key }),
 };
 
+/** What a check for a newer Sutra found. */
+export type UpdateStatus = {
+  /** The version running now. */
+  current: string;
+  /** The newest published version, if the check reached GitHub. */
+  latest: string | null;
+  /** True only when `latest` is genuinely newer than `current`. */
+  newer: boolean;
+  /** Where to get it. */
+  url: string;
+};
+
+export const updatesApi = {
+  /** The running version, with no network involved. */
+  version: () => invoke<string>("app_version"),
+  /** Ask GitHub. Only ever from a button — see updates.rs. */
+  check: () => invoke<UpdateStatus>("check_for_updates"),
+  open: (url: string) => invoke<void>("open_release_page", { url }),
+};
+
 /** What migrating the legacy citations did. */
 export type CitationMigration = {
   /** Zotero key, and the source note it now points at. */

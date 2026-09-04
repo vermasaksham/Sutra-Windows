@@ -42,6 +42,8 @@ export type VaultOptions = {
   palette?: string;
   /** Which edge the editing toolbar starts on. */
   dock?: "top" | "bottom" | "left" | "right";
+  /** What a check for updates should report, or "fail" to make it error. */
+  update?: { current: string; latest: string; newer: boolean } | "fail";
 };
 
 /**
@@ -153,6 +155,30 @@ export async function useVault(page: Page, options: VaultOptions) {
             };
           case "migration_needed":
             return false;
+
+          case "app_version":
+            return opts.update && opts.update !== "fail"
+              ? opts.update.current
+              : "0.1.0";
+          case "check_for_updates": {
+            if (opts.update === "fail") {
+              throw new Error("could not reach GitHub to check for updates");
+            }
+            if (!opts.update) {
+              return {
+                current: "0.1.0",
+                latest: "0.1.0",
+                newer: false,
+                url: "",
+              };
+            }
+            return {
+              current: opts.update.current,
+              latest: opts.update.latest,
+              newer: opts.update.newer,
+              url: `https://github.com/vermasaksham/Sutra-Windows/releases/tag/v${opts.update.latest}`,
+            };
+          }
 
           case "zotero_search": {
             zotero();

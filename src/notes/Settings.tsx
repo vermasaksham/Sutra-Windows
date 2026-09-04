@@ -1,4 +1,5 @@
 import ReferenceSettingsPanel from "./ReferenceSettings";
+import UpdateCheck from "./UpdateCheck";
 import TypographySettings from "./TypographySettings";
 import {
   PALETTES,
@@ -137,6 +138,13 @@ export default function SettingsDialog({
             References
           </h3>
           <ReferenceSettingsPanel onReport={onReport} />
+        </section>
+
+        <section className="flex flex-col gap-2 border-t border-border pt-4">
+          <h3 className="text-xs font-semibold tracking-wide text-ink-soft uppercase">
+            Version
+          </h3>
+          <UpdateCheck onReport={onReport} />
         </section>
 
         <section className="flex flex-col gap-2 border-t border-border pt-4">

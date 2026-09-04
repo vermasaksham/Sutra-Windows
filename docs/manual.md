@@ -781,7 +781,12 @@ elsewhere on the disk.
 Stated plainly, so none of them is a surprise:
 
 - **The installer is unsigned.** Windows SmartScreen will warn on first run —
-  _More info_ → _Run anyway_. Signing needs a certificate.
+  _More info_ → _Run anyway_. Signing needs a certificate; `docs/releasing.md`
+  says which kind and why it is not just a build step.
+- **Updates are not automatic.** Sutra can tell you a newer version exists —
+  Settings → Version → _Check for updates_ — but it cannot install one, and it
+  never checks on its own. Installing an update means downloading it from the
+  releases page, which leaves your vault untouched.
 - **The API key, if you put it in the settings panel, is stored in plain text**
   in `sutra.json`. Use the `ANTHROPIC_API_KEY` environment variable instead if
   that matters to you.
