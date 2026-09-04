@@ -51,9 +51,15 @@ export default defineConfig({
   ],
 
   webServer: {
-    command: "npm run build && npm run preview -- --port 4173 --strictPort",
-    url: "http://127.0.0.1:4173",
+    // `--host 127.0.0.1` is not decoration. Vite's preview server binds to
+    // "localhost", which on Windows resolves to ::1 first — so the server came
+    // up fine and Playwright, polling 127.0.0.1, waited three minutes and gave
+    // up. Naming the interface makes both ends agree on which localhost.
+    command:
+      "npm run build && npm run preview -- --host 127.0.0.1 --port 4173 --strictPort",
+    url: "http://127.0.0.1:4173/",
     reuseExistingServer: !process.env.CI,
-    timeout: 180_000,
+    // A cold Rust-free build is seconds; this is slack for a cold CI runner.
+    timeout: 240_000,
   },
 });
