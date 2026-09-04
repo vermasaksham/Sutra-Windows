@@ -1802,7 +1802,7 @@ impl Vault {
             }
         }
 
-        sources.sort_by(|a, b| a.title.to_lowercase().cmp(&b.title.to_lowercase()));
+        sources.sort_by_key(|s| s.title.to_lowercase());
         Ok(Overview {
             headings,
             citations,
