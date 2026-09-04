@@ -68,6 +68,9 @@ type Props = {
   } | null;
 };
 
+/** Rows added per step. Enough that scrolling rarely reaches the end. */
+const PAGE = 200;
+
 export default function NoteList({
   notes,
   hits,
@@ -84,6 +87,18 @@ export default function NoteList({
   view,
 }: Props) {
   const searchRef = useRef<HTMLInputElement>(null);
+
+  // How many rows are in the DOM. A vault reaches thousands of notes over a
+  // PhD, and rendering every row cost about twelve DOM nodes each — sixty
+  // thousand nodes for five thousand notes, and several seconds before the
+  // window appeared at all.
+  //
+  // Grown on scroll rather than windowed by height, deliberately. Rows are not
+  // a uniform height — a note may or may not have an excerpt or a folder line —
+  // and height-based virtualisation with a guessed row height puts rows in the
+  // wrong place, which is a worse failure than rendering fewer of them.
+  const [shown, setShown] = useState(PAGE);
+  const sentinel = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (focusSearch === 0) return;
@@ -121,6 +136,26 @@ export default function NoteList({
     () => (hits ? hitRows(hits, notes) : listRows(notes)),
     [hits, notes],
   );
+
+  // Back to the first page whenever this becomes a different list — a new
+  // search, another folder, another tag. Without it, narrowing a search would
+  // keep however many pages the previous list had grown to.
+  const firstId = rows[0]?.id;
+  useEffect(() => setShown(PAGE), [rows.length, firstId]);
+
+  useEffect(() => {
+    const target = sentinel.current;
+    if (!target) return;
+    const observer = new IntersectionObserver((entries) => {
+      if (entries.some((e) => e.isIntersecting)) {
+        setShown((n) => (n >= rows.length ? n : n + PAGE));
+      }
+    });
+    observer.observe(target);
+    return () => observer.disconnect();
+  }, [rows.length]);
+
+  const visible = rows.length > shown ? rows.slice(0, shown) : rows;
 
   return (
     <div className="flex h-full w-list shrink-0 flex-col border-r border-l border-border bg-canvas">
@@ -219,7 +254,7 @@ export default function NoteList({
                 A heading over the only group on screen is noise. */}
             {papers.length > 0 && <GroupLabel>Notes</GroupLabel>}
             <ul className="px-1.5">
-              {rows.map((row) => (
+              {visible.map((row) => (
                 <Row
                   key={row.id}
                   row={row}
@@ -230,6 +265,12 @@ export default function NoteList({
                 />
               ))}
             </ul>
+            {/* Crossing this asks for the next page. It sits inside the scroll
+                container, so the container's own scrolling drives it and no
+                scroll listener is needed. */}
+            {visible.length < rows.length && (
+              <div ref={sentinel} aria-hidden className="h-8" />
+            )}
           </>
         )}
 

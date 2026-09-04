@@ -100,6 +100,16 @@ export async function useVault(page: Page, options: VaultOptions) {
             return notes.map(summary);
           // Served from the same array as list_notes, so a source imported
           // mid-test resolves to a label instead of "not in this vault".
+          // A substring match over title and body. Not FTS5 — that is Rust's
+          // job and has its own tests — but enough that a test can search and
+          // get the note it is looking for.
+          case "search_notes": {
+            const q = String(args.query ?? "").toLowerCase();
+            if (!q) return [];
+            return notes
+              .filter((n) => (n.title + " " + n.body).toLowerCase().includes(q))
+              .map((n) => ({ id: n.id, title: n.title, excerpt: n.excerpt }));
+          }
           case "list_sources":
             return notes.filter((n) => n.type === "source").map(summary);
           case "read_note": {

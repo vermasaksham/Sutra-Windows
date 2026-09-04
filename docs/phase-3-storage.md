@@ -51,10 +51,10 @@ the flat rule still holds.
 
 ## What lives where
 
-| | |
-| --- | --- |
-| Page-level: `icon`, `cover`, `tags`, `title`, `parent`, `position` | YAML frontmatter |
-| Block-level: callouts, maths, chemistry | in-body markdown syntax |
+|                                                                    |                         |
+| ------------------------------------------------------------------ | ----------------------- |
+| Page-level: `icon`, `cover`, `tags`, `title`, `parent`, `position` | YAML frontmatter        |
+| Block-level: callouts, maths, chemistry                            | in-body markdown syntax |
 
 There is no third option for block-level things. A callout or an equation
 occupies a position in the document, and frontmatter has no way to express
@@ -78,10 +78,10 @@ the correct failure: the worst case loses the last edit, never the note.
 The vault is a folder of plain files, so something else will eventually change
 one — a sync client, a text editor, a script.
 
-| In-app buffer | On-disk change | Behaviour |
-| --- | --- | --- |
-| Clean | Any | Reload silently |
-| Dirty | Any | Prompt; the user picks |
+| In-app buffer | On-disk change | Behaviour              |
+| ------------- | -------------- | ---------------------- |
+| Clean         | Any            | Reload silently        |
+| Dirty         | Any            | Prompt; the user picks |
 
 Silently reloading over unsaved work would lose it, and prompting on every
 external change when nothing is at stake would be noise. The dirty flag is the
@@ -127,10 +127,10 @@ exactly where the requirement is strictest.
 
 Measured before adopting, across every block type currently supported:
 
-| | |
-| --- | --- |
+|                                                            |          |
+| ---------------------------------------------------------- | -------- |
 | Round-trip stable (a second save produces identical bytes) | 12 of 12 |
-| Byte-identical to the source on the first pass | 11 of 12 |
+| Byte-identical to the source on the first pass             | 11 of 12 |
 
 The exception is tables, which normalise their column padding once and are
 stable afterwards. Files do not churn on repeated saves.
@@ -145,11 +145,11 @@ The serialiser escapes characters that would otherwise be markdown syntax. This
 is lossless and stable — the text reads back exactly as typed, and a second save
 produces identical bytes — but the raw file is noisier than what was typed:
 
-| Typed | On disk | Reads back as |
-| --- | --- | --- |
-| `[001]` | `\[001\]` | `[001]` |
-| `a_b` | `a\_b` | `a_b` |
-| `<=>` | `&lt;=&gt;` | `<=>` |
+| Typed   | On disk     | Reads back as |
+| ------- | ----------- | ------------- |
+| `[001]` | `\[001\]`   | `[001]`       |
+| `a_b`   | `a\_b`      | `a_b`         |
+| `<=>`   | `&lt;=&gt;` | `<=>`         |
 
 Worth knowing for a vault full of Miller indices. Nothing is lost, and nothing
 churns, but someone opening the file in another editor will see the backslashes.
@@ -175,10 +175,10 @@ Two inputs are rewritten once on first save and stable thereafter. Both render
 identically before and after, so nothing is lost, but the file on disk differs
 from what was typed:
 
-| Typed | On disk |
-| --- | --- |
-| `\$5` | `$5` — the escape is dropped, since the serialiser has no rule for `$` |
-| `$a$$b$` | `$a\n$$b$` — two adjacent inline formulas with no separator |
+| Typed    | On disk                                                                |
+| -------- | ---------------------------------------------------------------------- |
+| `\$5`    | `$5` — the escape is dropped, since the serialiser has no rule for `$` |
+| `$a$$b$` | `$a\n$$b$` — two adjacent inline formulas with no separator            |
 
 The second is a genuine mis-parse rather than a normalisation: the block rule
 claims the middle `$$`. Tightening the pattern to catch it risks breaking
