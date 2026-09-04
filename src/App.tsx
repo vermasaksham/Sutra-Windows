@@ -10,6 +10,7 @@ import AiSettingsDialog from "./notes/AiSettings";
 import SettingsDialog from "./notes/Settings";
 import ZoteroPicker from "./notes/ZoteroPicker";
 import { setCitationStyle } from "./notes/citationStyle";
+import { setTypography, typographyApi } from "./notes/typography";
 import { citedRefs } from "./notes/citedRefs";
 import SourceDetails from "./notes/SourceDetails";
 import ExportMenu from "./notes/ExportMenu";
@@ -261,6 +262,18 @@ export default function App() {
       .config()
       .then((config) => setCitationStyle(config.style))
       .catch(() => setCitationStyle(""));
+  }, [settingsOpen]);
+
+  // Typography, mirrored into the store that writes the CSS variables. Read
+  // again when the settings dialog closes, which is the only thing that can
+  // change it.
+  useEffect(() => {
+    typographyApi
+      .get()
+      .then(setTypography)
+      .catch(() => {
+        /* No backend, or none stored: the stylesheet's own defaults stand. */
+      });
   }, [settingsOpen]);
 
   /**

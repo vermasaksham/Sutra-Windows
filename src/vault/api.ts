@@ -410,6 +410,15 @@ export const zoteroApi = {
     }),
   /** Re-render every linked source in the current style. Returns how many. */
   restyle: () => invoke<number>("restyle_sources"),
+  /**
+   * Connect an account from the key alone.
+   *
+   * The user ID is looked up rather than typed: Zotero's API needs a numeric
+   * id, and a username — the obvious thing to enter — answers 404 in a way
+   * that reads like an empty library.
+   */
+  connect: (apiKey: string) =>
+    invoke<ReferenceConfig>("connect_zotero_account", { apiKey }),
 };
 
 export type VaultChanged = { changed: string[] };

@@ -21,7 +21,7 @@
 
 use std::time::Duration;
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use crate::error::{Result, SutraError};
 use crate::references::{
@@ -33,7 +33,7 @@ use crate::references::{
 const LOCAL_BASE: &str = "http://127.0.0.1:23119";
 
 /// Zotero\'s web service.
-const WEB_BASE: &str = "https://api.zotero.org";
+pub const WEB_BASE: &str = "https://api.zotero.org";
 
 /// The header Zotero\'s web API authenticates with.
 const KEY_HEADER: &str = "Zotero-API-Key";
@@ -367,6 +367,97 @@ impl ReferenceProvider for Zotero {
     }
 }
 
+/// Who an API key belongs to.
+///
+/// The reason this exists: Zotero's own documentation warns that "user IDs are
+/// different from usernames", and the API answers a username with a 404 that
+/// reads like an empty library. Asking a person to find a number on a settings
+/// page and paste it correctly is a step that will go wrong, so the app does
+/// not ask — it takes the key and looks the number up.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Identity {
+    pub user_id: String,
+    pub username: Option<String>,
+    /// Whether the key may read the library at all. A key created with only
+    /// write access, or only group access, connects and then finds nothing.
+    pub can_read: bool,
+}
+
+impl Zotero {
+    /// Ask Zotero who a key belongs to.
+    ///
+    /// Deliberately an inherent method rather than part of the provider trait:
+    /// it takes a key and no library, which is a question only the web service
+    /// can be asked. The local connector has no key and no answer.
+    pub fn identify(base: &str, api_key: &str) -> Result<Identity> {
+        let key = api_key.trim();
+        if key.is_empty() {
+            return Err(SutraError::Zotero("no API key given".into()));
+        }
+
+        // The key is in the path here rather than a header, because that is the
+        // endpoint Zotero documents for this. It is the user's own key going to
+        // the service that issued it.
+        let url = format!("{}/keys/{}", base, urlencode(key));
+        let agent: ureq::Agent = ureq::Agent::config_builder()
+            .timeout_global(Some(TIMEOUT))
+            .build()
+            .into();
+
+        let body = agent
+            .get(&url)
+            .call()
+            .map_err(|e| {
+                SutraError::Zotero(describe(
+                    &e,
+                    &Flavour::Account {
+                        user_id: String::new(),
+                        api_key: key.to_string(),
+                    },
+                ))
+            })?
+            .body_mut()
+            .read_to_string()
+            .map_err(|e| SutraError::Zotero(e.to_string()))?;
+
+        let info: KeyInfo =
+            serde_json::from_str(&body).map_err(|e| SutraError::Zotero(e.to_string()))?;
+
+        Ok(Identity {
+            user_id: info.user_id.to_string(),
+            username: info.username.filter(|u| !u.trim().is_empty()),
+            can_read: info.access.user.library || info.access.user.files,
+        })
+    }
+}
+
+/// What `/keys/<key>` answers with.
+#[derive(Debug, Deserialize)]
+struct KeyInfo {
+    /// A JSON number, not a string.
+    #[serde(rename = "userID")]
+    user_id: u64,
+    #[serde(default)]
+    username: Option<String>,
+    #[serde(default)]
+    access: KeyAccess,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct KeyAccess {
+    #[serde(default)]
+    user: UserAccess,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct UserAccess {
+    #[serde(default)]
+    library: bool,
+    #[serde(default)]
+    files: bool,
+}
+
 /// The URI that selects one item in the Zotero desktop window.
 ///
 /// Its own function so the shape is pinned by a test: launching a process is
@@ -587,8 +678,21 @@ fn describe(error: &ureq::Error, flavour: &Flavour) -> String {
         },
         // A wrong or revoked key is the likely cause and the message from the
         // server is not obviously about that, so say it.
+        // The three failures a person actually hits, told apart. One message
+        // covering all of them is what makes this feature feel broken rather
+        // than misconfigured: "could not connect" gives you nothing to change.
         ureq::Error::StatusCode(403) => {
-            "Zotero refused the API key. Check the key and the user ID in Settings.".to_string()
+            "Zotero rejected the API key. Check it was copied whole, and that it \
+             still exists at zotero.org/settings/keys."
+                .to_string()
+        }
+        ureq::Error::StatusCode(404) => {
+            "Zotero has no library with that user ID. It is the number on \
+             zotero.org/settings/keys — not your username."
+                .to_string()
+        }
+        ureq::Error::StatusCode(429) => {
+            "Zotero is rate-limiting this key. Wait a minute and try again.".to_string()
         }
         other => other.to_string(),
     }
@@ -1094,5 +1198,120 @@ mod tests {
         // Something that only looks like an entity is left alone rather than
         // silently eaten.
         assert_eq!(html_to_markdown("cost &lt; 5"), "cost < 5");
+    }
+
+    /// A stub that answers with a chosen status code.
+    fn stub_status(code: u16, body: &'static str) -> (String, std::thread::JoinHandle<String>) {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let base = format!("http://{}", listener.local_addr().unwrap());
+        let handle = std::thread::spawn(move || {
+            let (mut socket, _) = listener.accept().unwrap();
+            let mut buffer = [0u8; 2048];
+            let read = socket.read(&mut buffer).unwrap_or(0);
+            let request = String::from_utf8_lossy(&buffer[..read]).to_string();
+            let response = format!(
+                "HTTP/1.1 {} X\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                code,
+                body.len(),
+                body
+            );
+            let _ = socket.write_all(response.as_bytes());
+            request
+        });
+        (base, handle)
+    }
+
+    const KEY_INFO: &str = r#"{"key":"P9NiFoyLeZu2bZNvvuQPDWsd","userID":475425,
+      "username":"saksham",
+      "access":{"user":{"library":true,"files":true,"notes":true,"write":false}}}"#;
+
+    #[test]
+    fn a_key_tells_us_its_own_user_id() {
+        // The fix for the connection that would not work. Zotero's own docs
+        // warn that user IDs are not usernames, and typing the wrong one gives
+        // a 404 that reads like an empty library — so the app stops asking and
+        // looks the number up from the key.
+        let (base, handle) = stub_status(200, KEY_INFO);
+        let who = Zotero::identify(&base, "P9NiFoyLeZu2bZNvvuQPDWsd").unwrap();
+        let request = handle.join().unwrap();
+
+        assert!(
+            request.contains("GET /keys/P9NiFoyLeZu2bZNvvuQPDWsd"),
+            "got {request}"
+        );
+        // A JSON number has to become the string the URLs are built from; a
+        // quoted "475425" would be a different thing to serialise back.
+        assert_eq!(who.user_id, "475425");
+        assert_eq!(who.username.as_deref(), Some("saksham"));
+        assert!(who.can_read);
+    }
+
+    #[test]
+    fn a_key_that_cannot_read_the_library_says_so() {
+        // This key connects and then finds nothing, which is the worst kind of
+        // failure to debug. It is caught at the point of connecting instead.
+        let (base, handle) = stub_status(
+            200,
+            r#"{"userID":1,"access":{"user":{"library":false,"files":false,"write":true}}}"#,
+        );
+        let who = Zotero::identify(&base, "k").unwrap();
+        handle.join().unwrap();
+        assert!(!who.can_read);
+    }
+
+    #[test]
+    fn a_missing_key_never_reaches_the_network() {
+        // No stub server: connecting would fail rather than return this error.
+        let error = Zotero::identify("http://127.0.0.1:1", "   ").unwrap_err();
+        assert!(error.to_string().contains("no API key"), "got {error}");
+    }
+
+    #[test]
+    fn each_failure_says_which_one_it_is() {
+        // One message for every failure is what made this feel broken rather
+        // than misconfigured. Each of these names the thing to change.
+        let (base, handle) = stub_status(403, "{}");
+        let error = Zotero::identify(&base, "wrong").unwrap_err().to_string();
+        handle.join().unwrap();
+        assert!(error.contains("rejected the API key"), "got {error}");
+
+        let (base, handle) = stub_status(404, "{}");
+        let error = Zotero::new(
+            base,
+            Flavour::Account {
+                user_id: "saksham".into(),
+                api_key: "k".into(),
+            },
+        )
+        .search("x", 5)
+        .unwrap_err()
+        .to_string();
+        handle.join().unwrap();
+        assert!(
+            error.contains("not your username"),
+            "a username in the user ID field is the likely mistake, and the \
+             message has to name it: got {error}"
+        );
+    }
+
+    #[test]
+    fn the_account_reports_a_network_failure_differently_from_the_connector() {
+        // "Is Zotero running?" is useless advice when the request was going to
+        // zotero.org.
+        let local = Zotero::local().availability().reason.unwrap();
+        assert!(local.contains("Is it running"), "got {local}");
+
+        let account = Zotero::new(
+            "http://127.0.0.1:1".into(),
+            Flavour::Account {
+                user_id: "1".into(),
+                api_key: "k".into(),
+            },
+        )
+        .availability()
+        .reason
+        .unwrap();
+        assert!(account.contains("zotero.org"), "got {account}");
+        assert!(!account.contains("Is it running"), "got {account}");
     }
 }

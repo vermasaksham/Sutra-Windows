@@ -8,6 +8,12 @@
 
 .sutra-prose {
   outline: none;
+  /* The note is set in the reading font, which defaults to the interface one
+     — so a person who wants to write in a serif gets that without their
+     sidebar turning into a broadsheet. */
+  font-family: var(--font-reading);
+  font-size: var(--text-size-body);
+  line-height: var(--leading-body);
   /* Room to click below the last block without hunting for it. */
   padding-block-end: 30vh;
 }

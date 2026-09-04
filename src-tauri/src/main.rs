@@ -19,6 +19,7 @@ mod references;
 mod related;
 mod state;
 mod tags;
+mod typography;
 mod vault;
 mod views;
 mod watcher;
@@ -67,6 +68,11 @@ fn main() {
             commands::reference_status,
             commands::reference_config,
             commands::configure_references,
+            commands::connect_zotero_account,
+            commands::typography,
+            commands::set_typography,
+            commands::import_font,
+            commands::remove_font,
             commands::restyle_sources,
             commands::zotero_detail,
             commands::zotero_open,

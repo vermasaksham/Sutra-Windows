@@ -1,4 +1,5 @@
 import ReferenceSettingsPanel from "./ReferenceSettings";
+import TypographySettings from "./TypographySettings";
 import {
   PALETTES,
   useTheme,
@@ -122,6 +123,13 @@ export default function SettingsDialog({
             The palette and the mode are separate: every palette is drawn for
             both light and dark, so switching one never undoes the other.
           </p>
+        </section>
+
+        <section className="flex flex-col gap-2 border-t border-border pt-4">
+          <h3 className="text-xs font-semibold tracking-wide text-ink-soft uppercase">
+            Typography
+          </h3>
+          <TypographySettings onReport={onReport} />
         </section>
 
         <section className="flex flex-col gap-2 border-t border-border pt-4">

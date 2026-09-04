@@ -244,12 +244,28 @@ DOI or journal. Each result offers three different things:
 | Connection                  | What it needs                                                                  | What leaves your machine                                   |
 | --------------------------- | ------------------------------------------------------------------------------ | ---------------------------------------------------------- |
 | **Zotero on this computer** | Zotero running, with _Allow other applications…_ on in its Settings → Advanced | Nothing. This is the default.                              |
-| **My Zotero account**       | Your numeric user ID and an API key from `zotero.org/settings/keys`            | Your search terms, and the library entries that come back. |
+| **My Zotero account**       | An API key from `zotero.org/settings/keys` — nothing else                      | Your search terms, and the library entries that come back. |
 
 The account connection works with Zotero closed, and on a machine where it is
 not installed at all — which is the point of it. It is off unless you configure
 it, and a half-configured account (box ticked, key not yet pasted) quietly keeps
 using the local connector rather than failing on every keystroke.
+
+**Paste the key and press Connect. That is the whole setup.** Sutra asks Zotero
+who the key belongs to and fills in your numeric user ID itself. You never have
+to find it — which matters, because the API needs a _number_ and Zotero's own
+documentation warns that user IDs are not usernames. Entering a username
+produces a 404 that reads exactly like an empty library, and that is the single
+most likely reason a connection appears not to work.
+
+If something is still wrong, the panel says which thing:
+
+| Message                          | What to change                                           |
+| -------------------------------- | -------------------------------------------------------- |
+| _Zotero rejected the API key_    | The key. Check it copied whole, and still exists.        |
+| _no read access to your library_ | Make a new key with **Allow library access** ticked.     |
+| _could not reach zotero.org_     | The network, not the key.                                |
+| _no library with that user ID_   | A stored ID from an older version — press Connect again. |
 
 A key typed into the panel is stored in plain text in the app's config file.
 Setting the `ZOTERO_API_KEY` environment variable instead stores nothing at all,
@@ -548,6 +564,55 @@ window would actually look like rather than a generic sample.
 The quick Light / Dark / System switch stays at the bottom of the rail, since
 that is the one appearance choice made often enough to deserve a permanent
 control.
+
+### Typography
+
+**Settings → Typography** sets two fonts independently, because they are two
+different jobs:
+
+- **Reading font** — the note itself.
+- **Interface font** — the rail, the list and the menus.
+
+Someone who wants to write in a serif rarely wants their sidebar in one, and
+tying the two together is why so many editors are set in a font nobody chose.
+Below them: text size, line spacing and line width, with a specimen underneath
+showing real subscripts and units rather than lorem ipsum — so you can see
+whether Sb₂Se₃ and W m⁻¹K⁻¹ survive a font before committing to it.
+
+Pick from the list — Sutra's own Source Sans 3, plus the faces Windows ships —
+or choose _Another font…_ and type any family name your system knows.
+
+### Bringing your own fonts
+
+Name the font, press **Choose a file…**, and pick a `.woff2`, `.woff`, `.ttf`
+or `.otf`. The file is **copied into Sutra's own folder**, not linked: a font
+referenced where it happens to sit today stops working the moment that folder
+moves, and nothing would be able to tell you why. The copy lives beside the
+app's settings rather than in the vault, for the same reason the theme does — a
+typeface belongs to the screen you are looking at, not to your notes, so
+syncing a vault between two machines will not drag one machine's typeface onto
+the other.
+
+Imported fonts appear in both pickers. **remove** deletes the file, and
+anything that was using it falls back to Sutra's own font rather than to a name
+nothing can resolve.
+
+### The editing toolbar
+
+A toolbar sits with the note, carrying undo and redo, bold, italic, underline,
+strikethrough and inline code, the three heading levels and body text, the
+three list kinds, quote, code block, divider, equation, chemical equation,
+table, and clear formatting.
+
+It shows only what the editor can actually do where your caret is — a button
+that would do nothing is not drawn, because a dead button reads as a bug in the
+document rather than in the toolbar.
+
+**Drag the handle** — the dots at its end — to any edge: top, bottom, left or
+right. A shaded band shows where it will land before you let go, and the choice
+is remembered between launches. It snaps to an edge rather than floating free,
+so it can never end up half off-screen where you would have to rescue it.
+Docked left or right it sits beside the note, never over the sidebar.
 
 **Two things worth knowing.**
 

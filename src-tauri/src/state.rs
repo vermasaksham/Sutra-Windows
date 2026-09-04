@@ -3,6 +3,7 @@
 use crate::ai::{self, Assistant as _, Off};
 use crate::error::{Result, SutraError};
 use crate::index::Index;
+use crate::typography::Typography;
 use crate::vault::Vault;
 use crate::watcher::VaultWatcher;
 use crate::zotero::Zotero;
@@ -23,6 +24,8 @@ struct Config {
     ai: AiSettings,
     #[serde(default)]
     references: ReferenceSettings,
+    #[serde(default)]
+    typography: Typography,
 }
 
 /// Which Zotero to talk to, and how citations should read.
@@ -392,6 +395,27 @@ pub fn set_reference_settings(
     };
     save_config(app, &config);
     reference_config(app)
+}
+
+/// How the app is set in type, always in a range that can be read.
+pub fn typography(app: &AppHandle) -> Typography {
+    read_config(app).unwrap_or_default().typography.clamped()
+}
+
+/// Save it, clamping on the way in.
+pub fn set_typography(app: &AppHandle, next: Typography) -> Typography {
+    let mut config = read_config(app).unwrap_or_default();
+    config.typography = next.clamped();
+    save_config(app, &config);
+    config.typography
+}
+
+/// Where imported fonts are kept.
+pub fn font_dir(app: &AppHandle) -> Option<PathBuf> {
+    app.path()
+        .app_config_dir()
+        .ok()
+        .map(|d| crate::typography::dir_in(&d))
 }
 
 /// The stored AI settings, or the defaults when there are none.

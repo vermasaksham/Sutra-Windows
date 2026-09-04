@@ -58,6 +58,26 @@ pub fn serve(
         return not_found();
     };
 
+    // Fonts the user imported live beside sutra.json rather than in the vault,
+    // because a typeface is a property of this screen and not of the notes. So
+    // they are served from there, and never from the vault's own tree.
+    if let Some(file) = reference.strip_prefix("fonts/") {
+        let Some(dir) = crate::state::font_dir(app) else {
+            return not_found();
+        };
+        let Ok(bytes) = crate::typography::read(&dir, file) else {
+            return not_found();
+        };
+        return Response::builder()
+            .status(StatusCode::OK)
+            .header("Content-Type", crate::typography::font_content_type(file))
+            // The stored name carries a fresh ULID per import, so a given file
+            // never changes and the webview need not ask twice.
+            .header("Cache-Control", "public, max-age=31536000, immutable")
+            .body(bytes)
+            .unwrap_or_else(|_| not_found());
+    }
+
     let state = app.state::<AppState>();
     let Ok(bytes) = state.with_vault(|vault| vault.read_attachment(&reference)) else {
         // Missing, refused, or no vault open. All indistinguishable to the

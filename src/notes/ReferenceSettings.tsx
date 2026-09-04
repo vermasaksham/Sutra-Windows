@@ -44,6 +44,23 @@ export default function ReferenceSettingsPanel({
 
   const custom = !CITATION_STYLES.some((s) => s.id === config.style);
 
+  async function connect() {
+    setBusy(true);
+    setStatus(null);
+    try {
+      const next = await zoteroApi.connect(key.trim());
+      setConfig(next);
+      setKey("");
+      // Connect means connected: the button used to say "Save and test" and
+      // only save, which left the one question the user had unanswered.
+      setStatus(await zoteroApi.status());
+    } catch (cause) {
+      onReport("Could not connect to Zotero", cause);
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function save(next: ReferenceConfig, sendKey: boolean) {
     setBusy(true);
     setStatus(null);
@@ -90,24 +107,6 @@ export default function ReferenceSettingsPanel({
       {config.account && (
         <div className="flex flex-col gap-2 rounded-lg border border-border bg-canvas p-3">
           <label className="flex flex-col gap-1 text-sm">
-            <span className="text-ink-soft">User ID</span>
-            <input
-              value={config.userId ?? ""}
-              onChange={(e) => setConfig({ ...config, userId: e.target.value })}
-              onBlur={() => void save(config, false)}
-              placeholder="48291"
-              className="rounded border border-border bg-surface px-2 py-1 text-sm text-ink outline-none focus:border-accent"
-            />
-            <span className="text-xs text-ink-muted">
-              The number — not your username — from{" "}
-              <code className="font-mono text-xs">
-                zotero.org/settings/keys
-              </code>
-              .
-            </span>
-          </label>
-
-          <label className="flex flex-col gap-1 text-sm">
             <span className="text-ink-soft">
               API key
               {config.keyInEnvironment && (
@@ -124,18 +123,20 @@ export default function ReferenceSettingsPanel({
               onChange={(e) => setKey(e.target.value)}
               placeholder={
                 config.hasKey
-                  ? "A key is stored — type to replace it"
-                  : "Paste a key"
+                  ? "A key is stored — paste a new one to replace it"
+                  : "Paste your key from zotero.org/settings/keys"
               }
-              className="rounded border border-border bg-surface px-2 py-1 text-sm text-ink outline-none focus:border-accent"
+              aria-label="Zotero API key"
+              className="rounded border border-border bg-surface px-2 py-1 font-mono text-sm text-ink outline-none focus:border-accent"
             />
             <span className="text-xs text-ink-muted">
               Create one at{" "}
               <code className="font-mono text-xs">
                 zotero.org/settings/keys/new
               </code>{" "}
-              — read-only permission is enough. A key typed here is stored in
-              plain text in the app&rsquo;s config file. Setting{" "}
+              with <strong>Allow library access</strong> ticked. Read-only is
+              enough — Sutra never writes to your library. A key typed here is
+              stored in plain text in the app&rsquo;s config file; setting{" "}
               <code className="font-mono text-xs">ZOTERO_API_KEY</code> instead
               stores nothing at all.
             </span>
@@ -144,30 +145,52 @@ export default function ReferenceSettingsPanel({
           <div className="flex flex-wrap items-center gap-2">
             <button
               type="button"
-              disabled={busy}
-              onClick={() => void save(config, key.trim() !== "")}
+              disabled={busy || key.trim() === ""}
+              onClick={() => void connect()}
               className="rounded-lg bg-accent px-3 py-1.5 text-sm font-medium text-surface transition-opacity duration-150 ease-out hover:opacity-90 disabled:opacity-50"
             >
-              {busy ? "Saving…" : "Save and test"}
+              {busy ? "Connecting…" : "Connect"}
             </button>
-            <button
-              type="button"
-              disabled={busy}
-              onClick={() => {
-                setBusy(true);
-                zoteroApi
-                  .status()
-                  .then(setStatus)
-                  .catch((cause) =>
-                    onReport("Could not test the connection", cause),
-                  )
-                  .finally(() => setBusy(false));
-              }}
-              className="rounded-lg border border-border px-3 py-1.5 text-sm text-ink-soft transition-colors duration-150 ease-out hover:border-accent hover:text-accent disabled:opacity-50"
-            >
-              Test connection
-            </button>
+            {config.userId && (
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => {
+                  setBusy(true);
+                  setStatus(null);
+                  zoteroApi
+                    .status()
+                    .then(setStatus)
+                    .catch((cause) =>
+                      onReport("Could not test the connection", cause),
+                    )
+                    .finally(() => setBusy(false));
+                }}
+                className="rounded-lg border border-border px-3 py-1.5 text-sm text-ink-soft transition-colors duration-150 ease-out hover:border-accent hover:text-accent disabled:opacity-50"
+              >
+                Test connection
+              </button>
+            )}
           </div>
+
+          {/*
+            Shown, not asked for. The user ID is the thing that was going wrong:
+            the API wants a number, Zotero's own docs warn it is "different from
+            usernames", and the obvious mistake answers 404 in a way that looks
+            like an empty library. So the app reads it off the key and just
+            reports what it found.
+          */}
+          {config.userId ? (
+            <p className="text-xs text-highlight">
+              Connected as user{" "}
+              <code className="font-mono text-xs">{config.userId}</code>.
+            </p>
+          ) : (
+            <p className="text-xs text-ink-muted">
+              Paste the key and press Connect. Sutra reads your user ID from the
+              key — you do not need to find it yourself.
+            </p>
+          )}
         </div>
       )}
 

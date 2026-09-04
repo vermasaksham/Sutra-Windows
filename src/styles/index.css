@@ -25,6 +25,7 @@
  * `text-ink-soft` instead of the doubled-up `text-text-primary`.
  */
 @theme inline {
+  --font-reading: var(--font-reading);
   --color-rail: var(--rail);
   --color-canvas: var(--canvas);
   --color-surface: var(--surface);

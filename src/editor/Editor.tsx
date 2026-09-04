@@ -1,5 +1,7 @@
 import { useEffect } from "react";
 import { EditorContent, useEditor } from "@tiptap/react";
+import Toolbar from "./Toolbar";
+import { isVertical, useDock } from "./toolbarDock";
 import type { Editor as TiptapEditor } from "@tiptap/core";
 import { DragHandle } from "@tiptap/extension-drag-handle-react";
 import { extensions } from "./extensions";
@@ -17,6 +19,9 @@ type Props = {
 };
 
 export default function Editor({ body, onChange, onReady }: Props) {
+  const dock = useDock();
+  const vertical = isVertical(dock);
+
   const editor = useEditor({
     extensions,
     // Content is loaded in onCreate instead of here: parsing markdown needs the
@@ -71,7 +76,17 @@ export default function Editor({ body, onChange, onReady }: Props) {
         </span>
       </DragHandle>
 
+      {/*
+        A horizontal toolbar sits in the flow, above or below the note, so it
+        never covers the line being written. A vertical one is fixed to the
+        side, where there is no flow to sit in. The dock decides which.
+      */}
+      {!vertical && dock === "top" && <Toolbar editor={editor} />}
+
       <EditorContent editor={editor} />
+
+      {!vertical && dock === "bottom" && <Toolbar editor={editor} />}
+      {vertical && <Toolbar editor={editor} />}
     </>
   );
 }

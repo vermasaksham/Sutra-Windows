@@ -22,6 +22,7 @@ use crate::state::{self, AiSettings, AiStatus, AppState};
 use crate::tags::Suggestion;
 use crate::vault::{MigrationPlan, NoteDoc, NoteSummary, Retag, TagChange};
 use crate::views::Query;
+use crate::zotero::{WEB_BASE as ZOTERO_WEB_BASE, Zotero};
 use serde::Serialize;
 use std::collections::HashMap;
 use tauri::{AppHandle, State};
@@ -300,6 +301,41 @@ fn cache_current_style(app: &AppHandle, vault: &crate::vault::Vault, id: &str, k
     }
 }
 
+/// Connect a Zotero account from the key alone.
+///
+/// Takes the key, asks Zotero whose it is, stores both, and reports back. This
+/// replaces the step that was failing: the API needs a numeric user ID, Zotero
+/// documents that it is "different from usernames", and a username produces a
+/// 404 that reads like an empty library. Nobody should have to know that.
+///
+/// A key with no read access to the personal library is refused here rather
+/// than saved, because it would connect successfully and then find nothing —
+/// the worst kind of failure to debug.
+#[tauri::command]
+pub fn connect_zotero_account(
+    app: AppHandle,
+    api_key: String,
+) -> Result<crate::state::ReferenceConfig> {
+    let identity = Zotero::identify(ZOTERO_WEB_BASE, &api_key)?;
+    if !identity.can_read {
+        return Err(SutraError::Zotero(
+            "That key has no read access to your library. Create one at \
+             zotero.org/settings/keys with \"Allow library access\" ticked."
+                .into(),
+        ));
+    }
+
+    let settings = crate::state::reference_settings(&app);
+    Ok(crate::state::set_reference_settings(
+        &app,
+        true,
+        Some(identity.user_id),
+        Some(api_key),
+        settings.style,
+        settings.locale,
+    ))
+}
+
 /// Everything about one item, collections and attachments included.
 #[tauri::command]
 pub fn zotero_detail(app: AppHandle, key: String) -> Result<ItemDetail> {
@@ -566,6 +602,76 @@ pub fn create_literature_note(
         index.upsert(&doc.summary, &doc.body)?;
         Ok(doc.summary)
     })
+}
+
+/// How the app is set in type.
+#[tauri::command]
+pub fn typography(app: AppHandle) -> crate::typography::Typography {
+    crate::state::typography(&app)
+}
+
+/// Save the typography. Sizes are clamped to a readable range on the way in.
+#[tauri::command]
+pub fn set_typography(
+    app: AppHandle,
+    typography: crate::typography::Typography,
+) -> crate::typography::Typography {
+    crate::state::set_typography(&app, typography)
+}
+
+/// Bring a font file in from outside.
+///
+/// Copied rather than referenced, for the same reason attachments are: a font
+/// that lives somewhere else on the disk stops working the moment that folder
+/// moves, and there would be no way to say why. The picker opens on the Rust
+/// side, so no filesystem path crosses the boundary here either.
+#[tauri::command]
+pub fn import_font(
+    app: AppHandle,
+    family: String,
+) -> Result<Option<crate::typography::Typography>> {
+    let Some(file) = app
+        .dialog()
+        .file()
+        .add_filter("Fonts", &["woff2", "woff", "ttf", "otf"])
+        .blocking_pick_file()
+    else {
+        return Ok(None);
+    };
+    let path = file
+        .into_path()
+        .map_err(|e| SutraError::NotADirectory(e.to_string()))?;
+    let dir = crate::state::font_dir(&app)
+        .ok_or_else(|| SutraError::NotADirectory("no config directory".into()))?;
+
+    let added = crate::typography::import(&dir, &path, &family)?;
+    let mut settings = crate::state::typography(&app);
+    // Replacing a family rather than stacking a second copy of it: importing
+    // the same font twice is a correction, not a collection.
+    settings.fonts.retain(|f| f.family != added.family);
+    settings.fonts.push(added);
+    Ok(Some(crate::state::set_typography(&app, settings)))
+}
+
+/// Forget an imported font. The file is deleted; nothing else refers to it.
+#[tauri::command]
+pub fn remove_font(app: AppHandle, family: String) -> crate::typography::Typography {
+    let mut settings = crate::state::typography(&app);
+    if let Some(dir) = crate::state::font_dir(&app) {
+        for font in settings.fonts.iter().filter(|f| f.family == family) {
+            let _ = std::fs::remove_file(dir.join(&font.file));
+        }
+    }
+    settings.fonts.retain(|f| f.family != family);
+    // A family that was in use and is now gone falls back to the app's own
+    // font rather than leaving a name nothing can resolve.
+    if settings.reading == family {
+        settings.reading.clear();
+    }
+    if settings.interface == family {
+        settings.interface.clear();
+    }
+    crate::state::set_typography(&app, settings)
 }
 
 /// Every tag in the vault, as written, with how many notes carry it.

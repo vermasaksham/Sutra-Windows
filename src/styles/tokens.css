@@ -285,7 +285,12 @@
     sans-serif;
   --font-mono: ui-monospace, "Cascadia Mono", "Consolas", monospace;
 
-  --text-size-body: 1rem; /* 16px */
+  /* The reading font falls through to the interface font, so choosing only
+     one of the two is a complete answer. Both are overwritten at runtime by
+     notes/typography.ts when the user has set them. */
+  --font-reading: var(--font-body);
+
+  --text-size-body: 16px;
   --leading-body: 1.65;
 
   /* Layout */
