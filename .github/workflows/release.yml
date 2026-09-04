@@ -1,0 +1,80 @@
+# Cut a public release from a version tag.
+#
+# The point of this workflow is a link that does not expire and does not ask
+# the person clicking it to sign in. A CI artifact is neither: it is gone after
+# ninety days and it is only downloadable by someone with an account and access
+# to the repository, which is the wrong thing to hand to a colleague who just
+# wants to try the app.
+#
+#   git tag v0.1.0 && git push origin v0.1.0
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+# Only the publish job writes, and only to create the release.
+permissions:
+  contents: read
+
+jobs:
+  # The whole Windows workflow — the same checks every commit gets, and the
+  # same installer build. Its artifact is what gets attached below, so the
+  # binary people download is the binary the tests passed against.
+  verify:
+    uses: ./.github/workflows/windows.yml
+
+  publish:
+    name: Publish
+    needs: verify
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      # Three files carry the version, and an installer whose internal version
+      # disagrees with the tag on its download page is a trap: it installs as
+      # one version and is reported as another, and the mismatch surfaces
+      # months later as a bug that cannot be reproduced.
+      - name: The tag and the version must agree
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          for file in \
+            "package.json:$(node -p 'require("./package.json").version')" \
+            "src-tauri/tauri.conf.json:$(node -p 'require("./src-tauri/tauri.conf.json").version')" \
+            "src-tauri/Cargo.toml:$(sed -n 's/^version = "\(.*\)"/\1/p' src-tauri/Cargo.toml | head -1)"
+          do
+            name="${file%%:*}"
+            version="${file##*:}"
+            if [ "$version" != "$tag" ]; then
+              echo "::error::$name says $version, the tag says $tag"
+              exit 1
+            fi
+            echo "$name: $version"
+          done
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: sutra-windows-unsigned
+          path: installers
+
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          notes="docs/releases/${GITHUB_REF_NAME}.md"
+          if [ -f "$notes" ]; then
+            gh release create "$GITHUB_REF_NAME" \
+              installers/msi/*.msi installers/nsis/*.exe \
+              --title "Sutra $GITHUB_REF_NAME" \
+              --notes-file "$notes"
+          else
+            # No notes written for this tag. Better a release with generated
+            # notes than no release, and better to say so than to fail quietly.
+            echo "::warning::no $notes; falling back to generated notes"
+            gh release create "$GITHUB_REF_NAME" \
+              installers/msi/*.msi installers/nsis/*.exe \
+              --title "Sutra $GITHUB_REF_NAME" \
+              --generate-notes
+          fi
