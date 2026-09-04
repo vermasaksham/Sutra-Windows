@@ -1,6 +1,13 @@
-import { Fragment, useEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useLayoutEffect, useState } from "react";
 import type { Editor } from "@tiptap/react";
-import { isVertical, nearestDock, setDock, useDock } from "./toolbarDock";
+import type { Box } from "./toolbarDock";
+import {
+  isVertical,
+  nearestDock,
+  placement,
+  setDock,
+  useDock,
+} from "./toolbarDock";
 
 /**
  * The editing toolbar.
@@ -15,6 +22,12 @@ import { isVertical, nearestDock, setDock, useDock } from "./toolbarDock";
  * It docks to one of four edges, dragged by the handle. Not free positioning:
  * a toolbar that can go anywhere ends up half off-screen, and then it has to
  * be rescued.
+ *
+ * Whichever edge it is on, it stays with the reader while the note scrolls.
+ * The top dock does that by being `sticky`, so it can start in the flow
+ * between the tags and the first line and only pin itself once the note
+ * passes under it. The other three are `fixed`, measured against the note
+ * column — see `placement` for why the measurement is needed.
  */
 
 type Item = {
@@ -233,12 +246,90 @@ const ITEMS: Item[] = [
   },
 ];
 
+/** The scroll container the note lives in, and the window around it. */
+type Frame = {
+  column: Box | null;
+  viewport: { width: number; height: number };
+};
+
+const NO_FRAME: Frame = {
+  column: null,
+  viewport: { width: 0, height: 0 },
+};
+
+function same(a: Frame, b: Frame): boolean {
+  if (a.viewport.width !== b.viewport.width) return false;
+  if (a.viewport.height !== b.viewport.height) return false;
+  if (!a.column || !b.column) return a.column === b.column;
+  return (
+    a.column.left === b.column.left &&
+    a.column.right === b.column.right &&
+    a.column.top === b.column.top &&
+    a.column.bottom === b.column.bottom
+  );
+}
+
+/**
+ * Measure the note's scroll container, and keep the measurement current.
+ *
+ * The container is what the floating docks are positioned against, because
+ * it is the box the note is actually in: its left edge is where the sidebar
+ * ends, and its visible height is what "the middle of the page" means while
+ * reading. Its rectangle does not change as the note scrolls — the note moves
+ * inside it — so there is no scroll listener here. A `ResizeObserver` is
+ * enough, and it catches the two things that do move the edges: the window
+ * changing size, and a side panel opening or closing.
+ */
+function useColumn(element: HTMLElement | null): Frame {
+  const [frame, setFrame] = useState<Frame>(NO_FRAME);
+
+  useLayoutEffect(() => {
+    const column = element?.closest<HTMLElement>(".sutra-main") ?? null;
+    if (!column) {
+      setFrame((current) => (current === NO_FRAME ? current : NO_FRAME));
+      return;
+    }
+
+    const measure = () => {
+      const rect = column.getBoundingClientRect();
+      const next: Frame = {
+        column: {
+          left: rect.left,
+          right: rect.right,
+          top: rect.top,
+          bottom: rect.bottom,
+          width: rect.width,
+          height: rect.height,
+        },
+        viewport: { width: window.innerWidth, height: window.innerHeight },
+      };
+      // Only re-render when the numbers actually moved. The observer fires on
+      // layout passes this component itself causes, and handing back a fresh
+      // object every time would be a render loop.
+      setFrame((current) => (same(current, next) ? current : next));
+    };
+
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(column);
+    window.addEventListener("resize", measure);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener("resize", measure);
+    };
+  }, [element]);
+
+  return frame;
+}
+
 export default function Toolbar({ editor }: { editor: Editor | null }) {
   const dock = useDock();
   const [, bump] = useState(0);
   const [dragging, setDragging] = useState(false);
   const [hint, setHint] = useState<null | ReturnType<typeof nearestDock>>(null);
-  const bar = useRef<HTMLDivElement>(null);
+  // State rather than a ref: the measurement below has to re-run when the
+  // element appears, and a ref assignment does not wake an effect.
+  const [bar, setBar] = useState<HTMLDivElement | null>(null);
 
   // Re-render on every selection or document change, so the pressed states and
   // the enabled states are about where the caret actually is.
@@ -253,9 +344,12 @@ export default function Toolbar({ editor }: { editor: Editor | null }) {
     };
   }, [editor]);
 
+  const frame = useColumn(bar);
+
   if (!editor) return null;
 
   const vertical = isVertical(dock);
+  const place = placement(dock, frame.column, frame.viewport);
   const available = ITEMS.filter((item) => {
     try {
       return item.can(editor);
@@ -316,24 +410,35 @@ export default function Toolbar({ editor }: { editor: Editor | null }) {
       )}
 
       <div
-        ref={bar}
+        ref={setBar}
         role="toolbar"
         aria-label="Formatting"
         aria-orientation={vertical ? "vertical" : "horizontal"}
         className={[
           "sutra-no-print z-30 flex items-center gap-0.5 rounded-xl border border-border bg-surface shadow-pane",
-          // Absolute inside <main>, which is `relative` — so a side dock sits
-          // beside the note rather than on top of the sidebar it would
-          // otherwise cover. `sticky` would not do: the note column scrolls,
-          // and the toolbar should not scroll away from the text it formats.
           vertical
-            ? "absolute top-1/2 max-h-[80vh] -translate-y-1/2 flex-col overflow-y-auto px-1 py-1.5"
+            ? "max-h-[80vh] flex-col overflow-y-auto px-1 py-1.5"
             : "flex-row flex-wrap px-1.5 py-1",
-          dock === "left" && "left-3",
-          dock === "right" && "right-3",
+          // The top dock is the only one still in the flow, so it is the only
+          // one that needs to hold a gap under itself. `top-9` clears the
+          // floating status bar, which is sticky at the top of the same
+          // scroll container.
+          place.position === "sticky" && "sticky top-9 mb-3",
         ]
           .filter(Boolean)
           .join(" ")}
+        style={
+          place.position === "fixed"
+            ? {
+                position: "fixed",
+                left: place.left,
+                right: place.right,
+                top: place.top,
+                bottom: place.bottom,
+                transform: place.transform,
+              }
+            : undefined
+        }
       >
         <button
           type="button"

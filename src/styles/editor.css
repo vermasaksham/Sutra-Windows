@@ -707,6 +707,9 @@ blockquote.sutra-voice-source {
     height: auto !important;
     overflow: visible !important;
     background: #ffffff !important;
+    /* The container keeps a strip clear for a side-docked toolbar. The
+       toolbar does not print, so neither should the strip. */
+    padding: 0 !important;
   }
 
   .sutra-page {

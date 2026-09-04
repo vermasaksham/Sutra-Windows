@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import Editor from "./editor/Editor";
+import { BOTTOM_RESERVE, SIDE_RESERVE, useDock } from "./editor/toolbarDock";
 import Toast from "./components/Toast";
 import { setNavigate, setTitles } from "./editor/wikilink/titleStore";
 import { setSources } from "./editor/citation/citationStore";
@@ -74,6 +75,9 @@ const SAVE_LABEL = {
 } as const;
 
 export default function App() {
+  /** Which edge the editing toolbar is on. Read here so the scroll container
+   *  can keep a strip clear for it. */
+  const dock = useDock();
   const [vault, setVault] = useState<VaultInfo | null>(null);
   const [checked, setChecked] = useState(false);
   const [notes, setNotes] = useState<NoteSummary[]>([]);
@@ -823,7 +827,19 @@ export default function App() {
         />
       </div>
 
-      <main className="sutra-main relative min-w-0 flex-1 overflow-y-auto bg-surface">
+      <main
+        className="sutra-main relative min-w-0 flex-1 overflow-y-auto bg-surface"
+        // A side dock floats over this container, so the container gives it a
+        // strip to float over. Padding rather than a narrower column: the note
+        // stays centred in what is left, and on a wide window — where the
+        // column is capped well inside the container anyway — the shift is
+        // barely visible.
+        style={{
+          paddingLeft: dock === "left" ? SIDE_RESERVE : undefined,
+          paddingRight: dock === "right" ? SIDE_RESERVE : undefined,
+          paddingBottom: dock === "bottom" ? BOTTOM_RESERVE : undefined,
+        }}
+      >
         {/*
           The window's only chrome, and it floats over the page rather than
           sitting in a bar above it — the point of this layout is that the note

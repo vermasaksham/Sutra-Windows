@@ -612,7 +612,20 @@ document rather than in the toolbar.
 right. A shaded band shows where it will land before you let go, and the choice
 is remembered between launches. It snaps to an edge rather than floating free,
 so it can never end up half off-screen where you would have to rescue it.
-Docked left or right it sits beside the note, never over the sidebar.
+
+Wherever you put it, it stays with you as you scroll.
+
+- **Top.** It starts in the note, between the tags and the first line, and
+  pins itself just under the status bar once the note scrolls up past it.
+- **Bottom.** It floats at the bottom of the note area. The note keeps a little
+  extra room at its end so the last line never ends up underneath it.
+- **Left or right.** It floats beside the note, vertically centred on whatever
+  you are reading. The note area keeps a clear strip for it, so it sits next to
+  your text rather than over the first character of every line — and never over
+  the sidebar.
+
+Open or close the context panel, or resize the window, and a floating toolbar
+moves with the note area rather than staying where it was.
 
 **Two things worth knowing.**
 
