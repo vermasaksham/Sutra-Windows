@@ -678,6 +678,24 @@ still gets you there.
 
 ---
 
+### Where the work is
+
+`Ctrl+K` → _Where the work is_ opens a count of where the research has got to,
+computed from your vault and nothing else:
+
+- **Questions you have not answered yet** — every heading the editor reads as
+  a question ([§9](#9-zotero-sources-and-citations)) with nothing written under
+  it. Click one to open the note it was asked in.
+- **Questions you have started on**, with how many words are under each.
+- **Sources nothing cites** — papers you brought in and have not used.
+- **How much of your evidence carries a page, and the source's own words.**
+
+It counts; it does not judge. Nothing is ranked, scored or suggested, because
+which question matters is exactly the judgement the three voices exist to keep
+yours. There is no network and no model involved.
+
+---
+
 ## 17. The command palette
 
 `Ctrl+K`. Type to filter; it searches both commands and your notes by title,
@@ -688,7 +706,8 @@ so it doubles as a jump-to-note.
 **This note** _(when one is open)_ — Set type to … (each of the ten kinds) ·
 Export as Word (.docx) · Print, or save as PDF
 
-**Vault** — Manage tags · Find notes written twice · New view · Save this
+**Vault** — Manage tags · Where the work is · Find notes written twice · New
+view · Save this
 search as a view _(when there is a search to save)_ · Turn Zotero citations
 into sources _(when there are any)_ · Settings — appearance and themes ·
 Assistance settings · Rebuild the search index

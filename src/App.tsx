@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import Editor from "./editor/Editor";
+import ResearchOverview from "./notes/ResearchOverview";
 import { BOTTOM_RESERVE, SIDE_RESERVE, useDock } from "./editor/toolbarDock";
 import Toast from "./components/Toast";
 import { setNavigate, setTitles } from "./editor/wikilink/titleStore";
@@ -104,6 +105,7 @@ export default function App() {
   > | null>(null);
   const [citationPromptOpen, setCitationPromptOpen] = useState(false);
   const [tagsOpen, setTagsOpen] = useState(false);
+  const [overviewOpen, setOverviewOpen] = useState(false);
   /** Notes near the open one, with the reason each is near. */
   const [related, setRelated] = useState<RelatedNote[]>([]);
   const [siblings, setSiblings] = useState<NoteSummary[]>([]);
@@ -1094,6 +1096,7 @@ export default function App() {
           onExportDocx={() => void exportDocx()}
           onExportPdf={exportPdf}
           onManageTags={() => setTagsOpen(true)}
+          onResearchOverview={() => setOverviewOpen(true)}
           onNewView={() => void editView(null)}
           onFindDuplicates={() => setDuplicatesOpen(true)}
           aiEnabled={ai?.enabled ?? false}
@@ -1121,6 +1124,16 @@ export default function App() {
           onClose={() => setTagsOpen(false)}
           onChanged={() => void refresh()}
           onReport={report}
+        />
+      )}
+
+      {overviewOpen && (
+        <ResearchOverview
+          onClose={() => setOverviewOpen(false)}
+          onOpen={(id) => {
+            setOverviewOpen(false);
+            void select(id);
+          }}
         />
       )}
 

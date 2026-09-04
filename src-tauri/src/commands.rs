@@ -348,6 +348,12 @@ pub fn zotero_open(app: AppHandle, key: String) -> Result<()> {
     crate::state::provider(&app).open(&key)
 }
 
+/// Everything the research overview is built from, in one vault scan.
+#[tauri::command]
+pub fn research_overview(state: State<'_, AppState>) -> Result<crate::vault::Overview> {
+    state.with_vault(|vault| vault.overview())
+}
+
 /// Ask GitHub whether a newer Sutra has been released.
 ///
 /// Only ever called from a button. Sutra computes everything else from your

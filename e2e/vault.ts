@@ -42,6 +42,10 @@ export type VaultOptions = {
   palette?: string;
   /** Which edge the editing toolbar starts on. */
   dock?: "top" | "bottom" | "left" | "right";
+  /** Source note id -> how many notes cite it, for the research overview. */
+  citations?: Record<string, number>;
+  withPage?: number;
+  withQuote?: number;
   /** What a check for updates should report, or "fail" to make it error. */
   update?: { current: string; latest: string; newer: boolean } | "fail";
 };
@@ -103,6 +107,45 @@ export async function useVault(page: Page, options: VaultOptions) {
           // A substring match over title and body. Not FTS5 — that is Rust's
           // job and has its own tests — but enough that a test can search and
           // get the note it is looking for.
+          // The vault-wide scan behind the research overview. Headings are
+          // returned unclassified — voice is decided in TypeScript, in one
+          // place — exactly as Rust does it.
+          case "research_overview": {
+            const headings = notes.flatMap((n) => {
+              const found: Array<{
+                note: string;
+                noteTitle: string;
+                text: string;
+                words: number;
+              }> = [];
+              for (const line of n.body.split("\n")) {
+                const heading = /^#{1,6}\s+(.*)$/.exec(line.trim());
+                if (heading) {
+                  found.push({
+                    note: n.id,
+                    noteTitle: n.title,
+                    text: heading[1]!.trim(),
+                    words: 0,
+                  });
+                } else if (found.length > 0) {
+                  found[found.length - 1]!.words += line
+                    .trim()
+                    .split(/\s+/)
+                    .filter(Boolean).length;
+                }
+              }
+              return found;
+            });
+            const sourceNotes = notes.filter((n) => n.type === "source");
+            return {
+              headings,
+              citations: opts.citations ?? {},
+              sources: sourceNotes.map(summary),
+              withPage: opts.withPage ?? 0,
+              withQuote: opts.withQuote ?? 0,
+            };
+          }
+
           case "search_notes": {
             const q = String(args.query ?? "").toLowerCase();
             if (!q) return [];
