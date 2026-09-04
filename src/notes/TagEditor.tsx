@@ -59,7 +59,7 @@ export default function TagEditor({
             type="button"
             onClick={() => onChange(tags.filter((t) => t !== tag))}
             aria-label={`Remove tag ${tag}`}
-            className="pr-2 pl-0.5 text-xs opacity-0 transition-opacity duration-150 ease-out group-hover/tag:opacity-100 focus-visible:opacity-100"
+            className="pr-2 pl-0.5 text-xs opacity-0 transition-opacity group-hover/tag:opacity-100 focus-visible:opacity-100"
           >
             ×
           </button>
@@ -123,7 +123,7 @@ export default function TagEditor({
                     }}
                     onMouseEnter={() => setHighlighted(index)}
                     className={[
-                      "w-full truncate rounded-md px-2 py-1 text-left text-xs transition-colors duration-150 ease-out",
+                      "w-full truncate rounded-md px-2 py-1 text-left text-xs transition-colors",
                       index === highlighted
                         ? "bg-row-active text-accent"
                         : "text-ink-soft",
@@ -140,7 +140,7 @@ export default function TagEditor({
         <button
           type="button"
           onClick={() => setAdding(true)}
-          className="sutra-no-print rounded-full border border-border px-2 py-0.5 text-xs text-ink-muted transition-colors duration-150 ease-out hover:border-accent hover:text-accent"
+          className="sutra-no-print rounded-full border border-border px-2 py-0.5 text-xs text-ink-muted transition-colors hover:border-accent hover:text-accent"
         >
           + tag
         </button>

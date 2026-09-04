@@ -67,7 +67,7 @@ export default function SourceDetails({
                 }
                 placeholder={field.placeholder}
                 aria-label={field.label}
-                className="w-full rounded bg-transparent px-1 py-0.5 text-sm text-ink outline-none transition-colors duration-150 ease-out hover:bg-row-hover focus:bg-row-hover placeholder:text-ink-muted"
+                className="w-full rounded bg-transparent px-1 py-0.5 text-sm text-ink outline-none transition-colors hover:bg-row-hover focus:bg-row-hover placeholder:text-ink-muted"
               />
             </dd>
           </div>
@@ -135,7 +135,7 @@ export default function SourceDetails({
               const key = meta.zotero;
               if (key) void zoteroApi.open(key).catch(() => setFailed(true));
             }}
-            className="sutra-no-print shrink-0 rounded-lg border border-border px-2 py-1 text-xs text-ink-soft transition-colors duration-150 ease-out hover:border-accent hover:text-accent"
+            className="sutra-no-print shrink-0 rounded-lg border border-border px-2 py-1 text-xs text-ink-soft transition-colors hover:border-accent hover:text-accent"
           >
             Open in Zotero
           </button>
@@ -162,7 +162,7 @@ export default function SourceDetails({
                 <button
                   type="button"
                   onClick={() => onOpen(note.id)}
-                  className="w-full truncate rounded px-1 py-0.5 text-left text-sm text-ink-soft transition-colors duration-150 ease-out hover:bg-row-hover hover:text-accent"
+                  className="w-full truncate rounded px-1 py-0.5 text-left text-sm text-ink-soft transition-colors hover:bg-row-hover hover:text-accent"
                 >
                   {note.title || "Untitled"}
                   {note.page && (

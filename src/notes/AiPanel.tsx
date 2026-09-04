@@ -111,7 +111,7 @@ export default function AiPanel({
               type="button"
               disabled={asking !== null}
               onClick={() => void ask(item.task)}
-              className="w-full rounded-lg border border-border px-3 py-1.5 text-left text-sm text-ink-soft transition-colors duration-150 ease-out hover:border-accent hover:text-accent disabled:opacity-50"
+              className="w-full rounded-lg border border-border px-3 py-1.5 text-left text-sm text-ink-soft transition-colors hover:border-accent hover:text-accent disabled:opacity-50"
             >
               {asking === item.task ? "Asking…" : item.label}
             </button>
@@ -175,7 +175,7 @@ export default function AiPanel({
             <button
               type="button"
               onClick={() => setDraft(null)}
-              className="rounded-lg border border-border px-2.5 py-1 text-xs text-ink-soft transition-colors duration-150 ease-out hover:border-accent hover:text-accent"
+              className="rounded-lg border border-border px-2.5 py-1 text-xs text-ink-soft transition-colors hover:border-accent hover:text-accent"
             >
               Discard
             </button>
@@ -192,7 +192,7 @@ export default function AiPanel({
                   );
                 setDraft(null);
               }}
-              className="rounded-lg bg-accent px-2.5 py-1 text-xs font-medium text-surface transition-opacity duration-150 ease-out hover:opacity-90 disabled:opacity-50"
+              className="rounded-lg bg-accent px-2.5 py-1 text-xs font-medium text-surface transition-opacity hover:opacity-90 disabled:opacity-50"
             >
               {draft.task === "tags"
                 ? `Add ${picked.size === 1 ? "1 tag" : `${picked.size} tags`}`

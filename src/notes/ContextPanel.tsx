@@ -94,7 +94,7 @@ export default function ContextPanel({
           type="button"
           onClick={onClose}
           aria-label="Hide the context panel"
-          className="text-[0.6875rem] text-ink-muted transition-colors duration-150 ease-out hover:text-accent"
+          className="text-[0.6875rem] text-ink-muted transition-colors hover:text-accent"
         >
           Hide
         </button>
@@ -133,7 +133,7 @@ export default function ContextPanel({
                   <button
                     type="button"
                     onClick={() => onCompare(note.id, note.reason)}
-                    className="w-full rounded-lg border border-highlight/40 bg-highlight-bg px-3 py-2 text-left transition-colors duration-150 ease-out hover:border-highlight"
+                    className="w-full rounded-lg border border-highlight/40 bg-highlight-bg px-3 py-2 text-left transition-colors hover:border-highlight"
                   >
                     <span className="block truncate text-sm text-ink">
                       {note.title}
@@ -169,7 +169,7 @@ export default function ContextPanel({
                   <button
                     type="button"
                     onClick={() => onOpen(note.id)}
-                    className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-left transition-colors duration-150 ease-out hover:border-accent"
+                    className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-left transition-colors hover:border-accent"
                   >
                     <span className="block truncate font-mono text-xs text-ink">
                       {note.here}
@@ -197,7 +197,7 @@ export default function ContextPanel({
               <button
                 type="button"
                 onClick={() => onOpen(note.id)}
-                className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-left transition-colors duration-150 ease-out hover:border-accent"
+                className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-left transition-colors hover:border-accent"
               >
                 <span className="block truncate text-sm text-ink">
                   {note.title}
@@ -228,7 +228,7 @@ export default function ContextPanel({
               <button
                 type="button"
                 onClick={() => onOpen(note.id)}
-                className="w-full truncate rounded-lg px-2 py-1 text-left text-sm text-ink-soft transition-colors duration-150 ease-out hover:bg-row-hover hover:text-ink"
+                className="w-full truncate rounded-lg px-2 py-1 text-left text-sm text-ink-soft transition-colors hover:bg-row-hover hover:text-ink"
               >
                 {note.title}
               </button>

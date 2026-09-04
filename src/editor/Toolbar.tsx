@@ -446,7 +446,7 @@ export default function Toolbar({ editor }: { editor: Editor | null }) {
           aria-label="Move the toolbar — drag to any edge"
           title="Drag to any edge"
           className={[
-            "shrink-0 cursor-grab rounded text-ink-muted transition-colors duration-150 ease-out hover:text-accent active:cursor-grabbing",
+            "shrink-0 cursor-grab rounded text-ink-muted transition-colors hover:text-accent active:cursor-grabbing",
             vertical ? "px-1 py-0.5" : "px-0.5 py-1",
           ].join(" ")}
         >
@@ -482,7 +482,7 @@ export default function Toolbar({ editor }: { editor: Editor | null }) {
                 aria-pressed={item.active ? active : undefined}
                 title={item.label}
                 className={[
-                  "grid size-7 shrink-0 place-items-center rounded text-xs transition-colors duration-150 ease-out",
+                  "grid size-7 shrink-0 place-items-center rounded text-xs transition-colors",
                   active
                     ? "bg-accent-bg font-semibold text-accent"
                     : "text-ink-soft hover:bg-row-hover hover:text-ink",

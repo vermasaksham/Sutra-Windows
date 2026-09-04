@@ -72,7 +72,7 @@ export default function DuplicateList({
                 <button
                   type="button"
                   onClick={() => onCompare(pair.left, pair.right, pair.reason)}
-                  className="w-full border-b border-border px-3 py-2 text-left transition-colors duration-150 ease-out last:border-0 hover:bg-row-hover"
+                  className="w-full border-b border-border px-3 py-2 text-left transition-colors last:border-0 hover:bg-row-hover"
                 >
                   <span className="block truncate text-sm text-ink">
                     {pair.leftTitle}
@@ -93,7 +93,7 @@ export default function DuplicateList({
           <button
             type="button"
             onClick={onClose}
-            className="rounded-lg border border-border px-3 py-1.5 text-sm text-ink-soft transition-colors duration-150 ease-out hover:border-accent hover:text-accent"
+            className="rounded-lg border border-border px-3 py-1.5 text-sm text-ink-soft transition-colors hover:border-accent hover:text-accent"
           >
             Done
           </button>

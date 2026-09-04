@@ -46,6 +46,14 @@
   --font-mono: var(--font-mono);
 
   --ease-out: var(--ease-out);
+  /* Tailwind's own defaults for every `transition-*` utility, so a bare
+     `transition-colors` is already the app's motion and no component has to
+     repeat a duration and a curve. Repeating them was the real problem: the
+     tokens governed ten rules in the stylesheets while a hardcoded 150ms
+     governed the hundred in the components, and only the ten of them answered
+     to prefers-reduced-motion. */
+  --default-transition-duration: var(--duration-fast);
+  --default-transition-timing-function: var(--ease-out);
   --container-content: var(--content-width);
   --shadow-pane: var(--shadow);
   --spacing-rail: var(--rail-width);

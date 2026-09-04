@@ -153,7 +153,7 @@ export default function TagManager({
                         `Merged #${s.from} into #${s.into}`,
                       )
                     }
-                    className="shrink-0 rounded-md border border-border px-2 py-1 text-xs text-ink-soft transition-colors duration-150 ease-out hover:border-accent hover:text-accent disabled:opacity-50"
+                    className="shrink-0 rounded-md border border-border px-2 py-1 text-xs text-ink-soft transition-colors hover:border-accent hover:text-accent disabled:opacity-50"
                   >
                     Merge
                   </button>
@@ -231,7 +231,7 @@ export default function TagManager({
                           setEditing(tag);
                           setDraft(tag);
                         }}
-                        className="shrink-0 text-xs text-ink-muted transition-colors duration-150 ease-out hover:text-accent"
+                        className="shrink-0 text-xs text-ink-muted transition-colors hover:text-accent"
                       >
                         Rename
                       </button>
@@ -255,7 +255,7 @@ export default function TagManager({
           <button
             type="button"
             onClick={onClose}
-            className="rounded-lg border border-border px-3 py-1.5 text-sm text-ink-soft transition-colors duration-150 ease-out hover:border-accent hover:text-accent"
+            className="rounded-lg border border-border px-3 py-1.5 text-sm text-ink-soft transition-colors hover:border-accent hover:text-accent"
           >
             Done
           </button>

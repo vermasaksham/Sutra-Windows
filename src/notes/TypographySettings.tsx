@@ -139,7 +139,7 @@ export default function TypographySettings({
                         onReport("Could not remove the font", cause),
                       );
                   }}
-                  className="shrink-0 text-xs text-ink-muted transition-colors duration-150 ease-out hover:text-accent"
+                  className="shrink-0 text-xs text-ink-muted transition-colors hover:text-accent"
                 >
                   remove
                 </button>
@@ -163,7 +163,7 @@ export default function TypographySettings({
             type="button"
             disabled={busy || naming.trim() === ""}
             onClick={() => void addFont()}
-            className="rounded-lg border border-border px-3 py-1.5 text-sm text-ink-soft transition-colors duration-150 ease-out hover:border-accent hover:text-accent disabled:opacity-50"
+            className="rounded-lg border border-border px-3 py-1.5 text-sm text-ink-soft transition-colors hover:border-accent hover:text-accent disabled:opacity-50"
           >
             {busy ? "Adding…" : "Choose a file…"}
           </button>

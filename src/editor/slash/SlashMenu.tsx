@@ -96,7 +96,7 @@ export default function SlashMenu({ items, onSelect, onDismiss, ref }: Props) {
               onMouseDown={(e) => e.preventDefault()}
               onClick={() => choose(item)}
               className={[
-                "flex w-full items-center gap-2.5 rounded-lg px-2 py-1.5 text-left transition-colors duration-150 ease-out",
+                "flex w-full items-center gap-2.5 rounded-lg px-2 py-1.5 text-left transition-colors",
                 isSelected ? "bg-accent-bg" : "bg-transparent",
               ].join(" ")}
             >

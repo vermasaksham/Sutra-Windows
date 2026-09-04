@@ -122,7 +122,7 @@ export default function CitationMenu({
               onMouseDown={(e) => e.preventDefault()}
               onClick={() => onSelect(item)}
               className={[
-                "block w-full rounded-lg px-2 py-1.5 text-left transition-colors duration-150 ease-out",
+                "block w-full rounded-lg px-2 py-1.5 text-left transition-colors",
                 isSelected ? "bg-accent-bg" : "",
               ].join(" ")}
             >

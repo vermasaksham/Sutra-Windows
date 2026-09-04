@@ -36,14 +36,14 @@ export default function ConflictPrompt({ note, onResolve }: Props) {
           <button
             type="button"
             onClick={() => onResolve("mine")}
-            className="rounded-lg bg-accent px-3 py-1.5 text-sm font-medium text-surface transition-opacity duration-150 ease-out hover:opacity-90"
+            className="rounded-lg bg-accent px-3 py-1.5 text-sm font-medium text-surface transition-opacity hover:opacity-90"
           >
             Keep my version
           </button>
           <button
             type="button"
             onClick={() => onResolve("theirs")}
-            className="rounded-lg border border-border px-3 py-1.5 text-sm text-ink-soft transition-colors duration-150 ease-out hover:text-ink"
+            className="rounded-lg border border-border px-3 py-1.5 text-sm text-ink-soft transition-colors hover:text-ink"
           >
             Load the file
           </button>

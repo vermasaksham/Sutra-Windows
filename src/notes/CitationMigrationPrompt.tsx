@@ -133,7 +133,7 @@ export default function CitationMigrationPrompt({
             type="button"
             onClick={onClose}
             disabled={busy}
-            className="rounded-lg border border-border px-3 py-1.5 text-sm text-ink-soft transition-colors duration-150 ease-out hover:border-accent hover:text-accent disabled:opacity-50"
+            className="rounded-lg border border-border px-3 py-1.5 text-sm text-ink-soft transition-colors hover:border-accent hover:text-accent disabled:opacity-50"
           >
             {result ? "Done" : "Not now"}
           </button>
@@ -142,7 +142,7 @@ export default function CitationMigrationPrompt({
               type="button"
               onClick={() => void run()}
               disabled={busy}
-              className="rounded-lg bg-accent px-3 py-1.5 text-sm font-medium text-surface transition-opacity duration-150 ease-out hover:opacity-90 disabled:opacity-50"
+              className="rounded-lg bg-accent px-3 py-1.5 text-sm font-medium text-surface transition-opacity hover:opacity-90 disabled:opacity-50"
             >
               {busy ? "Asking Zotero…" : "Migrate them"}
             </button>

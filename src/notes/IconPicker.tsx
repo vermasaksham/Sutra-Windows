@@ -88,7 +88,7 @@ export default function IconPicker({
       // `items-center` that means being centred on the icon row — which pulls a
       // 136px-tall popover upward until its first rows sit behind the header,
       // where they cannot be clicked. Anchoring it below the row fixes that.
-      className="absolute top-full left-0 z-30 mt-1 w-64 rounded-xl border border-border bg-surface p-2 shadow-pane transition-opacity duration-150 ease-out"
+      className="absolute top-full left-0 z-30 mt-1 w-64 rounded-xl border border-border bg-surface p-2 shadow-pane transition-opacity"
     >
       <div className="grid grid-cols-8 gap-0.5">
         {ICONS.map((candidate) => (
@@ -99,7 +99,7 @@ export default function IconPicker({
             aria-label={`Icon ${candidate}`}
             aria-pressed={icon === candidate}
             className={[
-              "grid aspect-square place-items-center rounded-md text-lg transition-colors duration-150 ease-out",
+              "grid aspect-square place-items-center rounded-md text-lg transition-colors",
               icon === candidate ? "bg-accent-bg" : "hover:bg-row-hover",
             ].join(" ")}
           >
@@ -111,7 +111,7 @@ export default function IconPicker({
         <button
           type="button"
           onClick={() => onPick(null)}
-          className="mt-1 w-full rounded-md px-2 py-1 text-left text-xs text-ink-muted transition-colors duration-150 ease-out hover:text-highlight"
+          className="mt-1 w-full rounded-md px-2 py-1 text-left text-xs text-ink-muted transition-colors hover:text-highlight"
         >
           Remove icon
         </button>

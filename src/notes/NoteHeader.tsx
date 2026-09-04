@@ -71,7 +71,7 @@ export default function NoteHeader({
           onClick={() => setPicking((open) => !open)}
           aria-label={doc.icon ? "Change icon" : "Add icon"}
           className={[
-            "rounded-md transition-colors duration-150 ease-out",
+            "rounded-md transition-colors",
             doc.icon
               ? "text-4xl leading-none"
               : "px-2 py-0.5 text-xs text-ink-muted opacity-0 hover:text-ink focus-visible:opacity-100 group-hover/page:opacity-100",
@@ -84,7 +84,7 @@ export default function NoteHeader({
           <button
             type="button"
             onClick={onCover}
-            className="rounded-md px-2 py-0.5 text-xs text-ink-muted opacity-0 transition-opacity duration-150 ease-out hover:text-ink group-hover/page:opacity-100 focus-visible:opacity-100"
+            className="rounded-md px-2 py-0.5 text-xs text-ink-muted opacity-0 transition-opacity hover:text-ink group-hover/page:opacity-100 focus-visible:opacity-100"
           >
             ＋ cover
           </button>

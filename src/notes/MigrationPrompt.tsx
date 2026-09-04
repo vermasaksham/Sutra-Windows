@@ -110,7 +110,7 @@ export default function MigrationPrompt({
             type="button"
             onClick={onDismiss}
             disabled={busy}
-            className="rounded-lg border border-border px-3 py-1.5 text-sm text-ink-soft transition-colors duration-150 ease-out hover:border-accent hover:text-accent disabled:opacity-50"
+            className="rounded-lg border border-border px-3 py-1.5 text-sm text-ink-soft transition-colors hover:border-accent hover:text-accent disabled:opacity-50"
           >
             Not now
           </button>
@@ -118,7 +118,7 @@ export default function MigrationPrompt({
             type="button"
             onClick={onRun}
             disabled={busy}
-            className="rounded-lg bg-accent px-3 py-1.5 text-sm font-medium text-surface transition-opacity duration-150 ease-out hover:opacity-90 disabled:opacity-50"
+            className="rounded-lg bg-accent px-3 py-1.5 text-sm font-medium text-surface transition-opacity hover:opacity-90 disabled:opacity-50"
           >
             {busy ? "Organising…" : "Organise into folders"}
           </button>

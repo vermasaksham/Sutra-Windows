@@ -130,7 +130,7 @@ export default function AiSettingsDialog({
                   .then(onSaved)
                   .catch((cause) => onReport("Could not forget the key", cause))
               }
-              className="mr-auto rounded-lg border border-border px-3 py-1.5 text-sm text-ink-soft transition-colors duration-150 ease-out hover:border-accent hover:text-accent disabled:opacity-50"
+              className="mr-auto rounded-lg border border-border px-3 py-1.5 text-sm text-ink-soft transition-colors hover:border-accent hover:text-accent disabled:opacity-50"
             >
               Forget the stored key
             </button>
@@ -139,7 +139,7 @@ export default function AiSettingsDialog({
             type="button"
             onClick={onClose}
             disabled={busy}
-            className="rounded-lg border border-border px-3 py-1.5 text-sm text-ink-soft transition-colors duration-150 ease-out hover:border-accent hover:text-accent disabled:opacity-50"
+            className="rounded-lg border border-border px-3 py-1.5 text-sm text-ink-soft transition-colors hover:border-accent hover:text-accent disabled:opacity-50"
           >
             Cancel
           </button>
@@ -147,7 +147,7 @@ export default function AiSettingsDialog({
             type="button"
             onClick={() => void save()}
             disabled={busy}
-            className="rounded-lg bg-accent px-3 py-1.5 text-sm font-medium text-surface transition-opacity duration-150 ease-out hover:opacity-90 disabled:opacity-50"
+            className="rounded-lg bg-accent px-3 py-1.5 text-sm font-medium text-surface transition-opacity hover:opacity-90 disabled:opacity-50"
           >
             {busy ? "Saving…" : "Save"}
           </button>

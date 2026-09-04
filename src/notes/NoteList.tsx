@@ -143,7 +143,7 @@ export default function NoteList({
               type="button"
               onClick={() => onQuery("")}
               aria-label="Clear the search"
-              className="shrink-0 text-ink-muted transition-colors duration-150 ease-out hover:text-ink"
+              className="shrink-0 text-ink-muted transition-colors hover:text-ink"
             >
               <Cross />
             </button>
@@ -160,7 +160,7 @@ export default function NoteList({
             <button
               type="button"
               onClick={view.onEdit}
-              className="shrink-0 text-[0.6875rem] text-ink-muted transition-colors duration-150 ease-out hover:text-accent"
+              className="shrink-0 text-[0.6875rem] text-ink-muted transition-colors hover:text-accent"
             >
               Edit query
             </button>
@@ -170,7 +170,7 @@ export default function NoteList({
               onClick={onCreate}
               aria-label="New note here"
               title="New note here"
-              className="grid size-4 shrink-0 place-items-center rounded text-ink-muted transition-colors duration-150 ease-out hover:text-accent"
+              className="grid size-4 shrink-0 place-items-center rounded text-ink-muted transition-colors hover:text-accent"
             >
               <Plus />
             </button>
@@ -290,7 +290,7 @@ function PaperRow({
       <button
         type="button"
         onClick={onLiteratureNote}
-        className="mt-1.5 text-xs text-highlight transition-opacity duration-150 ease-out hover:opacity-80"
+        className="mt-1.5 text-xs text-highlight transition-opacity hover:opacity-80"
       >
         Read it into a literature note →
       </button>
@@ -315,7 +315,7 @@ function Row({
     <li className="group relative">
       <div
         className={[
-          "flex items-start rounded-lg transition-colors duration-150 ease-out",
+          "flex items-start rounded-lg transition-colors",
           active ? "bg-row-active" : "hover:bg-row-hover",
         ].join(" ")}
       >
@@ -364,7 +364,7 @@ function Row({
           )}
         </button>
 
-        <span className="flex shrink-0 items-center pt-1.5 opacity-0 transition-opacity duration-150 ease-out group-hover:opacity-100 focus-within:opacity-100">
+        <span className="flex shrink-0 items-center pt-1.5 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
           <button
             type="button"
             onClick={onDelete}

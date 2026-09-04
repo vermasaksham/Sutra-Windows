@@ -55,7 +55,7 @@ export default function SourcesPanel({
         <button
           type="button"
           onClick={() => setPicking(true)}
-          className="sutra-no-print text-xs text-ink-muted transition-colors duration-150 ease-out hover:text-accent"
+          className="sutra-no-print text-xs text-ink-muted transition-colors hover:text-accent"
         >
           + source
         </button>
@@ -110,7 +110,7 @@ export default function SourcesPanel({
                       onChange(citations.filter((_, i) => i !== index))
                     }
                     aria-label="Remove this source"
-                    className="sutra-no-print shrink-0 text-xs text-ink-muted transition-colors duration-150 ease-out hover:text-accent"
+                    className="sutra-no-print shrink-0 text-xs text-ink-muted transition-colors hover:text-accent"
                   >
                     ×
                   </button>
@@ -269,7 +269,7 @@ function InlineOnly({
         <button
           type="button"
           onClick={onRecord}
-          className="sutra-no-print shrink-0 text-xs text-ink-muted transition-colors duration-150 ease-out hover:text-accent"
+          className="sutra-no-print shrink-0 text-xs text-ink-muted transition-colors hover:text-accent"
         >
           record it
         </button>

@@ -60,7 +60,7 @@ export default function Bibliography({
         <button
           type="button"
           onClick={() => void copy()}
-          className="sutra-no-print text-xs text-ink-muted transition-colors duration-150 ease-out hover:text-accent"
+          className="sutra-no-print text-xs text-ink-muted transition-colors hover:text-accent"
         >
           {copied ? "copied" : "copy"}
         </button>
@@ -74,7 +74,7 @@ export default function Bibliography({
             <button
               type="button"
               onClick={() => onOpen(entry.id)}
-              className="text-left transition-colors duration-150 ease-out hover:text-accent"
+              className="text-left transition-colors hover:text-accent"
             >
               {emphasisRuns(entry.text).map((run, i) =>
                 run.emphasis ? (

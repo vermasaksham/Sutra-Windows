@@ -55,7 +55,7 @@ export default function SettingsDialog({
             type="button"
             onClick={onClose}
             aria-label="Close settings"
-            className="rounded-lg px-2 py-0.5 text-ink-muted transition-colors duration-150 ease-out hover:text-accent"
+            className="rounded-lg px-2 py-0.5 text-ink-muted transition-colors hover:text-accent"
           >
             ✕
           </button>
@@ -83,7 +83,7 @@ export default function SettingsDialog({
                     aria-checked={active}
                     onClick={() => setPreference(mode.value)}
                     className={[
-                      "rounded-[5px] px-2.5 py-1 text-xs transition-colors duration-150 ease-out",
+                      "rounded-[5px] px-2.5 py-1 text-xs transition-colors",
                       active
                         ? "bg-accent-bg font-medium text-accent"
                         : "text-ink-soft hover:text-ink",
@@ -155,7 +155,7 @@ export default function SettingsDialog({
                 onClose();
                 onOpenAiSettings();
               }}
-              className="rounded-lg border border-border px-3 py-1.5 text-sm text-ink-soft transition-colors duration-150 ease-out hover:border-accent hover:text-accent"
+              className="rounded-lg border border-border px-3 py-1.5 text-sm text-ink-soft transition-colors hover:border-accent hover:text-accent"
             >
               {aiEnabled ? "Change" : "Turn on assistance"}
             </button>
@@ -202,7 +202,7 @@ function PaletteCard({
       aria-checked={chosen}
       onClick={onChoose}
       className={[
-        "flex items-center gap-3 rounded-xl border px-3 py-2.5 text-left transition-colors duration-150 ease-out",
+        "flex items-center gap-3 rounded-xl border px-3 py-2.5 text-left transition-colors",
         chosen
           ? "border-accent bg-accent-bg"
           : "border-border hover:border-accent",

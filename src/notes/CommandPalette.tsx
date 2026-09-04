@@ -364,7 +364,7 @@ export default function CommandPalette({
                       command.run();
                     }}
                     className={[
-                      "flex w-full items-baseline gap-3 rounded-lg px-3 py-1.5 text-left transition-colors duration-150 ease-out",
+                      "flex w-full items-baseline gap-3 rounded-lg px-3 py-1.5 text-left transition-colors",
                       index === selected ? "bg-row-active" : "",
                     ].join(" ")}
                   >

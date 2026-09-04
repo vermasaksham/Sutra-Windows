@@ -125,7 +125,7 @@ export default function SourcePicker({
                   <button
                     type="button"
                     onClick={() => onPick(source)}
-                    className="w-full rounded-lg px-3 py-1.5 text-left transition-colors duration-150 ease-out hover:bg-row-hover"
+                    className="w-full rounded-lg px-3 py-1.5 text-left transition-colors hover:bg-row-hover"
                   >
                     <span className="block truncate text-sm text-ink">
                       {source.title}
@@ -160,7 +160,7 @@ export default function SourcePicker({
                     type="button"
                     disabled={importing !== null}
                     onClick={() => void importAndPick(reference)}
-                    className="w-full rounded-lg px-3 py-1.5 text-left transition-colors duration-150 ease-out hover:bg-row-hover disabled:opacity-50"
+                    className="w-full rounded-lg px-3 py-1.5 text-left transition-colors hover:bg-row-hover disabled:opacity-50"
                   >
                     <span className="block truncate text-sm text-ink">
                       {reference.title}

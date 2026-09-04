@@ -637,6 +637,15 @@ machine's theme onto the other.
 Printing and Word export ignore the theme entirely. Both always produce black
 text on white, so exporting from dark mode does not hand you a black page.
 
+### Motion
+
+Sutra's movement is deliberately small — things fade and settle over about a
+fifth of a second, and nothing slides across the screen or bounces.
+
+If you have turned on **Show animations in Windows → off** (Settings →
+Accessibility → Visual effects), Sutra follows it: every transition drops to
+zero and states change instantly. Nothing else about the app changes.
+
 ## 16. Keyboard shortcuts
 
 These are the app's own. The editor keeps all its usual ones — bold, italic,

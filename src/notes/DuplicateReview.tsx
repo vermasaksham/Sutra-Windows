@@ -118,7 +118,7 @@ export default function DuplicateReview({
             type="button"
             onClick={onClose}
             disabled={busy}
-            className="rounded-lg border border-border px-3 py-1.5 text-sm text-ink-soft transition-colors duration-150 ease-out hover:border-accent hover:text-accent disabled:opacity-50"
+            className="rounded-lg border border-border px-3 py-1.5 text-sm text-ink-soft transition-colors hover:border-accent hover:text-accent disabled:opacity-50"
           >
             Not now
           </button>
@@ -131,7 +131,7 @@ export default function DuplicateReview({
                 onDismissed();
               }, "Could not record that")
             }
-            className="rounded-lg border border-border px-3 py-1.5 text-sm text-ink-soft transition-colors duration-150 ease-out hover:border-accent hover:text-accent disabled:opacity-50"
+            className="rounded-lg border border-border px-3 py-1.5 text-sm text-ink-soft transition-colors hover:border-accent hover:text-accent disabled:opacity-50"
           >
             They are different notes
           </button>
@@ -144,7 +144,7 @@ export default function DuplicateReview({
                 onMerged(keep);
               }, "Could not merge the notes")
             }
-            className="rounded-lg bg-accent px-3 py-1.5 text-sm font-medium text-surface transition-opacity duration-150 ease-out hover:opacity-90 disabled:opacity-50"
+            className="rounded-lg bg-accent px-3 py-1.5 text-sm font-medium text-surface transition-opacity hover:opacity-90 disabled:opacity-50"
           >
             {busy ? "Working…" : `Merge into ${keptTitle || "this one"}`}
           </button>
@@ -167,7 +167,7 @@ function Side({
   return (
     <div
       className={[
-        "flex min-h-0 flex-col rounded-lg border p-3 transition-colors duration-150 ease-out",
+        "flex min-h-0 flex-col rounded-lg border p-3 transition-colors",
         kept ? "border-accent" : "border-border",
       ].join(" ")}
     >

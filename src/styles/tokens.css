@@ -302,10 +302,15 @@
      than truncated. */
   --context-width: 20rem;
 
-  /* Motion — snappy, never floaty. */
-  --ease-out: cubic-bezier(0.2, 0, 0, 1);
-  --duration-fast: 150ms;
-  --duration-normal: 200ms;
+  /* Motion — responsive, never floaty, and never abrupt.
+
+     The curve starts at full speed and eases off, so a hover reads as
+     immediate and then settles rather than stopping dead. The previous curve,
+     cubic-bezier(0.2, 0, 0, 1), held at zero for the first fifth of its run
+     and then snapped: a hesitation you feel as a stutter more than as speed. */
+  --ease-out: cubic-bezier(0.33, 1, 0.68, 1);
+  --duration-fast: 180ms;
+  --duration-normal: 260ms;
 }
 
 /* Respect the OS setting for people who ask for less movement. */

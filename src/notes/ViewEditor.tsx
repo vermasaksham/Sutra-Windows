@@ -167,7 +167,7 @@ export default function ViewEditor({
             type="button"
             onClick={onCancel}
             disabled={saving}
-            className="rounded-lg border border-border px-3 py-1.5 text-sm text-ink-soft transition-colors duration-150 ease-out hover:border-accent hover:text-accent disabled:opacity-50"
+            className="rounded-lg border border-border px-3 py-1.5 text-sm text-ink-soft transition-colors hover:border-accent hover:text-accent disabled:opacity-50"
           >
             Cancel
           </button>
@@ -175,7 +175,7 @@ export default function ViewEditor({
             type="button"
             onClick={() => void save()}
             disabled={saving}
-            className="rounded-lg bg-accent px-3 py-1.5 text-sm font-medium text-surface transition-opacity duration-150 ease-out hover:opacity-90 disabled:opacity-50"
+            className="rounded-lg bg-accent px-3 py-1.5 text-sm font-medium text-surface transition-opacity hover:opacity-90 disabled:opacity-50"
           >
             {saving ? "Saving…" : title ? "Save view" : "Create view"}
           </button>
@@ -266,7 +266,7 @@ function Group({
       <button
         type="button"
         onClick={() => onChange([...terms, { under: "" }])}
-        className="mt-1.5 text-xs text-ink-muted transition-colors duration-150 ease-out hover:text-accent"
+        className="mt-1.5 text-xs text-ink-muted transition-colors hover:text-accent"
       >
         + Add a condition
       </button>
@@ -376,7 +376,7 @@ function Row({
         type="button"
         onClick={onRemove}
         aria-label="Remove this condition"
-        className="shrink-0 rounded px-1 text-ink-muted transition-colors duration-150 ease-out hover:text-accent"
+        className="shrink-0 rounded px-1 text-ink-muted transition-colors hover:text-accent"
       >
         ×
       </button>

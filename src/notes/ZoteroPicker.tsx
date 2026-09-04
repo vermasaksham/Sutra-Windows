@@ -295,7 +295,7 @@ function Row({
           type="button"
           onClick={onLiteratureNote}
           disabled={busy}
-          className="rounded-lg bg-accent px-2.5 py-1 text-xs font-medium text-surface transition-opacity duration-150 ease-out hover:opacity-90 disabled:opacity-50"
+          className="rounded-lg bg-accent px-2.5 py-1 text-xs font-medium text-surface transition-opacity hover:opacity-90 disabled:opacity-50"
         >
           {busy ? "Working…" : "Literature note"}
         </button>
@@ -303,14 +303,14 @@ function Row({
           type="button"
           onClick={onAddSource}
           disabled={busy}
-          className="rounded-lg border border-border px-2.5 py-1 text-xs text-ink-soft transition-colors duration-150 ease-out hover:border-accent hover:text-accent disabled:opacity-50"
+          className="rounded-lg border border-border px-2.5 py-1 text-xs text-ink-soft transition-colors hover:border-accent hover:text-accent disabled:opacity-50"
         >
           Add as source
         </button>
         <button
           type="button"
           onClick={onOpen}
-          className="rounded-lg border border-border px-2.5 py-1 text-xs text-ink-soft transition-colors duration-150 ease-out hover:border-accent hover:text-accent"
+          className="rounded-lg border border-border px-2.5 py-1 text-xs text-ink-soft transition-colors hover:border-accent hover:text-accent"
         >
           Open in Zotero
         </button>

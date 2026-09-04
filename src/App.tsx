@@ -862,7 +862,7 @@ export default function App() {
               type="button"
               onClick={() => setContextOpen(true)}
               title={`Show what is near this note (${shortcut(MOD, "\\")})`}
-              className="text-xs text-ink-muted transition-colors duration-150 ease-out hover:text-accent"
+              className="text-xs text-ink-muted transition-colors hover:text-accent"
             >
               Context
             </button>
@@ -925,14 +925,14 @@ export default function App() {
                 <button
                   type="button"
                   onClick={() => selectView(selectedId)}
-                  className="text-accent transition-opacity duration-150 ease-out hover:opacity-80"
+                  className="text-accent transition-opacity hover:opacity-80"
                 >
                   Run it
                 </button>
                 <button
                   type="button"
                   onClick={() => void editView(selectedId)}
-                  className="text-ink-muted transition-colors duration-150 ease-out hover:text-accent"
+                  className="text-ink-muted transition-colors hover:text-accent"
                 >
                   Edit the query
                 </button>
@@ -962,7 +962,7 @@ export default function App() {
                 <button
                   type="button"
                   onClick={() => void createNote(null)}
-                  className="mt-2 rounded-lg bg-accent px-3 py-1.5 text-sm font-medium text-surface transition-opacity duration-150 ease-out hover:opacity-90"
+                  className="mt-2 rounded-lg bg-accent px-3 py-1.5 text-sm font-medium text-surface transition-opacity hover:opacity-90"
                 >
                   New note
                 </button>

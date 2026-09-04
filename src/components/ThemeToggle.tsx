@@ -25,7 +25,7 @@ export default function ThemeToggle() {
             aria-checked={active}
             onClick={() => setPreference(option.value)}
             className={[
-              "rounded-[5px] px-2 py-0.5 text-xs transition-colors duration-150 ease-out",
+              "rounded-[5px] px-2 py-0.5 text-xs transition-colors",
               active
                 ? "bg-accent-bg text-accent"
                 : "text-ink-soft hover:text-ink",

@@ -43,7 +43,7 @@ export default function FolderBar({
       <button
         type="button"
         onClick={() => onSelectFolder(null)}
-        className="rounded px-1 text-ink-muted transition-colors duration-150 ease-out hover:text-accent"
+        className="rounded px-1 text-ink-muted transition-colors hover:text-accent"
       >
         All notes
       </button>
@@ -55,7 +55,7 @@ export default function FolderBar({
           <button
             type="button"
             onClick={() => onSelectFolder(path)}
-            className="rounded px-1 text-ink-soft transition-colors duration-150 ease-out hover:text-accent"
+            className="rounded px-1 text-ink-soft transition-colors hover:text-accent"
           >
             {name}
           </button>
@@ -72,7 +72,7 @@ export default function FolderBar({
           aria-expanded={open}
           aria-label="Move this note to another folder"
           title="Move to another folder"
-          className="ml-1 rounded-md px-1.5 py-0.5 text-xs text-ink-muted transition-colors duration-150 ease-out hover:bg-row-hover hover:text-accent"
+          className="ml-1 rounded-md px-1.5 py-0.5 text-xs text-ink-muted transition-colors hover:bg-row-hover hover:text-accent"
         >
           Move…
         </button>
@@ -137,7 +137,7 @@ function Choice({ label, onClick }: { label: string; onClick: () => void }) {
     <button
       type="button"
       onClick={onClick}
-      className="w-full truncate rounded-lg px-2 py-1.5 text-left text-sm text-ink-soft transition-colors duration-150 ease-out hover:bg-row-hover hover:text-ink"
+      className="w-full truncate rounded-lg px-2 py-1.5 text-left text-sm text-ink-soft transition-colors hover:bg-row-hover hover:text-ink"
     >
       {label}
     </button>

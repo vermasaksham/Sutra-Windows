@@ -44,7 +44,7 @@ export default function ExportMenu({
         onClick={() => setOpen((o) => !o)}
         disabled={busy}
         aria-expanded={open}
-        className="rounded-md border border-border px-2 py-0.5 text-xs text-ink-muted transition-colors duration-150 ease-out hover:text-ink disabled:opacity-60"
+        className="rounded-md border border-border px-2 py-0.5 text-xs text-ink-muted transition-colors hover:text-ink disabled:opacity-60"
       >
         {busy ? "Exporting…" : "Export"}
       </button>
@@ -61,7 +61,7 @@ export default function ExportMenu({
               setOpen(false);
               onDocx();
             }}
-            className="block w-full rounded-lg px-2 py-1.5 text-left transition-colors duration-150 ease-out hover:bg-accent-bg"
+            className="block w-full rounded-lg px-2 py-1.5 text-left transition-colors hover:bg-accent-bg"
           >
             <span className="block text-sm text-ink">Word (.docx)</span>
             <span className="block text-xs text-ink-muted">
@@ -75,7 +75,7 @@ export default function ExportMenu({
               setOpen(false);
               onPdf();
             }}
-            className="block w-full rounded-lg px-2 py-1.5 text-left transition-colors duration-150 ease-out hover:bg-accent-bg"
+            className="block w-full rounded-lg px-2 py-1.5 text-left transition-colors hover:bg-accent-bg"
           >
             <span className="block text-sm text-ink">PDF</span>
             {/* Said plainly: this hands off to the system print dialog rather

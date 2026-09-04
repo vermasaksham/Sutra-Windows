@@ -147,7 +147,7 @@ export default function ReferenceSettingsPanel({
               type="button"
               disabled={busy || key.trim() === ""}
               onClick={() => void connect()}
-              className="rounded-lg bg-accent px-3 py-1.5 text-sm font-medium text-surface transition-opacity duration-150 ease-out hover:opacity-90 disabled:opacity-50"
+              className="rounded-lg bg-accent px-3 py-1.5 text-sm font-medium text-surface transition-opacity hover:opacity-90 disabled:opacity-50"
             >
               {busy ? "Connecting…" : "Connect"}
             </button>
@@ -166,7 +166,7 @@ export default function ReferenceSettingsPanel({
                     )
                     .finally(() => setBusy(false));
                 }}
-                className="rounded-lg border border-border px-3 py-1.5 text-sm text-ink-soft transition-colors duration-150 ease-out hover:border-accent hover:text-accent disabled:opacity-50"
+                className="rounded-lg border border-border px-3 py-1.5 text-sm text-ink-soft transition-colors hover:border-accent hover:text-accent disabled:opacity-50"
               >
                 Test connection
               </button>
@@ -264,7 +264,7 @@ export default function ReferenceSettingsPanel({
               )
               .finally(() => setBusy(false));
           }}
-          className="rounded-lg border border-border px-3 py-1.5 text-sm text-ink-soft transition-colors duration-150 ease-out hover:border-accent hover:text-accent disabled:opacity-50"
+          className="rounded-lg border border-border px-3 py-1.5 text-sm text-ink-soft transition-colors hover:border-accent hover:text-accent disabled:opacity-50"
         >
           {busy ? "Working…" : "Restyle existing sources"}
         </button>
@@ -303,7 +303,7 @@ function Choice({
       aria-checked={checked}
       onClick={onChoose}
       className={[
-        "rounded-lg border px-3 py-2 text-left transition-colors duration-150 ease-out",
+        "rounded-lg border px-3 py-2 text-left transition-colors",
         checked
           ? "border-accent bg-accent-bg"
           : "border-border hover:border-accent",

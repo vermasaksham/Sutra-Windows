@@ -33,7 +33,7 @@ export default function Toast({
         type="button"
         onClick={onDismiss}
         aria-label="Dismiss"
-        className="text-ink-muted transition-colors duration-150 ease-out hover:text-ink"
+        className="text-ink-muted transition-colors hover:text-ink"
       >
         ×
       </button>

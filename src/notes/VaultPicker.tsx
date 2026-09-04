@@ -39,7 +39,7 @@ export default function VaultPicker({ onOpened }: { onOpened: () => void }) {
           type="button"
           onClick={choose}
           disabled={busy}
-          className="rounded-lg bg-accent px-4 py-2 text-sm font-medium text-surface transition-opacity duration-150 ease-out hover:opacity-90 disabled:opacity-60"
+          className="rounded-lg bg-accent px-4 py-2 text-sm font-medium text-surface transition-opacity hover:opacity-90 disabled:opacity-60"
         >
           {busy ? "Opening…" : "Choose folder"}
         </button>

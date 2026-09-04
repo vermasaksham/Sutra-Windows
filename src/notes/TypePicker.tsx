@@ -42,7 +42,7 @@ export default function TypePicker({
         aria-expanded={open}
         aria-label={`Note type: ${label}. Change it.`}
         className={[
-          "rounded-full px-2.5 py-0.5 text-xs transition-colors duration-150 ease-out",
+          "rounded-full px-2.5 py-0.5 text-xs transition-colors",
           isDefault
             ? "border border-border text-ink-muted hover:border-accent hover:text-accent"
             : "bg-accent-bg font-medium text-accent",
@@ -64,7 +64,7 @@ export default function TypePicker({
                   }}
                   aria-current={option.value === type ? "true" : undefined}
                   className={[
-                    "w-full rounded-lg px-2.5 py-1.5 text-left text-sm transition-colors duration-150 ease-out",
+                    "w-full rounded-lg px-2.5 py-1.5 text-left text-sm transition-colors",
                     option.value === type
                       ? "bg-row-active font-medium text-accent"
                       : "text-ink-soft hover:bg-row-hover hover:text-ink",

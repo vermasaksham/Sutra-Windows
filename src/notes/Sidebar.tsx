@@ -95,7 +95,7 @@ export default function Sidebar({
           onClick={onCapture}
           aria-label="Capture a note to the Inbox"
           title={`Capture to Inbox (${shortcut(MOD, "N")})`}
-          className="grid size-6 shrink-0 place-items-center rounded-md text-ink-muted transition-colors duration-150 ease-out hover:bg-row-hover hover:text-accent"
+          className="grid size-6 shrink-0 place-items-center rounded-md text-ink-muted transition-colors hover:bg-row-hover hover:text-accent"
         >
           <Plus />
         </button>
@@ -127,7 +127,7 @@ export default function Sidebar({
             onClick={() => onNewFolder(activeFolder)}
             aria-label="New folder"
             title="New folder"
-            className="grid size-4 place-items-center rounded text-ink-muted transition-colors duration-150 ease-out hover:text-accent"
+            className="grid size-4 place-items-center rounded text-ink-muted transition-colors hover:text-accent"
           >
             <Plus small />
           </button>
@@ -166,7 +166,7 @@ export default function Sidebar({
             onClick={onNewView}
             aria-label="New view"
             title="New view"
-            className="grid size-4 place-items-center rounded text-ink-muted transition-colors duration-150 ease-out hover:text-accent"
+            className="grid size-4 place-items-center rounded text-ink-muted transition-colors hover:text-accent"
           >
             <Plus small />
           </button>
@@ -187,7 +187,7 @@ export default function Sidebar({
                   }
                   aria-current={activeView === view.id ? "true" : undefined}
                   className={[
-                    "flex w-full items-center gap-1.5 rounded-md px-2 py-1 text-left text-sm transition-colors duration-150 ease-out",
+                    "flex w-full items-center gap-1.5 rounded-md px-2 py-1 text-left text-sm transition-colors",
                     activeView === view.id
                       ? "bg-row-active font-medium text-accent"
                       : "text-ink-soft hover:bg-row-hover hover:text-ink",
@@ -214,7 +214,7 @@ export default function Sidebar({
                 onClick={onManageTags}
                 aria-label="Manage tags"
                 title="Rename, merge and tidy tags"
-                className="text-[0.6875rem] text-ink-muted transition-colors duration-150 ease-out hover:text-accent"
+                className="text-[0.6875rem] text-ink-muted transition-colors hover:text-accent"
               >
                 Manage
               </button>
@@ -246,7 +246,7 @@ export default function Sidebar({
           type="button"
           onClick={onOpenZotero}
           title={`Cite a paper (${shortcut(MOD, SHIFT, "Z")})`}
-          className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-sm text-ink-soft transition-colors duration-150 ease-out hover:bg-row-hover hover:text-accent"
+          className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-sm text-ink-soft transition-colors hover:bg-row-hover hover:text-accent"
         >
           <QuoteMarkIcon className="size-4 shrink-0" />
           <span>Cite a paper</span>
@@ -263,7 +263,7 @@ export default function Sidebar({
           onClick={onOpenSettings}
           aria-label="Settings"
           title="Settings"
-          className="rounded-md px-1.5 py-1 text-ink-muted transition-colors duration-150 ease-out hover:bg-row-hover hover:text-accent"
+          className="rounded-md px-1.5 py-1 text-ink-muted transition-colors hover:bg-row-hover hover:text-accent"
         >
           <GearIcon className="size-4" />
         </button>
@@ -327,7 +327,7 @@ function FolderRow({
   return (
     <div
       className={[
-        "flex items-center rounded-md transition-colors duration-150 ease-out",
+        "flex items-center rounded-md transition-colors",
         active
           ? "bg-row-active text-accent"
           : "text-ink-soft hover:bg-row-hover hover:text-ink",
@@ -392,7 +392,7 @@ function Row({
       onClick={onClick}
       aria-current={active ? "true" : undefined}
       className={[
-        "flex w-full items-center rounded-md py-1 pr-2 text-left text-sm transition-colors duration-150 ease-out",
+        "flex w-full items-center rounded-md py-1 pr-2 text-left text-sm transition-colors",
         active
           ? "bg-row-active font-medium text-accent"
           : "text-ink-soft hover:bg-row-hover hover:text-ink",
@@ -447,7 +447,7 @@ function TagRow({
   return (
     <div
       className={[
-        "flex items-center rounded-md transition-colors duration-150 ease-out",
+        "flex items-center rounded-md transition-colors",
         active
           ? "bg-row-active text-accent"
           : "text-ink-soft hover:bg-row-hover hover:text-ink",
@@ -546,7 +546,7 @@ function Chevron({ open }: { open: boolean }) {
       strokeWidth={2}
       strokeLinecap="round"
       strokeLinejoin="round"
-      className="size-3 transition-transform duration-150 ease-out"
+      className="size-3 transition-transform"
       style={{ transform: open ? "rotate(90deg)" : "none" }}
       aria-hidden
     >
