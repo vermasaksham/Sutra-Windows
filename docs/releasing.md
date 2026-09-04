@@ -44,11 +44,19 @@ Fixing it is a purchase and an identity check, not a code change:
 An EV certificate additionally clears SmartScreen's reputation check
 immediately. An OV one builds reputation over time and downloads.
 
-Once you have one, the signing step goes in `.github/workflows/release.yml`
-between **Build** and **Publish**, and the secrets go in the repository's
-Actions secrets. Tauri signs via its `bundle.windows.signCommand` hook or by
-running `signtool` over the built artifacts; the details depend on which of the
-two routes above you take, so they are deliberately not guessed at here.
+**The workflow is already wired for it.** The build step passes
+`TAURI_WINDOWS_SIGN_COMMAND` through from a repository secret named
+`WINDOWS_SIGN_COMMAND`. Tauri runs that command over each bundled artifact when
+it is set, and does not sign when it is not — so nothing changes until you add
+the secret, and every build says in its log which of the two it was.
+
+To turn signing on, add one Actions secret, `WINDOWS_SIGN_COMMAND`, holding the
+command your CA gave you with `%1` where the file goes. For Azure Trusted
+Signing that is a `trusted-signing-cli` invocation; for a cloud HSM it is that
+vendor's `signtool` wrapper. Nothing else in the repository has to change.
+
+The exact command is deliberately not guessed at here: it differs per CA, and a
+plausible-looking wrong one would fail at release time.
 
 **Nobody should generate this key but you.** A signing key is an identity. One
 created inside an automated session, or pasted into a chat log, is compromised
