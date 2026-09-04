@@ -143,7 +143,15 @@ display block pre-filled with `\ce{}` and puts the caret inside the braces —
 `\ce{}` is the part nobody remembers, and the formula is the part you came to
 write. Inline, just type `$\ce{Sb2Se3}$`.
 
-Click any rendered formula to edit its LaTeX; click away to re-render.
+**Editing a formula.** Click any rendered formula to see its LaTeX; click away
+to re-render. The source appears where the formula was — in the line for an
+inline formula, on its own line for an equation — set in a monospaced accent
+colour rather than inside an input box, so a sentence you are part-way through
+still reads as a sentence while you fix the formula in the middle of it.
+
+Press `Esc` when you are done and the caret returns to the document, just
+after the formula, so you can carry on writing. After an equation that is a
+fresh line below it; after an inline formula it is the rest of the sentence.
 
 Everything round-trips to markdown as `$…$` and `$$…$$`, so a formula written
 here is a formula in the file.

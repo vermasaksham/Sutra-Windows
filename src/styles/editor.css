@@ -421,25 +421,38 @@
 
 .sutra-math-block {
   margin-block: 1rem;
-  border-radius: 8px;
-  border: 1px solid transparent;
-  transition: border-color var(--duration-fast) var(--ease-out);
+  /* Centres the formula, and lets the shrink-to-fit box below hug it. */
+  text-align: center;
 }
 
-.sutra-math-block.is-selected {
-  border-color: var(--accent);
-}
-
+/* A displayed equation is a line of the document, not a panel in it. The
+   padding is only what an equation with a tall fraction or a long arrow needs
+   in order not to touch the prose above and below, and the hover is the
+   faintest tint the app has — enough to say "this is clickable", not enough
+   to draw a slab around a reaction the reader is trying to read. */
+/* Shrink-to-fit, so hover and selection tint the equation rather than painting
+   a band across the whole column. That was the difference between "this bit of
+   the document responds to you" and a panel sitting in the note — and a
+   reaction is a line of the document. */
 .sutra-math-rendered {
-  padding: 0.75rem 1rem;
+  display: inline-block;
+  max-width: 100%;
+  padding: 0.25rem 0.5rem;
   overflow-x: auto;
   cursor: pointer;
-  border-radius: 8px;
+  border-radius: 6px;
   transition: background-color var(--duration-fast) var(--ease-out);
 }
 
 .sutra-math-rendered:hover {
-  background-color: var(--surface);
+  background-color: var(--row-hover);
+}
+
+/* Selected as a node — picked up by the keyboard, about to be moved or
+   deleted. A tint, not the rule this used to draw around the column: the
+   inline formulas already say "selected" this way, so now the two agree. */
+.sutra-math-block.is-selected .sutra-math-rendered {
+  background-color: var(--accent-bg);
 }
 
 /* A citation still pointing at a Zotero item rather than a source note. It
@@ -510,31 +523,53 @@ blockquote.sutra-voice-source {
   }
 }
 
-/* Raw LaTeX, while editing. Monospaced because alignment matters in a formula
-   and the author is reading source, not prose. */
+/* Raw LaTeX, while editing.
+   
+   Monospaced, because alignment matters in a formula and the author is
+   reading source rather than prose — but with no box around it. A bordered,
+   filled input in the middle of a sentence is a widget the eye has to step
+   over: it is taller than the line it sits in, it shoves the words after it
+   along, and it stops reading as part of the sentence at exactly the moment
+   the author is deciding whether the formula belongs there.
+   
+   What marks it as source instead is the accent colour and the monospace —
+   both of which travel with the text rather than drawing a rectangle around
+   it. Sizes are in `em` so the source tracks whatever body size the reader
+   set, and `line-height: inherit` keeps the line from growing as it opens. */
 .sutra-math-textarea,
 .sutra-math-input {
   font-family: var(--font-mono);
-  font-size: 0.875rem;
-  line-height: 1.6;
-  color: var(--text-primary);
-  background-color: var(--surface);
-  border: 1px solid var(--accent);
-  border-radius: 8px;
-  padding: 0.5rem 0.75rem;
+  font-size: 0.9em;
+  line-height: inherit;
+  color: var(--accent);
+  background-color: transparent;
+  border: none;
+  border-radius: 0;
+  padding: 0;
   outline: none;
-  resize: vertical;
+  /* Grow to the formula rather than to a character count. Without this the
+     input holds `size` characters' worth of width, which the old border and
+     fill disguised and an unboxed input shows as a gap in the sentence.
+     Where it is unsupported the `size` attribute still applies, so this is
+     an improvement rather than a dependency. */
+  field-sizing: content;
 }
 
 .sutra-math-textarea {
   display: block;
   width: 100%;
+  /* The wrapper centres the rendered formula; source is read left to right. */
+  text-align: left;
+  /* No grabber: the box it would resize is gone, and the row count already
+     follows the number of lines in the formula. */
+  resize: none;
 }
 
 .sutra-math-input {
+  /* inline-block is what an input is; the baseline alignment is what keeps it
+     sitting on the same line as the words either side of it. */
   display: inline-block;
-  padding: 0.05rem 0.3rem;
-  border-radius: 4px;
+  vertical-align: baseline;
 }
 
 .sutra-math-textarea::placeholder,

@@ -12,6 +12,8 @@ export default function MathInlineView({
   node,
   updateAttributes,
   selected,
+  editor,
+  getPos,
 }: NodeViewProps) {
   const latex = (node.attrs.latex as string) ?? "";
   const [editing, setEditing] = useState(false);
@@ -33,6 +35,22 @@ export default function MathInlineView({
     if (draft !== latex) updateAttributes({ latex: draft });
   }
 
+  /**
+   * Finish, and put the caret back in the sentence, just after the formula.
+   *
+   * Same reason as the block view: closing the input unmounts the focused
+   * element, focus falls to the body, and the rest of the sentence typed
+   * after a formula was going nowhere. Here it matters more, because the
+   * words after an inline formula are usually the point of the sentence.
+   *
+   * Not on blur — that means the author clicked elsewhere on purpose.
+   */
+  function finish() {
+    commit();
+    const pos = typeof getPos === "function" ? getPos() : null;
+    editor.commands.focus(pos == null ? null : pos + node.nodeSize);
+  }
+
   if (editing) {
     return (
       <NodeViewWrapper as="span" className="sutra-math-inline-wrapper">
@@ -48,16 +66,20 @@ export default function MathInlineView({
             e.stopPropagation();
             if (e.key === "Enter") {
               e.preventDefault();
-              commit();
+              finish();
             }
             // Escape finishes and keeps the edit, same as the block view.
             if (e.key === "Escape") {
               e.preventDefault();
-              commit();
+              finish();
             }
           }}
           className="sutra-math-input"
-          size={Math.max(draft.length, 6)}
+          // A floor, not a width: `field-sizing: content` sizes this to the
+          // formula, and this is only what browsers without it fall back to.
+          // Small, so an empty formula is a caret to type into rather than a
+          // gap in the sentence.
+          size={Math.max(draft.length, 2)}
         />
       </NodeViewWrapper>
     );
