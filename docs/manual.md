@@ -806,6 +806,12 @@ search index_. Safe: it is rebuilt from the markdown.
 
 **A deleted note.** Look in `.sutra/trash` inside the vault.
 
+**Two copies of one note.** A sync client that cannot merge writes a second
+file beside the first — "Growth (conflicted copy).md", or your machine's name
+appended. Both appear in the list and both keep their text; Sutra opens the one
+it wrote, and never edits or deletes the other. Compare them, keep what you
+want, and delete the loser in Explorer.
+
 **Before any bulk rewrite** — a tag rename across the vault, a citation
 migration — every markdown file is copied into a timestamped folder under
 `.sutra/backups` first.

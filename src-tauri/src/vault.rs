@@ -181,6 +181,13 @@ impl Vault {
         let mut files = Vec::new();
         collect(&self.root, &self.root, 0, &mut files)?;
 
+        // Two files can claim one id — a sync client's conflicted copy, a note
+        // duplicated in Explorer. Which one wins used to depend on the order
+        // the filesystem happened to hand them back, which is not the same on
+        // Windows as on Linux: the same vault opened the note on one and its
+        // conflicted copy on the other.
+        files.sort_by(|a, b| canonical_first(a, b));
+
         let mut notes = Vec::new();
         let mut map = HashMap::with_capacity(files.len());
 
@@ -1706,6 +1713,21 @@ fn strip_links(line: &str) -> String {
 
     out.push_str(rest);
     out
+}
+
+/// Which of two files claiming one id is the one to open.
+///
+/// Every conflict convention *decorates* the name Sutra wrote — Dropbox adds
+/// "(conflicted copy)", OneDrive appends the machine name, Explorer adds
+/// "(1)". None of them shortens it. So the shortest file name is Sutra's own,
+/// and ties break lexicographically so the answer never depends on the
+/// filesystem's iteration order.
+///
+/// The other copy is not hidden: it is still listed, still on disk, and still
+/// readable. This decides only which one `[[links]]` and the note list open.
+fn canonical_first(a: &str, b: &str) -> std::cmp::Ordering {
+    let name = |path: &str| path.rsplit('/').next().unwrap_or(path).chars().count();
+    name(a).cmp(&name(b)).then_with(|| a.cmp(b))
 }
 
 /// One heading found somewhere in the vault.
@@ -3570,5 +3592,62 @@ mod tests {
         let texts: Vec<_> = overview.headings.iter().map(|h| h.text.as_str()).collect();
         assert!(texts.contains(&"My question"));
         assert!(texts.contains(&"Source says"));
+    }
+
+    #[test]
+    fn the_canonical_file_wins_over_every_conflict_convention() {
+        use std::cmp::Ordering;
+
+        // Each of these is a real thing a sync client or Explorer writes
+        // beside the file Sutra wrote. All of them add characters; none
+        // shortens the name.
+        for decorated in [
+            "Growth (conflicted copy).md",
+            "Growth-LAPTOP.md",
+            "Growth (1).md",
+            "Growth - Copy.md",
+            "Growth (DESKTOP-4F2K1 conflicted copy 2026-09-04).md",
+        ] {
+            assert_eq!(
+                canonical_first("Growth.md", decorated),
+                Ordering::Less,
+                "Growth.md should win over {decorated}"
+            );
+            // And the answer must not depend on which one was seen first.
+            assert_eq!(canonical_first(decorated, "Growth.md"), Ordering::Greater);
+        }
+    }
+
+    #[test]
+    fn a_deep_note_is_not_beaten_by_a_shallow_conflicted_copy() {
+        use std::cmp::Ordering;
+
+        // The comparison is on the file name, not the path: a note four
+        // folders down is not a worse candidate than a conflicted copy in the
+        // vault root.
+        assert_eq!(
+            canonical_first("a/b/c/d/Growth.md", "Growth (conflicted copy).md"),
+            Ordering::Less
+        );
+    }
+
+    #[test]
+    fn two_equally_named_files_are_decided_the_same_way_every_time() {
+        use std::cmp::Ordering;
+
+        // Same length, so the filesystem's order could otherwise decide.
+        // Lexicographic is arbitrary but stable, which is the whole point.
+        assert_eq!(
+            canonical_first("b/Growth.md", "a/Growth.md"),
+            Ordering::Greater
+        );
+        assert_eq!(
+            canonical_first("a/Growth.md", "b/Growth.md"),
+            Ordering::Less
+        );
+        assert_eq!(
+            canonical_first("a/Growth.md", "a/Growth.md"),
+            Ordering::Equal
+        );
     }
 }
