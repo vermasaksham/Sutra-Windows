@@ -3177,4 +3177,198 @@ mod tests {
         assert!(text.contains("alice"), "{text}");
         assert!(text.contains("tag: xrd"), "{text}");
     }
+
+    /// How the vault behaves at the size a PhD reaches, rather than the size a
+    /// unit test reaches.
+    ///
+    /// Ignored because it writes thousands of files and takes seconds; run it
+    /// deliberately:
+    ///
+    ///     cargo test --bins -- --ignored --nocapture scales_to_a_real_vault
+    ///
+    /// It asserts a ceiling rather than printing a number, because a benchmark
+    /// nobody fails is a benchmark nobody reads. The ceilings are deliberately
+    /// loose — they are there to catch an accidental O(n²), not to police
+    /// milliseconds on someone else's laptop.
+    #[test]
+    #[ignore = "writes thousands of files"]
+    fn scales_to_a_real_vault() {
+        use std::time::Instant;
+
+        let vault = TempVault::new();
+        const NOTES: usize = 5_000;
+
+        // Spread across folders, the way a vault actually grows, so the
+        // directory walk is not measured against one enormous flat folder.
+        let started = Instant::now();
+        for i in 0..NOTES {
+            let folder = format!("Strand {}/Sub {}", i % 7, (i / 7) % 5);
+            vault.create_folder(&folder).unwrap();
+            let doc = vault
+                .create_note(&format!("Note {i} about Sb2Se3 growth"), Some(folder))
+                .unwrap();
+            vault
+                .save_note(
+                    &doc.summary.id,
+                    &doc.summary.title,
+                    &format!(
+                        "Antimony selenide ribbons grow along the c axis in run {i}. \
+                         The seed layer decides the texture, and iodine transports \
+                         the material as $\\ce{{SbI3}}$ in the vapour."
+                    ),
+                )
+                .unwrap();
+        }
+        eprintln!("built {NOTES} notes in {:?}", started.elapsed());
+
+        let started = Instant::now();
+        let notes = vault.list_notes().unwrap();
+        let listing = started.elapsed();
+        eprintln!("list_notes: {listing:?} for {} notes", notes.len());
+        assert_eq!(notes.len(), NOTES);
+
+        // Listing reads every file, so it is linear by construction. The
+        // ceiling is what keeps it linear: at 5,000 notes this is the single
+        // call standing between launching the app and seeing anything.
+        assert!(
+            listing.as_millis() < 4_000,
+            "listing {NOTES} notes took {listing:?}, which a person waits through"
+        );
+
+        let started = Instant::now();
+        let folders = vault.list_folders().unwrap();
+        eprintln!(
+            "list_folders: {:?} for {} folders",
+            started.elapsed(),
+            folders.len()
+        );
+
+        let started = Instant::now();
+        let tags = vault.list_tags().unwrap();
+        eprintln!("list_tags: {:?} for {} tags", started.elapsed(), tags.len());
+
+        // Reading one note must not depend on how many others there are. If
+        // this ever tracks NOTES, something has started scanning the vault to
+        // find a file it already knows the path of.
+        let started = Instant::now();
+        vault.read_note(&notes[NOTES / 2].id).unwrap();
+        let one = started.elapsed();
+        eprintln!("read_note: {one:?}");
+        assert!(one.as_millis() < 50, "reading one note took {one:?}");
+    }
+
+    /// A sync client rewriting the vault underneath a save.
+    ///
+    /// The manual tells people to put their vault in OneDrive or Dropbox, so
+    /// this is not a hypothetical: another process replaces files on its own
+    /// schedule while Sutra is writing. The vault is a thesis, so the bar is
+    /// that no state is ever *torn* — a note may hold either version, but it
+    /// must never hold half of one, and it must never disappear.
+    #[test]
+    fn a_sync_client_rewriting_files_never_tears_a_note() {
+        use std::sync::Arc;
+        use std::sync::atomic::{AtomicBool, Ordering};
+
+        let vault = Arc::new(TempVault::new());
+        let doc = vault.create_note("Growth", None).unwrap();
+        let id = doc.summary.id.clone();
+        let path = vault.root().join(vault.relative_for(&id).unwrap());
+
+        let stop = Arc::new(AtomicBool::new(false));
+
+        // The impostor: another process writing a complete, valid version of
+        // the same note, the way a sync client lands a remote edit.
+        let intruder = {
+            let path = path.clone();
+            let id = id.clone();
+            let stop = Arc::clone(&stop);
+            std::thread::spawn(move || {
+                let mut n = 0;
+                while !stop.load(Ordering::Relaxed) {
+                    n += 1;
+                    let contents = format!(
+                        "---\nid: {id}\ntype: note\ntitle: Growth\ncreated: 2026-08-21T10:14:00Z\nupdated: 2026-08-21T10:14:00Z\n---\n\nfrom the other machine, revision {n}\n"
+                    );
+                    let _ = note::write_atomic(&path, &contents);
+                }
+            })
+        };
+
+        for i in 0..200 {
+            vault
+                .save_note(&id, "Growth", &format!("written here, revision {i}"))
+                .unwrap();
+
+            // Whatever is on disk at this instant must be a whole note. This is
+            // the assertion that matters: a half-written file is unrecoverable
+            // work, and the reason writes go through a temp file and a rename.
+            let raw = fs::read_to_string(&path).unwrap();
+            let (parsed, body) = frontmatter::split(&raw)
+                .unwrap_or_else(|e| panic!("torn note on disk: {e}\n---\n{raw}"));
+            let fm = parsed.expect("a note with no frontmatter appeared");
+            assert_eq!(fm.id, id, "the note's identity changed under it");
+            assert!(
+                body.contains("revision"),
+                "a note was truncated mid-write: {body:?}"
+            );
+        }
+
+        stop.store(true, Ordering::Relaxed);
+        intruder.join().unwrap();
+
+        assert!(path.exists(), "the note was lost entirely");
+        assert_eq!(vault.list_notes().unwrap().len(), 1);
+    }
+
+    /// The other thing a sync client does: leave a second copy behind.
+    ///
+    /// Dropbox writes "note (conflicted copy).md" and OneDrive writes
+    /// "note-LAPTOP.md", both carrying the same `id` in their frontmatter. The
+    /// rule here is that neither copy may be *hidden*: whichever one the app
+    /// opens, the other is still a file in the vault with its text intact, and
+    /// the listing does not silently drop it.
+    #[test]
+    fn a_conflicted_copy_hides_neither_version() {
+        let vault = TempVault::new();
+        let doc = vault.create_note("Growth", None).unwrap();
+        let id = doc.summary.id.clone();
+        vault
+            .save_note(&id, "Growth", "the version written here")
+            .unwrap();
+
+        let original = vault.root().join(vault.relative_for(&id).unwrap());
+        let conflicted = vault.root().join("Growth (conflicted copy).md");
+        let mut raw = fs::read_to_string(&original).unwrap();
+        raw = raw.replace("the version written here", "the version from the laptop");
+        fs::write(&conflicted, &raw).unwrap();
+
+        let notes = vault.list_notes().unwrap();
+        assert_eq!(
+            notes.len(),
+            2,
+            "a conflicted copy must be visible, not swallowed"
+        );
+
+        // Opening by id is unambiguous — first file wins — and, crucially,
+        // reading does not delete or rewrite the other copy.
+        let opened = vault.read_note(&id).unwrap();
+        assert!(opened.body.contains("written here"));
+        assert!(
+            fs::read_to_string(&conflicted)
+                .unwrap()
+                .contains("from the laptop"),
+            "the other copy must still be on disk, untouched"
+        );
+
+        // And saving does not clobber it either.
+        vault
+            .save_note(&id, "Growth", "edited after the conflict")
+            .unwrap();
+        assert!(
+            fs::read_to_string(&conflicted)
+                .unwrap()
+                .contains("from the laptop"),
+            "saving one copy overwrote the other"
+        );
+    }
 }
