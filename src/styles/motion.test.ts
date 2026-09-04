@@ -1,9 +1,18 @@
 import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
-/** Read a stylesheet beside this test as text. */
+/**
+ * Read a stylesheet beside this test as text.
+ *
+ * `fileURLToPath`, not `url.pathname`. On Windows — the platform this app
+ * ships on — a file URL's pathname is `/D:/a/...`, with a leading slash, and
+ * Node reads that as a path relative to the current drive: the CI failure this
+ * replaces was `ENOENT ... 'D:\D:\a\Sutra-Windows\...'`. On Linux the two
+ * agree, so nothing here could have caught it.
+ */
 const read = (file: string) =>
-  readFileSync(new URL(file, import.meta.url).pathname, "utf8");
+  readFileSync(fileURLToPath(new URL(file, import.meta.url)), "utf8");
 
 const index = read("./index.css");
 const tokens = read("./tokens.css");
