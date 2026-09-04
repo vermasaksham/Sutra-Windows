@@ -1,0 +1,104 @@
+# Cut a public release from a version tag.
+#
+# The point of this workflow is a link that does not expire and does not ask
+# the person clicking it to sign in. A CI artifact is neither: it is gone after
+# ninety days and it is only downloadable by someone with an account and access
+# to the repository, which is the wrong thing to hand to a colleague who just
+# wants to try the app.
+#
+# Either push a tag:
+#
+#   git tag v0.1.0 && git push origin v0.1.0
+#
+# or run this workflow from the Actions tab and give it the tag to cut. The
+# second exists because pushing a tag needs push rights on tag refs, which not
+# everyone who should be able to cut a release has; the workflow creates the
+# tag itself, at the commit it was dispatched from.
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Version tag to cut, e.g. v0.1.0"
+        required: true
+        type: string
+
+# Only the publish job writes, and only to create the release.
+permissions:
+  contents: read
+
+jobs:
+  # The whole Windows workflow — the same checks every commit gets, and the
+  # same installer build. Its artifact is what gets attached below, so the
+  # binary people download is the binary the tests passed against.
+  verify:
+    uses: ./.github/workflows/windows.yml
+
+  publish:
+    name: Publish
+    needs: verify
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      # A tag push carries the tag in the ref; a dispatch carries it in the
+      # input. Resolved once here so nothing downstream has to know which.
+      - name: The tag being cut
+        id: release
+        run: echo "tag=${{ inputs.tag || github.ref_name }}" >> "$GITHUB_OUTPUT"
+
+      # Three files carry the version, and an installer whose internal version
+      # disagrees with the tag on its download page is a trap: it installs as
+      # one version and is reported as another, and the mismatch surfaces
+      # months later as a bug that cannot be reproduced.
+      - name: The tag and the version must agree
+        env:
+          TAG: ${{ steps.release.outputs.tag }}
+        run: |
+          tag="${TAG#v}"
+          for file in \
+            "package.json:$(node -p 'require("./package.json").version')" \
+            "src-tauri/tauri.conf.json:$(node -p 'require("./src-tauri/tauri.conf.json").version')" \
+            "src-tauri/Cargo.toml:$(sed -n 's/^version = "\(.*\)"/\1/p' src-tauri/Cargo.toml | head -1)"
+          do
+            name="${file%%:*}"
+            version="${file##*:}"
+            if [ "$version" != "$tag" ]; then
+              echo "::error::$name says $version, the tag says $tag"
+              exit 1
+            fi
+            echo "$name: $version"
+          done
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: sutra-windows-unsigned
+          path: installers
+
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.release.outputs.tag }}
+        run: |
+          # `--target` creates the tag when it does not exist yet, which is the
+          # dispatch case, and is a no-op agreeing with reality when the tag
+          # push is what started this.
+          notes="docs/releases/${TAG}.md"
+          if [ -f "$notes" ]; then
+            notes_args=(--notes-file "$notes")
+          else
+            # No notes written for this tag. Better a release with generated
+            # notes than no release, and better to say so than to fail quietly.
+            echo "::warning::no $notes; falling back to generated notes"
+            notes_args=(--generate-notes)
+          fi
+          gh release create "$TAG" \
+            installers/msi/*.msi installers/nsis/*.exe \
+            --target "$GITHUB_SHA" \
+            --title "Sutra $TAG" \
+            "${notes_args[@]}"

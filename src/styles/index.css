@@ -1,0 +1,96 @@
+/* Source Sans 3, self-hosted. Sutra is local-first, so the app must render
+   correctly with no network — no Google Fonts CDN. Vite fingerprints and
+   bundles the woff2 files out of node_modules. */
+@import "@fontsource/source-sans-3/400.css";
+@import "@fontsource/source-sans-3/400-italic.css";
+@import "@fontsource/source-sans-3/600.css";
+@import "@fontsource/source-sans-3/700.css";
+
+/* KaTeX's stylesheet, self-hosted with the fonts it references. Same reason as
+   Source Sans 3: the app has to render with no network. */
+@import "katex/dist/katex.min.css";
+
+@import "tailwindcss";
+@import "./tokens.css";
+@import "./editor.css";
+
+/*
+ * Bridge the raw tokens into Tailwind's theme so utilities exist for them.
+ *
+ * `@theme inline` matters here: it makes the generated utilities emit
+ * `var(--canvas)` rather than baking in the hex value at build time. That is
+ * what lets a single `data-theme` swap repaint the whole app at runtime.
+ *
+ * Text colours are aliased to "ink" so the utilities read `text-ink` and
+ * `text-ink-soft` instead of the doubled-up `text-text-primary`.
+ */
+@theme inline {
+  --font-reading: var(--font-reading);
+  --color-rail: var(--rail);
+  --color-canvas: var(--canvas);
+  --color-surface: var(--surface);
+  --color-border: var(--border);
+  --color-row-hover: var(--row-hover);
+  --color-row-active: var(--row-active);
+
+  --color-ink: var(--text-primary);
+  --color-ink-soft: var(--text-secondary);
+  --color-ink-muted: var(--text-muted);
+
+  --color-accent: var(--accent);
+  --color-accent-bg: var(--accent-bg);
+  --color-highlight: var(--highlight);
+  --color-highlight-bg: var(--highlight-bg);
+
+  --font-sans: var(--font-body);
+  --font-mono: var(--font-mono);
+
+  --ease-out: var(--ease-out);
+  /* Tailwind's own defaults for every `transition-*` utility, so a bare
+     `transition-colors` is already the app's motion and no component has to
+     repeat a duration and a curve. Repeating them was the real problem: the
+     tokens governed ten rules in the stylesheets while a hardcoded 150ms
+     governed the hundred in the components, and only the ten of them answered
+     to prefers-reduced-motion. */
+  --default-transition-duration: var(--duration-fast);
+  --default-transition-timing-function: var(--ease-out);
+  --container-content: var(--content-width);
+  --shadow-pane: var(--shadow);
+  --spacing-rail: var(--rail-width);
+  --spacing-list: var(--list-width);
+  --spacing-context: var(--context-width);
+}
+
+@layer base {
+  html {
+    /* Tauri's webview is a browser; stop it behaving like a web page. */
+    -webkit-user-select: none;
+    user-select: none;
+  }
+
+  body {
+    background-color: var(--rail);
+    color: var(--text-primary);
+    font-family: var(--font-body);
+    font-size: var(--text-size-body);
+    line-height: var(--leading-body);
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+
+  /* Anywhere the user is actually writing or reading prose, give selection
+     back. Editor surfaces opt in with .selectable. */
+  .selectable,
+  input,
+  textarea,
+  [contenteditable="true"] {
+    -webkit-user-select: text;
+    user-select: text;
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+    border-radius: 2px;
+  }
+}

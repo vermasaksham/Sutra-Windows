@@ -1,0 +1,786 @@
+/*
+ * Editor surface.
+ *
+ * Written as plain CSS against the tokens rather than Tailwind utilities: the
+ * editor renders nodes ProseMirror creates, so there is no JSX to hang classes
+ * on. Same rule applies — every colour is a variable.
+ */
+
+.sutra-prose {
+  outline: none;
+  /* The note is set in the reading font, which defaults to the interface one
+     — so a person who wants to write in a serif gets that without their
+     sidebar turning into a broadsheet. */
+  font-family: var(--font-reading);
+  font-size: var(--text-size-body);
+  line-height: var(--leading-body);
+  /* Room to click below the last block without hunting for it. */
+  padding-block-end: 30vh;
+}
+
+/* --- Vertical rhythm ---------------------------------------------------- */
+
+.sutra-prose > * + * {
+  margin-block-start: 0.5rem;
+}
+
+.sutra-prose p {
+  line-height: var(--leading-body);
+}
+
+.sutra-prose h1,
+.sutra-prose h2,
+.sutra-prose h3 {
+  font-weight: 600;
+  line-height: 1.25;
+  letter-spacing: -0.011em;
+  color: var(--text-primary);
+}
+
+.sutra-prose h1 {
+  font-size: 1.875rem;
+}
+.sutra-prose h2 {
+  font-size: 1.5rem;
+}
+.sutra-prose h3 {
+  font-size: 1.25rem;
+}
+
+/* Headings need air above them, but not when they open the document. */
+.sutra-prose > h1 + *,
+.sutra-prose > h2 + *,
+.sutra-prose > h3 + * {
+  margin-block-start: 0.375rem;
+}
+.sutra-prose > * + h1 {
+  margin-block-start: 2rem;
+}
+.sutra-prose > * + h2 {
+  margin-block-start: 1.75rem;
+}
+.sutra-prose > * + h3 {
+  margin-block-start: 1.5rem;
+}
+
+/* --- Placeholder -------------------------------------------------------- */
+
+.sutra-prose .is-empty::before {
+  content: attr(data-placeholder);
+  color: var(--text-muted);
+  float: left;
+  height: 0;
+  pointer-events: none;
+}
+
+/* --- Inline ------------------------------------------------------------- */
+
+.sutra-prose .sutra-link {
+  color: var(--accent);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+
+.sutra-prose code {
+  font-family: var(--font-mono);
+  font-size: 0.875em;
+  background-color: var(--highlight-bg);
+  color: var(--highlight);
+  padding: 0.1em 0.35em;
+  border-radius: 4px;
+}
+
+.sutra-prose mark {
+  background-color: var(--highlight-bg);
+  color: var(--highlight);
+  border-radius: 2px;
+  padding: 0 0.15em;
+}
+
+/* --- Lists -------------------------------------------------------------- */
+
+.sutra-prose ul,
+.sutra-prose ol {
+  padding-inline-start: 1.5rem;
+}
+
+.sutra-prose ul {
+  list-style: disc;
+}
+.sutra-prose ol {
+  list-style: decimal;
+}
+.sutra-prose ul ul {
+  list-style: circle;
+}
+
+.sutra-prose li::marker {
+  color: var(--text-muted);
+}
+
+.sutra-prose li > p {
+  margin: 0;
+}
+
+.sutra-prose li + li {
+  margin-block-start: 0.125rem;
+}
+
+/* Checkboxes. The list itself carries no marker — the input is the marker. */
+.sutra-prose ul[data-type="taskList"] {
+  list-style: none;
+  padding-inline-start: 0;
+}
+
+.sutra-prose ul[data-type="taskList"] li {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.6rem;
+}
+
+.sutra-prose ul[data-type="taskList"] li > label {
+  /* Nudge the box onto the text baseline rather than the line box top. */
+  margin-block-start: 0.28em;
+  flex-shrink: 0;
+  display: flex;
+}
+
+.sutra-prose ul[data-type="taskList"] li > div {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.sutra-prose input[type="checkbox"] {
+  appearance: none;
+  width: 1rem;
+  height: 1rem;
+  border: 1.5px solid var(--border);
+  border-radius: 4px;
+  background-color: var(--surface);
+  cursor: pointer;
+  display: grid;
+  place-content: center;
+  transition:
+    background-color var(--duration-fast) var(--ease-out),
+    border-color var(--duration-fast) var(--ease-out);
+}
+
+.sutra-prose input[type="checkbox"]:hover {
+  border-color: var(--accent);
+}
+
+.sutra-prose input[type="checkbox"]:checked {
+  background-color: var(--accent);
+  border-color: var(--accent);
+}
+
+.sutra-prose input[type="checkbox"]:checked::after {
+  content: "";
+  width: 0.55rem;
+  height: 0.32rem;
+  border-inline-start: 2px solid var(--surface);
+  border-block-end: 2px solid var(--surface);
+  transform: translateY(-1px) rotate(-45deg);
+}
+
+/* A ticked item recedes; it is done. */
+.sutra-prose li[data-checked="true"] > div {
+  color: var(--text-muted);
+  text-decoration: line-through;
+}
+
+/* --- Blocks ------------------------------------------------------------- */
+
+.sutra-prose blockquote {
+  border-inline-start: 3px solid var(--border);
+  padding-inline-start: 1rem;
+  color: var(--text-secondary);
+  font-style: italic;
+}
+
+.sutra-prose pre {
+  font-family: var(--font-mono);
+  font-size: 0.875rem;
+  line-height: 1.6;
+  background-color: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.875rem 1rem;
+  overflow-x: auto;
+}
+
+/* Inside a code block the inline-code chip styling must not apply. */
+.sutra-prose pre code {
+  background: none;
+  color: var(--text-primary);
+  padding: 0;
+  font-size: inherit;
+}
+
+.sutra-prose hr {
+  border: none;
+  border-block-start: 1px solid var(--border);
+  margin-block: 1.5rem;
+}
+
+/* Selected divider — it has no text, so it needs its own selected state. */
+.sutra-prose hr.ProseMirror-selectednode {
+  border-block-start-color: var(--accent);
+}
+
+.sutra-image {
+  max-width: 100%;
+  height: auto;
+  border-radius: 8px;
+  display: block;
+}
+
+.sutra-image.ProseMirror-selectednode {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* --- Tables ------------------------------------------------------------- */
+
+.sutra-prose table {
+  border-collapse: collapse;
+  table-layout: fixed;
+  width: 100%;
+  margin-block: 1rem;
+  overflow: hidden;
+}
+
+.sutra-prose th,
+.sutra-prose td {
+  border: 1px solid var(--border);
+  padding: 0.4rem 0.6rem;
+  vertical-align: top;
+  position: relative;
+  min-width: 3rem;
+}
+
+.sutra-prose th {
+  background-color: var(--surface);
+  font-weight: 600;
+  text-align: start;
+}
+
+.sutra-prose td > p,
+.sutra-prose th > p {
+  margin: 0;
+}
+
+.sutra-prose .selectedCell::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background-color: var(--accent-bg);
+  opacity: 0.6;
+  pointer-events: none;
+}
+
+.sutra-prose .column-resize-handle {
+  position: absolute;
+  inset-block: 0;
+  inset-inline-end: -2px;
+  width: 3px;
+  background-color: var(--accent);
+  cursor: col-resize;
+}
+
+/* --- Selection ---------------------------------------------------------- */
+
+.sutra-prose ::selection {
+  background-color: var(--accent-bg);
+}
+
+.sutra-prose .ProseMirror-gapcursor::after {
+  border-block-start-color: var(--text-primary);
+}
+
+/* --- Drag handle -------------------------------------------------------- */
+
+/*
+ * Revealed on approach, not always present. The handle is portalled to the
+ * body by the extension and positioned next to whichever block the pointer is
+ * over; it fades rather than pops.
+ */
+.sutra-drag-handle {
+  display: grid;
+  -webkit-user-select: none;
+  user-select: none;
+  place-items: center;
+  width: 1.5rem;
+  height: 1.5rem;
+  margin-inline-end: 0.25rem;
+  border-radius: 6px;
+  color: var(--text-muted);
+  background-color: transparent;
+  cursor: grab;
+  transition: background-color var(--duration-fast) var(--ease-out);
+}
+
+/*
+ * The extension reveals and hides its wrapper by setting `visibility` inline,
+ * which cannot be transitioned. We take the reveal over: force the wrapper
+ * permanently visible, then drive opacity ourselves so the handle fades in
+ * and out instead of blinking. `!important` is deliberate — it is the only
+ * way to outrank the library's inline style. `pointer-events` keeps the
+ * faded-out handle inert.
+ */
+.sutra-drag-handle-wrapper {
+  visibility: visible !important;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--duration-fast) var(--ease-out);
+}
+
+.sutra-drag-handle-wrapper:not([style*="visibility: hidden"]) {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.sutra-drag-handle:hover {
+  background-color: var(--accent-bg);
+  color: var(--accent);
+}
+
+.sutra-drag-handle:active {
+  cursor: grabbing;
+}
+
+/* --- Wikilinks ---------------------------------------------------------- */
+
+.sutra-wikilink-wrapper {
+  display: inline;
+}
+
+.sutra-wikilink {
+  color: var(--accent);
+  background-color: var(--accent-bg);
+  border-radius: 4px;
+  padding: 0.05em 0.3em;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background-color var(--duration-fast) var(--ease-out);
+}
+
+.sutra-wikilink:hover {
+  background-color: var(--accent);
+  color: var(--surface);
+}
+
+/* A link whose target no longer exists. The text is still in the file, so it
+   is shown rather than hidden — in the highlight colour, which is reserved for
+   things that want attention. */
+.sutra-wikilink.is-missing {
+  color: var(--highlight);
+  background-color: var(--highlight-bg);
+  cursor: default;
+  text-decoration: line-through;
+}
+
+.sutra-wikilink.is-missing:hover {
+  background-color: var(--highlight-bg);
+  color: var(--highlight);
+}
+
+/* Search excerpts: FTS5 marks the matched terms. */
+.sutra-excerpt mark {
+  background-color: var(--highlight-bg);
+  color: var(--highlight);
+  border-radius: 2px;
+}
+
+/* --- Maths and chemistry ------------------------------------------------ */
+
+.sutra-math-inline-wrapper {
+  display: inline;
+}
+
+.sutra-math-inline {
+  cursor: pointer;
+  border-radius: 4px;
+  padding: 0 0.15em;
+  transition: background-color var(--duration-fast) var(--ease-out);
+}
+
+.sutra-math-inline:hover,
+.sutra-math-inline.is-selected {
+  background-color: var(--accent-bg);
+}
+
+/* A formula with nothing in it still needs to be findable and clickable. */
+.sutra-math-inline.is-empty::after {
+  content: "empty formula";
+  color: var(--text-muted);
+  font-size: 0.85em;
+  font-style: italic;
+}
+
+.sutra-math-block {
+  margin-block: 1rem;
+  /* Centres the formula, and lets the shrink-to-fit box below hug it. */
+  text-align: center;
+}
+
+/* A displayed equation is a line of the document, not a panel in it. The
+   padding is only what an equation with a tall fraction or a long arrow needs
+   in order not to touch the prose above and below, and the hover is the
+   faintest tint the app has — enough to say "this is clickable", not enough
+   to draw a slab around a reaction the reader is trying to read. */
+/* Shrink-to-fit, so hover and selection tint the equation rather than painting
+   a band across the whole column. That was the difference between "this bit of
+   the document responds to you" and a panel sitting in the note — and a
+   reaction is a line of the document. */
+.sutra-math-rendered {
+  display: inline-block;
+  max-width: 100%;
+  padding: 0.25rem 0.5rem;
+  overflow-x: auto;
+  cursor: pointer;
+  border-radius: 6px;
+  transition: background-color var(--duration-fast) var(--ease-out);
+}
+
+.sutra-math-rendered:hover {
+  background-color: var(--row-hover);
+}
+
+/* Selected as a node — picked up by the keyboard, about to be moved or
+   deleted. A tint, not the rule this used to draw around the column: the
+   inline formulas already say "selected" this way, so now the two agree. */
+.sutra-math-block.is-selected .sutra-math-rendered {
+  background-color: var(--accent-bg);
+}
+
+/* A citation still pointing at a Zotero item rather than a source note. It
+   works only while Zotero is running, so it is marked — not as an error, but
+   as something with a shelf life. */
+.sutra-citation.is-legacy {
+  border-block-end: 1px dotted var(--highlight);
+}
+
+/*
+ * The three voices of a literature note.
+ *
+ * Only ever a reading aid: these are decorations on ordinary markdown headings,
+ * so nothing here reaches the file. The source's voice gets the strongest
+ * treatment because it is the one that must never be mistaken for the reader's
+ * own words — an evidence block, set apart. The other two are marked more
+ * quietly; they are already yours.
+ */
+.sutra-voice {
+  border-inline-start: 2px solid transparent;
+  padding-inline-start: 0.9rem;
+  margin-inline-start: -0.9rem;
+}
+
+.sutra-voice-heading {
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  margin-block: 1.5rem 0.4rem;
+}
+
+.sutra-voice-source {
+  border-inline-start-color: var(--accent);
+}
+.sutra-voice-source.sutra-voice-heading {
+  color: var(--accent);
+}
+/* The quoted claim itself, which is what an evidence block is for. */
+.sutra-voice-source blockquote,
+blockquote.sutra-voice-source {
+  background: var(--accent-bg);
+  border-radius: 0 6px 6px 0;
+}
+
+.sutra-voice-interpretation {
+  border-inline-start-color: var(--border);
+}
+.sutra-voice-interpretation.sutra-voice-heading {
+  color: var(--text-muted);
+}
+
+.sutra-voice-question {
+  border-inline-start-color: var(--highlight);
+}
+.sutra-voice-question.sutra-voice-heading {
+  color: var(--highlight);
+}
+
+/* On paper the rules stay — they are the only thing separating a claim from a
+   conclusion once the colours are gone. */
+@media print {
+  .sutra-voice {
+    border-inline-start-color: #999 !important;
+  }
+  .sutra-voice-source {
+    border-inline-start-color: #000 !important;
+  }
+}
+
+/* Raw LaTeX, while editing.
+   
+   Monospaced, because alignment matters in a formula and the author is
+   reading source rather than prose — but with no box around it. A bordered,
+   filled input in the middle of a sentence is a widget the eye has to step
+   over: it is taller than the line it sits in, it shoves the words after it
+   along, and it stops reading as part of the sentence at exactly the moment
+   the author is deciding whether the formula belongs there.
+   
+   What marks it as source instead is the accent colour and the monospace —
+   both of which travel with the text rather than drawing a rectangle around
+   it. Sizes are in `em` so the source tracks whatever body size the reader
+   set, and `line-height: inherit` keeps the line from growing as it opens. */
+.sutra-math-textarea,
+.sutra-math-input {
+  font-family: var(--font-mono);
+  font-size: 0.9em;
+  line-height: inherit;
+  color: var(--accent);
+  background-color: transparent;
+  border: none;
+  border-radius: 0;
+  padding: 0;
+  outline: none;
+  /* Grow to the formula rather than to a character count. Without this the
+     input holds `size` characters' worth of width, which the old border and
+     fill disguised and an unboxed input shows as a gap in the sentence.
+     Where it is unsupported the `size` attribute still applies, so this is
+     an improvement rather than a dependency. */
+  field-sizing: content;
+}
+
+.sutra-math-textarea {
+  display: block;
+  width: 100%;
+  /* The wrapper centres the rendered formula; source is read left to right. */
+  text-align: left;
+  /* No grabber: the box it would resize is gone, and the row count already
+     follows the number of lines in the formula. */
+  resize: none;
+}
+
+.sutra-math-input {
+  /* inline-block is what an input is; the baseline alignment is what keeps it
+     sitting on the same line as the words either side of it. */
+  display: inline-block;
+  vertical-align: baseline;
+}
+
+.sutra-math-textarea::placeholder,
+.sutra-math-input::placeholder {
+  color: var(--text-muted);
+}
+
+/* KaTeX defaults to the surrounding colour, which is what we want, but its
+   error markup hardcodes red. Route that through the token instead. */
+.sutra-prose .katex {
+  color: inherit;
+}
+
+.sutra-prose .katex .katex-error {
+  color: var(--highlight) !important;
+}
+
+/* Long display formulas scroll rather than widening the content column. */
+.sutra-prose .katex-display {
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding-block: 0.2em;
+}
+
+/* --- Images ------------------------------------------------------------- */
+
+.sutra-image-wrapper {
+  margin-block: 1rem;
+}
+
+.sutra-image.is-selected {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* A reference that will not load. The file may have been moved out of the
+   vault, and showing nothing at all would hide that from the author. */
+.sutra-image-missing {
+  border: 1px dashed var(--border);
+  border-radius: 8px;
+  padding: 0.75rem 1rem;
+  color: var(--text-muted);
+  font-size: 0.875rem;
+}
+
+.sutra-image-missing code {
+  background: none;
+  color: var(--highlight);
+  padding: 0;
+}
+
+/* --- Page cover --------------------------------------------------------- */
+
+.sutra-cover {
+  position: relative;
+  /* Bleeds sideways, never upward. A negative top margin pulled the cover
+     over the folder breadcrumb above it, so adding a cover picture hid the
+     one control that says where the note lives. */
+  margin: 0 -1.5rem 1rem;
+  height: 11rem;
+  overflow: hidden;
+  border-radius: 0 0 10px 10px;
+}
+
+.sutra-cover img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.sutra-cover-change {
+  position: absolute;
+  right: 0.75rem;
+  bottom: 0.75rem;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background-color: var(--surface);
+  color: var(--text-secondary);
+  font-size: 0.75rem;
+  padding: 0.2rem 0.5rem;
+  opacity: 0;
+  transition: opacity var(--duration-fast) var(--ease-out);
+}
+
+.sutra-cover:hover .sutra-cover-change,
+.sutra-cover-change:focus-visible {
+  opacity: 1;
+}
+
+/* --- Toast -------------------------------------------------------------- */
+
+/* Rises rather than appears, so a failure that arrives while you are reading
+   is noticed without yanking attention. */
+@keyframes sutra-toast-in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, 0.5rem);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, 0);
+  }
+}
+
+.sutra-toast {
+  animation: sutra-toast-in var(--duration-normal) var(--ease-out);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sutra-toast {
+    animation: none;
+  }
+}
+
+/* --- Citations ---------------------------------------------------------- */
+
+.sutra-citation-wrapper {
+  display: inline;
+}
+
+.sutra-citation {
+  color: var(--accent);
+  border-radius: 4px;
+  padding: 0 0.15em;
+  white-space: nowrap;
+  transition: background-color var(--duration-fast) var(--ease-out);
+}
+
+.sutra-citation:hover,
+.sutra-citation.is-selected {
+  background-color: var(--accent-bg);
+}
+
+.sutra-citation.is-loading {
+  color: var(--text-muted);
+}
+
+/* Asked for and not in the library. The key is still in the file, so saying
+   so is more use than rendering nothing. */
+.sutra-citation.is-missing {
+  color: var(--highlight);
+  background-color: var(--highlight-bg);
+}
+
+/* --- Printing ----------------------------------------------------------- */
+
+/*
+ * PDF export goes through the system print dialog, so the print stylesheet is
+ * the export format. Everything that is chrome disappears and the note is laid
+ * out for paper: black on white, no interface, no interaction affordances.
+ */
+@media print {
+  .sutra-no-print {
+    display: none !important;
+  }
+
+  html,
+  body {
+    background: #ffffff !important;
+    color: #000000 !important;
+  }
+
+  /* The app is a fixed-height flex shell with its own scroll container, which
+     would otherwise print exactly one screenful. The pane also carries its own
+     ground, which would print as a tinted rectangle behind the text. */
+  .sutra-shell,
+  .sutra-main {
+    display: block !important;
+    height: auto !important;
+    overflow: visible !important;
+    background: #ffffff !important;
+    /* The container keeps a strip clear for a side-docked toolbar. The
+       toolbar does not print, so neither should the strip. */
+    padding: 0 !important;
+  }
+
+  .sutra-page {
+    max-width: none !important;
+    padding: 0 !important;
+  }
+
+  .sutra-prose {
+    padding-block-end: 0 !important;
+  }
+
+  /* Keep a heading with the text it introduces, and never split a formula or a
+     picture across a page. */
+  h1,
+  h2,
+  h3 {
+    break-after: avoid;
+  }
+
+  .sutra-math-block,
+  .sutra-image-wrapper,
+  table,
+  pre {
+    break-inside: avoid;
+  }
+
+  /* A link's destination is invisible on paper otherwise. */
+  .sutra-prose a[href^="http"]::after {
+    content: " (" attr(href) ")";
+    font-size: 0.85em;
+    color: #444444;
+  }
+
+  .sutra-citation,
+  .sutra-wikilink {
+    color: #000000 !important;
+    background: none !important;
+  }
+}

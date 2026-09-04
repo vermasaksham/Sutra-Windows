@@ -1,0 +1,51 @@
+[package]
+name = "sutra"
+version = "0.1.0"
+description = "Local-first, block-based notes for materials-chemistry research"
+edition = "2024"
+rust-version = "1.85"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+base64 = "0.23.1"
+docx-rs = "0.4.22"
+notify-debouncer-full = "0.5"
+percent-encoding = "2.3.2"
+rusqlite = { version = "0.40.2", features = ["bundled"] }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.151"
+serde_yaml_ng = "0.10"
+tauri = { version = "2", features = [] }
+tauri-plugin-dialog = "2"
+thiserror = "2"
+time = { version = "0.3.45", features = ["formatting", "parsing", "serde-well-known", "macros"] }
+ulid = "3"
+# Zotero is plain HTTP on 127.0.0.1 and needed no TLS; the Anthropic API is
+# HTTPS, so `rustls` is here for step 8's optional assistant and nothing else.
+# `json` is what gives `send_json`/`read_json`.
+ureq = { version = "3.4.0", default-features = false, features = [
+  "rustls",
+  "json",
+] }
+# Reading back the .docx docx-rs just wrote, so vector copies of the formulas
+# can be woven in beside the raster ones. docx-rs pulls this in already.
+zip = "7.2.0"
+
+# Windows is the primary target and a leading dot does not hide a folder there,
+# so `.sutra` needs its hidden attribute set through the API that owns it.
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = [
+  "Win32_Storage_FileSystem",
+  "Win32_Foundation",
+] }
+
+[profile.release]
+# Smaller, faster binaries for shipping. `panic = "abort"` drops the unwinding
+# machinery: if the app panics it dies rather than trying to recover.
+codegen-units = 1
+lto = true
+opt-level = "s"
+panic = "abort"
+strip = true
