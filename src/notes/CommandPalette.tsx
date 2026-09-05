@@ -42,6 +42,7 @@ type Props = {
   onExportDocx: () => void;
   onExportPdf: () => void;
   onManageTags: () => void;
+  onResearchOverview: () => void;
   onNewView: () => void;
   onFindDuplicates: () => void;
   /** Whether assistance is switched on, so the command can say which way. */
@@ -71,6 +72,7 @@ export default function CommandPalette({
   onExportDocx,
   onExportPdf,
   onManageTags,
+  onResearchOverview,
   onNewView,
   onFindDuplicates,
   aiEnabled,
@@ -139,6 +141,14 @@ export default function CommandPalette({
       label: "Manage tags — rename, merge, tidy",
       group: "Vault",
       run: onManageTags,
+    });
+
+    out.push({
+      id: "overview",
+      label: "Where the work is — open questions and unused sources",
+      group: "Vault",
+      hint: "counted from your vault, nothing else",
+      run: onResearchOverview,
     });
 
     out.push({
@@ -225,6 +235,7 @@ export default function CommandPalette({
     onOpenSettings,
     onOpenZotero,
     onManageTags,
+    onResearchOverview,
     onNewView,
     onFindDuplicates,
     aiEnabled,

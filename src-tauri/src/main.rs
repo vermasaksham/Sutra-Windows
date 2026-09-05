@@ -20,6 +20,7 @@ mod related;
 mod state;
 mod tags;
 mod typography;
+mod updates;
 mod vault;
 mod views;
 mod watcher;
@@ -51,6 +52,10 @@ fn main() {
         // function. A command that is not listed here does not exist as far as
         // the frontend is concerned.
         .invoke_handler(tauri::generate_handler![
+            commands::research_overview,
+            commands::check_for_updates,
+            commands::app_version,
+            commands::open_release_page,
             commands::pick_vault,
             commands::current_vault,
             commands::list_notes,

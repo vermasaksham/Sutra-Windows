@@ -348,6 +348,44 @@ pub fn zotero_open(app: AppHandle, key: String) -> Result<()> {
     crate::state::provider(&app).open(&key)
 }
 
+/// Everything the research overview is built from, in one vault scan.
+#[tauri::command]
+pub fn research_overview(state: State<'_, AppState>) -> Result<crate::vault::Overview> {
+    state.with_vault(|vault| vault.overview())
+}
+
+/// Ask GitHub whether a newer Sutra has been released.
+///
+/// Only ever called from a button. Sutra computes everything else from your
+/// own vault and says so, so a check that ran on its own would be a promise
+/// broken quietly.
+#[tauri::command]
+pub fn check_for_updates() -> Result<crate::updates::UpdateStatus> {
+    crate::updates::check()
+}
+
+/// The version running, without asking anything of the network.
+#[tauri::command]
+pub fn app_version() -> String {
+    crate::updates::current_version().to_string()
+}
+
+/// Open a Sutra release page in the browser.
+///
+/// Restricted to this project's own releases rather than taking any URL: a
+/// command that hands an arbitrary string to the shell is a command that opens
+/// whatever a note tells it to.
+#[tauri::command]
+pub fn open_release_page(url: String) -> Result<()> {
+    const PREFIX: &str = "https://github.com/vermasaksham/Sutra-Windows/releases";
+    if !url.starts_with(PREFIX) {
+        return Err(crate::error::SutraError::Zotero(
+            "that is not a Sutra release page".into(),
+        ));
+    }
+    crate::updates::open(&url)
+}
+
 /// Copy a file into the vault's attachments folder.
 ///
 /// Returns the vault-relative reference to put in the markdown. The frontend

@@ -18,7 +18,7 @@ use docx_rs::*;
 use serde::Deserialize;
 use std::path::Path;
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Default, Deserialize)]
 pub struct Run {
     #[serde(default)]
     pub text: String,
@@ -90,8 +90,11 @@ struct VectorCopy {
 pub struct ExportDocument {
     pub title: String,
     pub blocks: Vec<Block>,
+    /// The bibliography, in citation order, each entry already split into runs
+    /// so a journal name Zotero italicised arrives italic rather than wrapped
+    /// in asterisks.
     #[serde(default)]
-    pub references: Vec<String>,
+    pub references: Vec<Vec<Run>>,
 }
 
 /// Word measures pictures in EMU: 914400 to the inch, and a screen pixel is
@@ -309,8 +312,7 @@ pub fn write_docx(document: &ExportDocument, path: &Path) -> Result<()> {
                 .style("Heading2"),
         );
         for reference in &document.references {
-            docx = docx
-                .add_paragraph(Paragraph::new().add_run(docx_rs::Run::new().add_text(reference)));
+            docx = docx.add_paragraph(paragraph_of(reference));
         }
     }
 
@@ -581,7 +583,21 @@ mod tests {
                     alt: "\\ce{Sb2Se3}".into(),
                 },
             ],
-            references: vec!["Zhou et al. (2019) Quasi-1D Sb2Se3 ribbons doi:10.1000/xyz".into()],
+            references: vec![vec![
+                Run {
+                    text: "Zhou, Y. et al. Quasi-1D Sb2Se3 ribbons. ".into(),
+                    ..Default::default()
+                },
+                Run {
+                    text: "Nature Energy".into(),
+                    italic: true,
+                    ..Default::default()
+                },
+                Run {
+                    text: " 2019, 4, 748.".into(),
+                    ..Default::default()
+                },
+            ]],
         }
     }
 
@@ -621,7 +637,10 @@ mod tests {
         assert!(xml.contains("Sb2Se3 growth log"), "title missing");
         assert!(xml.contains("Transport reaction"), "heading missing");
         assert!(xml.contains("Worth isolating."), "quote missing");
-        assert!(xml.contains("Zhou et al."), "bibliography missing");
+        assert!(
+            xml.contains("Quasi-1D Sb2Se3 ribbons"),
+            "bibliography missing"
+        );
 
         let _ = std::fs::remove_file(path);
     }
@@ -795,6 +814,33 @@ mod tests {
         }];
         let path = std::env::temp_dir().join("sutra-not-png.docx");
         assert!(write_docx(&document, &path).is_err());
+        let _ = std::fs::remove_file(path);
+    }
+
+    /// The bibliography reaches Word as formatted text, not as markdown.
+    ///
+    /// A styled entry comes back from Zotero as HTML and is flattened to
+    /// markdown on the way here, which is how a journal name arrives as
+    /// *Nature Energy*. Sent as one flat string it printed the asterisks —
+    /// the one place in the app where markup leaked into a finished document.
+    #[test]
+    fn a_bibliography_is_italicised_rather_than_asterisked() {
+        let path = write_to_temp(&sample());
+        let xml = entry(&path, "word/document.xml");
+
+        assert!(xml.contains("References"), "no bibliography heading");
+        assert!(xml.contains("Nature Energy"), "the journal name is missing");
+        assert!(
+            !xml.contains("*Nature Energy*"),
+            "the journal name printed its markdown: {xml}"
+        );
+
+        // The italic run must actually be italic, not merely un-asterisked.
+        let italic = xml
+            .split("<w:r>")
+            .any(|run| run.contains("Nature Energy") && run.contains("<w:i"));
+        assert!(italic, "the journal name is not italicised in the document");
+
         let _ = std::fs::remove_file(path);
     }
 }

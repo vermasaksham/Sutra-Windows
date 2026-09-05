@@ -1,5 +1,6 @@
 import type { JSONContent } from "@tiptap/core";
-import { resolved } from "../editor/citation/citationStore";
+import { positionOf, resolved } from "../editor/citation/citationStore";
+import { emphasisRuns, marker } from "../notes/citationStyle";
 import { mathToImage } from "./mathToImage";
 import { encodeSvg, rasterise } from "./rasterise";
 import { attachmentUrl } from "../editor/image/attachmentUrl";
@@ -55,7 +56,7 @@ export type ExportDocument = {
   title: string;
   blocks: Block[];
   /** Formatted bibliography lines, if the note cites anything. */
-  references: string[];
+  references: Run[][];
 };
 
 const MARKS: Record<string, keyof Run> = {
@@ -85,7 +86,13 @@ function runsFrom(nodes: JSONContent[] | undefined): Run[] {
       const [cited] = resolved([ref]);
       // An unresolved citation exports as its ref rather than vanishing: the
       // reference is in the file, and a silently dropped one is worse.
-      runs.push({ text: cited ? `(${cited.label})` : `(${ref})` });
+      // Same marker as on screen, from the same function, so an exported
+      // document numbers its citations exactly as the editor showed them.
+      runs.push({
+        text: cited
+          ? marker(cited.styled, cited.label, positionOf(ref))
+          : `(${ref})`,
+      });
     } else if (node.type === "hardBreak") {
       runs.push({ text: "\n" });
     }
@@ -323,7 +330,19 @@ export async function buildDocument(
   const blocks: Block[] = [];
   await walk(doc, blocks);
 
-  const references = resolved(citedRefs).map((cited) => cited.detail);
+  // Split each entry into runs so italics survive into Word.
+  //
+  // A styled bibliography comes back from Zotero as HTML and is flattened to
+  // markdown, which is how a journal name reaches here as *Nature Energy*. Sent
+  // as one flat string, Word showed the asterisks — the one place in the app
+  // where markup leaked into a finished document. `emphasisRuns` is the same
+  // function the bibliography panel uses, so the two cannot drift.
+  const references = resolved(citedRefs).map((cited) =>
+    emphasisRuns(cited.detail).map((run) => ({
+      text: run.text,
+      italic: run.emphasis,
+    })),
+  );
 
   return { title, blocks, references };
 }

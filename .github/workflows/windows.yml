@@ -68,6 +68,26 @@ jobs:
       - name: Frontend tests
         run: npm test
 
+      # The app driven in a real browser, against the production bundle. Types,
+      # lint and unit tests all pass happily while the editor is broken; until
+      # this existed, nothing in CI could tell the difference.
+      - name: Install the browser
+        run: npx playwright install --with-deps chromium
+
+      - name: End-to-end tests
+        run: npm run e2e
+
+      - name: Keep the traces from a failed run
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: |
+            playwright-report/
+            test-results/
+          retention-days: 7
+          if-no-files-found: ignore
+
       - name: Rust formatting
         run: cargo fmt --check
         working-directory: src-tauri
@@ -106,8 +126,27 @@ jobs:
       # `--bundles` overrides tauri.conf.json, which also lists the macOS
       # targets. Naming the two Windows ones here means this cannot fail over a
       # `.dmg` nobody asked for.
+      # Signing activates only when the certificate secrets exist, so a fork
+      # and every ordinary commit still build. Unsigned is the honest default
+      # until someone buys a certificate — see docs/releasing.md for which kind
+      # and why it is a purchase rather than a build step.
       - name: Build
         run: npm run tauri:build -- --bundles msi,nsis
+        env:
+          # Tauri runs this over each bundled artifact when it is set. Absent,
+          # it does not sign and does not complain.
+          TAURI_WINDOWS_SIGN_COMMAND: ${{ secrets.WINDOWS_SIGN_COMMAND }}
+
+      - name: Say whether these installers are signed
+        shell: bash
+        run: |
+          if [ -n "${{ secrets.WINDOWS_SIGN_COMMAND }}" ]; then
+            echo "::notice::Installers were signed."
+          else
+            # A notice rather than a warning: unsigned is the current, stated
+            # state of the project, not a fault in this run.
+            echo "::notice::Installers are UNSIGNED. SmartScreen will warn on first run — docs/releasing.md."
+          fi
 
       # Unsigned, and said so rather than left to be discovered: Windows
       # SmartScreen will warn on first run. Signing needs a certificate, which

@@ -223,6 +223,49 @@ export const sourcesApi = {
     invoke<NoteSummary>("import_zotero_source", { key }),
 };
 
+/** One heading found somewhere in the vault. */
+export type VaultHeading = {
+  note: string;
+  noteTitle: string;
+  text: string;
+  /** Words written under it, before the next heading. Zero means unanswered. */
+  words: number;
+};
+
+/** Everything the research overview is built from. */
+export type Overview = {
+  headings: VaultHeading[];
+  /** Source note id -> how many notes cite it. Absent means nothing does. */
+  citations: Record<string, number>;
+  sources: NoteSummary[];
+  withPage: number;
+  withQuote: number;
+};
+
+export const overviewApi = {
+  read: () => invoke<Overview>("research_overview"),
+};
+
+/** What a check for a newer Sutra found. */
+export type UpdateStatus = {
+  /** The version running now. */
+  current: string;
+  /** The newest published version, if the check reached GitHub. */
+  latest: string | null;
+  /** True only when `latest` is genuinely newer than `current`. */
+  newer: boolean;
+  /** Where to get it. */
+  url: string;
+};
+
+export const updatesApi = {
+  /** The running version, with no network involved. */
+  version: () => invoke<string>("app_version"),
+  /** Ask GitHub. Only ever from a button — see updates.rs. */
+  check: () => invoke<UpdateStatus>("check_for_updates"),
+  open: (url: string) => invoke<void>("open_release_page", { url }),
+};
+
 /** What migrating the legacy citations did. */
 export type CitationMigration = {
   /** Zotero key, and the source note it now points at. */

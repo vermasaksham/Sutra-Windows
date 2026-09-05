@@ -316,6 +316,25 @@ vault and your Zotero library. Picking a Zotero item brings it in first, so a
 citation always points at a note in your vault rather than at an item in
 another program.
 
+### How a citation reads in the text
+
+In a numbering style — ACS, RSC, Nature, IEEE, Vancouver — a citation appears
+as its number in the reference list: the first paper you cite is `(1)`, the
+second `(2)`, and citing the first one again is `(1)` again. Insert a citation
+ahead of another and both renumber as you type.
+
+The numbering is Sutra's, not Zotero's, and it has to be: Zotero renders one
+item at a time and has no way of knowing what else this note cites, so it
+returns the same number for every paper. What Sutra takes from Zotero is the
+_shape_ — a style that writes `(1)` gets `(3)`, one that writes `[1]` gets
+`[3]`.
+
+In an author-date style — APA, Harvard, Chicago — the citation reads exactly as
+the library rendered it: `(Zhou et al., 2019)`.
+
+Either way, if the library has not rendered that source yet, you get the
+vault's own `(Author, Year)` label rather than a blank.
+
 ### Citation styles
 
 **Sutra does not format citations. Zotero does.**
@@ -512,7 +531,9 @@ claimed. Units are compared after normalisation, so `W m⁻¹K⁻¹`, `W/mK` and
 The export menu on a note offers two routes, and they are genuinely different:
 
 - **Word (.docx)** — writes a file. Equations become images (both a raster and
-  a vector copy, so they stay sharp when printed). Pictures come along.
+  a vector copy, so they stay sharp when printed). Pictures come along, and a
+  References section is placed at the end in your chosen style, in citation
+  order, italics and all.
 - **PDF** — hands off to the system print dialog. Choose _Save as PDF_ there.
 
 ---
@@ -676,6 +697,24 @@ still gets you there.
 
 ---
 
+### Where the work is
+
+`Ctrl+K` → _Where the work is_ opens a count of where the research has got to,
+computed from your vault and nothing else:
+
+- **Questions you have not answered yet** — every heading the editor reads as
+  a question ([§9](#9-zotero-sources-and-citations)) with nothing written under
+  it. Click one to open the note it was asked in.
+- **Questions you have started on**, with how many words are under each.
+- **Sources nothing cites** — papers you brought in and have not used.
+- **How much of your evidence carries a page, and the source's own words.**
+
+It counts; it does not judge. Nothing is ranked, scored or suggested, because
+which question matters is exactly the judgement the three voices exist to keep
+yours. There is no network and no model involved.
+
+---
+
 ## 17. The command palette
 
 `Ctrl+K`. Type to filter; it searches both commands and your notes by title,
@@ -686,7 +725,8 @@ so it doubles as a jump-to-note.
 **This note** _(when one is open)_ — Set type to … (each of the ten kinds) ·
 Export as Word (.docx) · Print, or save as PDF
 
-**Vault** — Manage tags · Find notes written twice · New view · Save this
+**Vault** — Manage tags · Where the work is · Find notes written twice · New
+view · Save this
 search as a view _(when there is a search to save)_ · Turn Zotero citations
 into sources _(when there are any)_ · Settings — appearance and themes ·
 Assistance settings · Rebuild the search index
@@ -766,6 +806,12 @@ search index_. Safe: it is rebuilt from the markdown.
 
 **A deleted note.** Look in `.sutra/trash` inside the vault.
 
+**Two copies of one note.** A sync client that cannot merge writes a second
+file beside the first — "Growth (conflicted copy).md", or your machine's name
+appended. Both appear in the list and both keep their text; Sutra opens the one
+it wrote, and never edits or deletes the other. Compare them, keep what you
+want, and delete the loser in Explorer.
+
 **Before any bulk rewrite** — a tag rename across the vault, a citation
 migration — every markdown file is copied into a timestamped folder under
 `.sutra/backups` first.
@@ -781,7 +827,12 @@ elsewhere on the disk.
 Stated plainly, so none of them is a surprise:
 
 - **The installer is unsigned.** Windows SmartScreen will warn on first run —
-  _More info_ → _Run anyway_. Signing needs a certificate.
+  _More info_ → _Run anyway_. Signing needs a certificate; `docs/releasing.md`
+  says which kind and why it is not just a build step.
+- **Updates are not automatic.** Sutra can tell you a newer version exists —
+  Settings → Version → _Check for updates_ — but it cannot install one, and it
+  never checks on its own. Installing an update means downloading it from the
+  releases page, which leaves your vault untouched.
 - **The API key, if you put it in the settings panel, is stored in plain text**
   in `sutra.json`. Use the `ANTHROPIC_API_KEY` environment variable instead if
   that matters to you.
@@ -793,10 +844,10 @@ Stated plainly, so none of them is a surprise:
 - **No mobile app, and no sync of its own.** Sync the vault folder with
   whatever you already use.
 - **Folders go four levels deep**, no further.
-- **The bibliography is a list, not a laid-out document.** The reference list
-  is rendered by Zotero in your chosen style and can be copied, but Word export
-  does not place a formatted bibliography section for you — paste it where you
-  want it.
+- **A numbered citation is numbered by this note, not by your whole thesis.**
+  In ACS or Nature the marker is the paper's position in _this_ note's
+  reference list. Two notes each citing one paper both say `(1)`, which is
+  correct for each note and something to renumber when you assemble a chapter.
 - **A styled citation needs the library once.** Until a source has been
   rendered, its citation falls back to a plain `Author, Year` label. Settings →
   References → Restyle existing sources fixes that in one go.

@@ -181,6 +181,13 @@ impl Vault {
         let mut files = Vec::new();
         collect(&self.root, &self.root, 0, &mut files)?;
 
+        // Two files can claim one id — a sync client's conflicted copy, a note
+        // duplicated in Explorer. Which one wins used to depend on the order
+        // the filesystem happened to hand them back, which is not the same on
+        // Windows as on Linux: the same vault opened the note on one and its
+        // conflicted copy on the other.
+        files.sort_by(|a, b| canonical_first(a, b));
+
         let mut notes = Vec::new();
         let mut map = HashMap::with_capacity(files.len());
 
@@ -1708,6 +1715,160 @@ fn strip_links(line: &str) -> String {
     out
 }
 
+/// Which of two files claiming one id is the one to open.
+///
+/// Every conflict convention *decorates* the name Sutra wrote — Dropbox adds
+/// "(conflicted copy)", OneDrive appends the machine name, Explorer adds
+/// "(1)". None of them shortens it. So the shortest file name is Sutra's own,
+/// and ties break lexicographically so the answer never depends on the
+/// filesystem's iteration order.
+///
+/// The other copy is not hidden: it is still listed, still on disk, and still
+/// readable. This decides only which one `[[links]]` and the note list open.
+fn canonical_first(a: &str, b: &str) -> std::cmp::Ordering {
+    let name = |path: &str| path.rsplit('/').next().unwrap_or(path).chars().count();
+    name(a).cmp(&name(b)).then_with(|| a.cmp(b))
+}
+
+/// One heading found somewhere in the vault.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Heading {
+    /// The note it is in.
+    pub note: String,
+    pub note_title: String,
+    /// The heading's own text, exactly as written.
+    pub text: String,
+    /// How much prose follows it, before the next heading. Zero means the
+    /// question was asked and nothing has been written under it yet.
+    pub words: usize,
+}
+
+/// What the research overview is built from.
+///
+/// Deliberately *not* an analysis. This gathers what is already written and
+/// counts it; deciding which question matters is the researcher's job, and a
+/// dashboard that ranked them would be inventing a judgement it cannot make.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Overview {
+    /// Every heading in the vault, in note order. The frontend classifies them
+    /// by voice — those rules live in one place, in TypeScript, and copying
+    /// them into Rust would be two definitions of the same idea.
+    pub headings: Vec<Heading>,
+    /// Source note id -> how many notes cite it. A source missing from this
+    /// map is cited by nothing.
+    pub citations: HashMap<String, usize>,
+    /// Every source note, so "imported but never cited" can be shown.
+    pub sources: Vec<NoteSummary>,
+    /// How many citations carry a page reference, and how many of those also
+    /// carry the source's own words. The provenance record, counted.
+    pub with_page: usize,
+    pub with_quote: usize,
+}
+
+impl Vault {
+    /// Read the whole vault once and gather what a research overview needs.
+    ///
+    /// One pass, because the alternative is a command per source and a body
+    /// fetch per note — and at a few thousand notes that is the difference
+    /// between a panel that opens and one that hangs.
+    pub fn overview(&self) -> Result<Overview> {
+        let mut files = Vec::new();
+        collect(&self.root, &self.root, 0, &mut files)?;
+
+        let mut headings = Vec::new();
+        let mut citations: HashMap<String, usize> = HashMap::new();
+        let mut sources = Vec::new();
+        let (mut with_page, mut with_quote) = (0, 0);
+
+        for relative in files {
+            let Ok(contents) = fs::read_to_string(self.root.join(&relative)) else {
+                continue;
+            };
+            let Ok((parsed, body)) = frontmatter::split(&contents) else {
+                continue;
+            };
+            let fm = parsed.unwrap_or_else(|| Self::synthesise(&relative));
+
+            for citation in &fm.sources {
+                *citations.entry(citation.id.clone()).or_default() += 1;
+                if citation
+                    .page
+                    .as_deref()
+                    .is_some_and(|p| !p.trim().is_empty())
+                {
+                    with_page += 1;
+                }
+                if citation
+                    .quote
+                    .as_deref()
+                    .is_some_and(|q| !q.trim().is_empty())
+                {
+                    with_quote += 1;
+                }
+            }
+
+            let summary = summary_of(&fm, body, folder_of(&relative));
+            if summary.note_type == NoteType::Source {
+                sources.push(summary.clone());
+            }
+
+            for (text, words) in headings_in(body) {
+                headings.push(Heading {
+                    note: fm.id.clone(),
+                    note_title: fm.title.clone(),
+                    text,
+                    words,
+                });
+            }
+        }
+
+        sources.sort_by_key(|s| s.title.to_lowercase());
+        Ok(Overview {
+            headings,
+            citations,
+            sources,
+            with_page,
+            with_quote,
+        })
+    }
+}
+
+/// Every ATX heading in a body, with how many words follow it.
+///
+/// Fenced code is skipped: `# include <stdio.h>` inside a listing is not a
+/// heading, and counting it as one would put C in a list of research
+/// questions.
+fn headings_in(body: &str) -> Vec<(String, usize)> {
+    let mut out: Vec<(String, usize)> = Vec::new();
+    let mut fenced = false;
+
+    for line in body.lines() {
+        let trimmed = line.trim_start();
+        if trimmed.starts_with("```") || trimmed.starts_with("~~~") {
+            fenced = !fenced;
+            continue;
+        }
+        if fenced {
+            continue;
+        }
+        if let Some(rest) = trimmed.strip_prefix('#') {
+            let text = rest.trim_start_matches('#').trim();
+            if !text.is_empty() {
+                out.push((text.to_string(), 0));
+            }
+            continue;
+        }
+        // Prose belongs to the heading above it. A blockquote counts: under a
+        // source-voice heading, the quote *is* the content.
+        if let Some(last) = out.last_mut() {
+            last.1 += trimmed.split_whitespace().count();
+        }
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -3176,5 +3337,317 @@ mod tests {
         );
         assert!(text.contains("alice"), "{text}");
         assert!(text.contains("tag: xrd"), "{text}");
+    }
+
+    /// How the vault behaves at the size a PhD reaches, rather than the size a
+    /// unit test reaches.
+    ///
+    /// Ignored because it writes thousands of files and takes seconds; run it
+    /// deliberately:
+    ///
+    ///     cargo test --bins -- --ignored --nocapture scales_to_a_real_vault
+    ///
+    /// It asserts a ceiling rather than printing a number, because a benchmark
+    /// nobody fails is a benchmark nobody reads. The ceilings are deliberately
+    /// loose — they are there to catch an accidental O(n²), not to police
+    /// milliseconds on someone else's laptop.
+    #[test]
+    #[ignore = "writes thousands of files"]
+    fn scales_to_a_real_vault() {
+        use std::time::Instant;
+
+        let vault = TempVault::new();
+        const NOTES: usize = 5_000;
+
+        // Spread across folders, the way a vault actually grows, so the
+        // directory walk is not measured against one enormous flat folder.
+        let started = Instant::now();
+        for i in 0..NOTES {
+            let folder = format!("Strand {}/Sub {}", i % 7, (i / 7) % 5);
+            vault.create_folder(&folder).unwrap();
+            let doc = vault
+                .create_note(&format!("Note {i} about Sb2Se3 growth"), Some(folder))
+                .unwrap();
+            vault
+                .save_note(
+                    &doc.summary.id,
+                    &doc.summary.title,
+                    &format!(
+                        "Antimony selenide ribbons grow along the c axis in run {i}. \
+                         The seed layer decides the texture, and iodine transports \
+                         the material as $\\ce{{SbI3}}$ in the vapour."
+                    ),
+                )
+                .unwrap();
+        }
+        eprintln!("built {NOTES} notes in {:?}", started.elapsed());
+
+        let started = Instant::now();
+        let notes = vault.list_notes().unwrap();
+        let listing = started.elapsed();
+        eprintln!("list_notes: {listing:?} for {} notes", notes.len());
+        assert_eq!(notes.len(), NOTES);
+
+        // Listing reads every file, so it is linear by construction. The
+        // ceiling is what keeps it linear: at 5,000 notes this is the single
+        // call standing between launching the app and seeing anything.
+        assert!(
+            listing.as_millis() < 4_000,
+            "listing {NOTES} notes took {listing:?}, which a person waits through"
+        );
+
+        let started = Instant::now();
+        let folders = vault.list_folders().unwrap();
+        eprintln!(
+            "list_folders: {:?} for {} folders",
+            started.elapsed(),
+            folders.len()
+        );
+
+        let started = Instant::now();
+        let tags = vault.list_tags().unwrap();
+        eprintln!("list_tags: {:?} for {} tags", started.elapsed(), tags.len());
+
+        // Reading one note must not depend on how many others there are. If
+        // this ever tracks NOTES, something has started scanning the vault to
+        // find a file it already knows the path of.
+        let started = Instant::now();
+        vault.read_note(&notes[NOTES / 2].id).unwrap();
+        let one = started.elapsed();
+        eprintln!("read_note: {one:?}");
+        assert!(one.as_millis() < 50, "reading one note took {one:?}");
+    }
+
+    /// A sync client rewriting the vault underneath a save.
+    ///
+    /// The manual tells people to put their vault in OneDrive or Dropbox, so
+    /// this is not a hypothetical: another process replaces files on its own
+    /// schedule while Sutra is writing. The vault is a thesis, so the bar is
+    /// that no state is ever *torn* — a note may hold either version, but it
+    /// must never hold half of one, and it must never disappear.
+    #[test]
+    fn a_sync_client_rewriting_files_never_tears_a_note() {
+        use std::sync::Arc;
+        use std::sync::atomic::{AtomicBool, Ordering};
+
+        let vault = Arc::new(TempVault::new());
+        let doc = vault.create_note("Growth", None).unwrap();
+        let id = doc.summary.id.clone();
+        let path = vault.root().join(vault.relative_for(&id).unwrap());
+
+        let stop = Arc::new(AtomicBool::new(false));
+
+        // The impostor: another process writing a complete, valid version of
+        // the same note, the way a sync client lands a remote edit.
+        let intruder = {
+            let path = path.clone();
+            let id = id.clone();
+            let stop = Arc::clone(&stop);
+            std::thread::spawn(move || {
+                let mut n = 0;
+                while !stop.load(Ordering::Relaxed) {
+                    n += 1;
+                    let contents = format!(
+                        "---\nid: {id}\ntype: note\ntitle: Growth\ncreated: 2026-08-21T10:14:00Z\nupdated: 2026-08-21T10:14:00Z\n---\n\nfrom the other machine, revision {n}\n"
+                    );
+                    let _ = note::write_atomic(&path, &contents);
+                }
+            })
+        };
+
+        for i in 0..200 {
+            vault
+                .save_note(&id, "Growth", &format!("written here, revision {i}"))
+                .unwrap();
+
+            // Whatever is on disk at this instant must be a whole note. This is
+            // the assertion that matters: a half-written file is unrecoverable
+            // work, and the reason writes go through a temp file and a rename.
+            let raw = fs::read_to_string(&path).unwrap();
+            let (parsed, body) = frontmatter::split(&raw)
+                .unwrap_or_else(|e| panic!("torn note on disk: {e}\n---\n{raw}"));
+            let fm = parsed.expect("a note with no frontmatter appeared");
+            assert_eq!(fm.id, id, "the note's identity changed under it");
+            assert!(
+                body.contains("revision"),
+                "a note was truncated mid-write: {body:?}"
+            );
+        }
+
+        stop.store(true, Ordering::Relaxed);
+        intruder.join().unwrap();
+
+        assert!(path.exists(), "the note was lost entirely");
+        assert_eq!(vault.list_notes().unwrap().len(), 1);
+    }
+
+    /// The other thing a sync client does: leave a second copy behind.
+    ///
+    /// Dropbox writes "note (conflicted copy).md" and OneDrive writes
+    /// "note-LAPTOP.md", both carrying the same `id` in their frontmatter. The
+    /// rule here is that neither copy may be *hidden*: whichever one the app
+    /// opens, the other is still a file in the vault with its text intact, and
+    /// the listing does not silently drop it.
+    #[test]
+    fn a_conflicted_copy_hides_neither_version() {
+        let vault = TempVault::new();
+        let doc = vault.create_note("Growth", None).unwrap();
+        let id = doc.summary.id.clone();
+        vault
+            .save_note(&id, "Growth", "the version written here")
+            .unwrap();
+
+        let original = vault.root().join(vault.relative_for(&id).unwrap());
+        let conflicted = vault.root().join("Growth (conflicted copy).md");
+        let mut raw = fs::read_to_string(&original).unwrap();
+        raw = raw.replace("the version written here", "the version from the laptop");
+        fs::write(&conflicted, &raw).unwrap();
+
+        let notes = vault.list_notes().unwrap();
+        assert_eq!(
+            notes.len(),
+            2,
+            "a conflicted copy must be visible, not swallowed"
+        );
+
+        // Opening by id is unambiguous — first file wins — and, crucially,
+        // reading does not delete or rewrite the other copy.
+        let opened = vault.read_note(&id).unwrap();
+        assert!(opened.body.contains("written here"));
+        assert!(
+            fs::read_to_string(&conflicted)
+                .unwrap()
+                .contains("from the laptop"),
+            "the other copy must still be on disk, untouched"
+        );
+
+        // And saving does not clobber it either.
+        vault
+            .save_note(&id, "Growth", "edited after the conflict")
+            .unwrap();
+        assert!(
+            fs::read_to_string(&conflicted)
+                .unwrap()
+                .contains("from the laptop"),
+            "saving one copy overwrote the other"
+        );
+    }
+
+    #[test]
+    fn headings_are_found_with_the_weight_of_what_follows() {
+        let body = "# Growth\n\nTwo words here.\n\n## My question\n\n## Answered\n\nThree words follow this.\n";
+        let found = headings_in(body);
+        assert_eq!(found.len(), 3);
+        assert_eq!(found[0], ("Growth".into(), 3));
+        // A question with nothing under it is the thing the overview is for.
+        assert_eq!(found[1], ("My question".into(), 0));
+        assert_eq!(found[2], ("Answered".into(), 4));
+    }
+
+    #[test]
+    fn a_hash_inside_a_code_fence_is_not_a_heading() {
+        // `# include <stdio.h>` in a listing is not a research question, and
+        // counting it as one would put C in the list.
+        let body = "## Real\n\n```c\n#include <stdio.h>\n# not a heading\n```\n\nprose\n";
+        let found = headings_in(body);
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].0, "Real");
+    }
+
+    #[test]
+    fn an_overview_counts_citations_and_their_provenance() {
+        let vault = TempVault::new();
+
+        let source = vault.create_note("Ko 2024", None).unwrap();
+        vault
+            .set_type(&source.summary.id, NoteType::Source)
+            .unwrap();
+
+        let note = vault.create_note("Thermal conductivity", None).unwrap();
+        vault
+            .save_note(
+                &note.summary.id,
+                "Thermal conductivity",
+                "## My question\n\n## Source says\n\nquoted\n",
+            )
+            .unwrap();
+        vault
+            .set_citations(
+                &note.summary.id,
+                vec![Citation {
+                    id: source.summary.id.clone(),
+                    page: Some("6".into()),
+                    quote: Some("kappa = 0.037".into()),
+                    ..Default::default()
+                }],
+            )
+            .unwrap();
+
+        let overview = vault.overview().unwrap();
+        assert_eq!(overview.citations.get(&source.summary.id), Some(&1));
+        assert_eq!(overview.with_page, 1);
+        assert_eq!(overview.with_quote, 1);
+        assert_eq!(overview.sources.len(), 1, "the source note is listed");
+
+        let texts: Vec<_> = overview.headings.iter().map(|h| h.text.as_str()).collect();
+        assert!(texts.contains(&"My question"));
+        assert!(texts.contains(&"Source says"));
+    }
+
+    #[test]
+    fn the_canonical_file_wins_over_every_conflict_convention() {
+        use std::cmp::Ordering;
+
+        // Each of these is a real thing a sync client or Explorer writes
+        // beside the file Sutra wrote. All of them add characters; none
+        // shortens the name.
+        for decorated in [
+            "Growth (conflicted copy).md",
+            "Growth-LAPTOP.md",
+            "Growth (1).md",
+            "Growth - Copy.md",
+            "Growth (DESKTOP-4F2K1 conflicted copy 2026-09-04).md",
+        ] {
+            assert_eq!(
+                canonical_first("Growth.md", decorated),
+                Ordering::Less,
+                "Growth.md should win over {decorated}"
+            );
+            // And the answer must not depend on which one was seen first.
+            assert_eq!(canonical_first(decorated, "Growth.md"), Ordering::Greater);
+        }
+    }
+
+    #[test]
+    fn a_deep_note_is_not_beaten_by_a_shallow_conflicted_copy() {
+        use std::cmp::Ordering;
+
+        // The comparison is on the file name, not the path: a note four
+        // folders down is not a worse candidate than a conflicted copy in the
+        // vault root.
+        assert_eq!(
+            canonical_first("a/b/c/d/Growth.md", "Growth (conflicted copy).md"),
+            Ordering::Less
+        );
+    }
+
+    #[test]
+    fn two_equally_named_files_are_decided_the_same_way_every_time() {
+        use std::cmp::Ordering;
+
+        // Same length, so the filesystem's order could otherwise decide.
+        // Lexicographic is arbitrary but stable, which is the whole point.
+        assert_eq!(
+            canonical_first("b/Growth.md", "a/Growth.md"),
+            Ordering::Greater
+        );
+        assert_eq!(
+            canonical_first("a/Growth.md", "b/Growth.md"),
+            Ordering::Less
+        );
+        assert_eq!(
+            canonical_first("a/Growth.md", "a/Growth.md"),
+            Ordering::Equal
+        );
     }
 }

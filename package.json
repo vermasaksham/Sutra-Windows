@@ -1,7 +1,7 @@
 {
   "name": "sutra",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.2.0",
   "type": "module",
   "description": "Local-first, block-based notes for materials-chemistry research.",
   "scripts": {
@@ -13,7 +13,9 @@
     "tauri:dev": "tauri dev",
     "tauri:build": "tauri build",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "e2e": "playwright test",
+    "e2e:ui": "playwright test --ui"
   },
   "dependencies": {
     "@floating-ui/dom": "^1.8.0",
@@ -35,6 +37,7 @@
     "react-dom": "^19.2.0"
   },
   "devDependencies": {
+    "@playwright/test": "^1.62.1",
     "@tailwindcss/vite": "^4.3.3",
     "@tauri-apps/cli": "^2.11.4",
     "@types/react": "^19.2.0",

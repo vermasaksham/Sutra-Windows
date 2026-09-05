@@ -115,6 +115,7 @@ export default function ContextPanel({
         {showSources && citations.length > 0 && (
           <Bibliography
             citations={citations}
+            inlineRefs={inlineRefs}
             sources={sources}
             onOpen={onOpen}
           />

@@ -2,7 +2,7 @@
 
 use crate::error::Result;
 use std::fs::{self, File};
-use std::io::Write;
+use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 
 /// Longest slug we will put in a filename. Windows still has a 260-character
@@ -199,12 +199,62 @@ pub fn write_atomic(path: &Path, contents: &str) -> Result<()> {
     // If the rename fails, clean up rather than littering the vault with temp
     // files. The rename error is the one worth reporting, so the removal's own
     // result is deliberately discarded.
-    if let Err(e) = fs::rename(&temp, path) {
+    if let Err(e) = rename_with_retry(&temp, path) {
         let _ = fs::remove_file(&temp);
         return Err(e.into());
     }
 
     Ok(())
+}
+
+/// How many times a rename is retried, and how long the waits are.
+///
+/// Short and bounded: the point is to ride out a scanner holding the file for
+/// a few milliseconds, not to wait out a file someone has genuinely locked
+/// open. Roughly a quarter of a second in total, after which the error is the
+/// honest answer.
+const RENAME_TRIES: u32 = 6;
+const RENAME_BACKOFF_MS: u64 = 8;
+
+/// Is this the transient "someone else has the file open" failure?
+///
+/// On Windows a rename over an existing file fails while any other process
+/// holds a handle to the target — and on a vault in OneDrive or Dropbox, that
+/// process is the sync client, scanning the file we are trying to replace. It
+/// surfaces as ERROR_ACCESS_DENIED (5) or ERROR_SHARING_VIOLATION (32).
+/// Retrying is right for exactly these and wrong for everything else: a
+/// missing directory or a full disk does not improve by waiting.
+fn worth_retrying(e: &io::Error) -> bool {
+    if e.kind() == io::ErrorKind::PermissionDenied {
+        return true;
+    }
+    matches!(e.raw_os_error(), Some(5) | Some(32))
+}
+
+/// Rename, riding out a sync client that is holding the target open.
+///
+/// Split out and generic over the operation so the retry policy can be tested
+/// on any platform. The failure it exists for only happens on Windows, which
+/// is exactly why it must not be tested only on Windows.
+fn rename_with_retry(from: &Path, to: &Path) -> io::Result<()> {
+    retrying(|| fs::rename(from, to))
+}
+
+fn retrying<T>(mut attempt: impl FnMut() -> io::Result<T>) -> io::Result<T> {
+    let mut waited = RENAME_BACKOFF_MS;
+    for _ in 1..RENAME_TRIES {
+        match attempt() {
+            Ok(value) => return Ok(value),
+            Err(e) if worth_retrying(&e) => {
+                std::thread::sleep(std::time::Duration::from_millis(waited));
+                waited *= 2;
+            }
+            Err(e) => return Err(e),
+        }
+    }
+    // The last try's error is the one reported, so a file that really is
+    // locked produces the real reason rather than "gave up".
+    attempt()
 }
 
 /// A sibling of `path`, dot-prefixed so it is hidden on Unix and sorts out of
@@ -317,5 +367,61 @@ mod tests {
         );
 
         fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// The retry policy, exercised on whatever platform is running the tests.
+    ///
+    /// The failure it exists for — a sync client holding the file open while
+    /// we rename over it — only happens on Windows, which is precisely why the
+    /// policy must not be testable only on Windows. Development happens on
+    /// Linux; an untested Windows-only branch is a guess.
+    #[test]
+    fn a_rename_rides_out_a_sharing_violation() {
+        use std::cell::Cell;
+
+        let attempts = Cell::new(0);
+        let result = retrying(|| {
+            attempts.set(attempts.get() + 1);
+            if attempts.get() < 3 {
+                Err(io::Error::from_raw_os_error(32)) // ERROR_SHARING_VIOLATION
+            } else {
+                Ok("written")
+            }
+        });
+        assert_eq!(result.unwrap(), "written");
+        assert_eq!(attempts.get(), 3, "it should stop retrying once it works");
+    }
+
+    #[test]
+    fn a_rename_gives_up_and_reports_the_real_reason() {
+        use std::cell::Cell;
+
+        let attempts = Cell::new(0);
+        let result: io::Result<()> = retrying(|| {
+            attempts.set(attempts.get() + 1);
+            Err(io::Error::from_raw_os_error(32))
+        });
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err().raw_os_error(), Some(32));
+        assert_eq!(
+            attempts.get(),
+            RENAME_TRIES,
+            "a genuinely locked file must not be waited on forever"
+        );
+    }
+
+    #[test]
+    fn a_rename_does_not_retry_what_waiting_cannot_fix() {
+        use std::cell::Cell;
+
+        // A missing directory or a full disk does not improve by waiting, and
+        // retrying it only delays the error the caller needs to see.
+        let attempts = Cell::new(0);
+        let result: io::Result<()> = retrying(|| {
+            attempts.set(attempts.get() + 1);
+            Err(io::Error::from(io::ErrorKind::NotFound))
+        });
+        assert!(result.is_err());
+        assert_eq!(attempts.get(), 1);
     }
 }

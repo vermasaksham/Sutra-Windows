@@ -11,7 +11,7 @@ Rust on Windows links with MSVC, so this is required even though you will not
 open Visual Studio.
 
 Install **Build Tools for Visual Studio** and select the
-*Desktop development with C++* workload. That gives you the MSVC linker and the
+_Desktop development with C++_ workload. That gives you the MSVC linker and the
 Windows SDK. This is the step people skip, and the failure it produces is a
 `link.exe not found` error much later.
 
@@ -103,7 +103,7 @@ sudo apt-get install libwebkit2gtk-4.1-dev libgtk-3-dev \
 ## Troubleshooting
 
 **`link.exe not found`** — the C++ Build Tools workload from step 1 is missing
-or the *Desktop development with C++* workload was not ticked.
+or the _Desktop development with C++_ workload was not ticked.
 
 **The window opens blank** — the Vite dev server is not on port 1420.
 `vite.config.ts` sets `strictPort: true` on purpose: if something else holds
