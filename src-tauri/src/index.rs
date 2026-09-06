@@ -1117,6 +1117,94 @@ mod tests {
     }
 
     #[test]
+    fn deleting_the_database_loses_no_research_content() {
+        // The broader version of the rule above. Prose surviving a rebuild is
+        // the easy half; what matters for a thesis is that provenance, source
+        // metadata and the offline citation cache come back too — none of
+        // which the index may be the only copy of.
+        let f = Fixture::new();
+
+        let mut meta = crate::frontmatter::SourceMeta {
+            authors: Some("Zhou, Y.".into()),
+            year: Some("2019".into()),
+            doi: Some("10.1000/x".into()),
+            zotero: Some("ABCD1234".into()),
+            citation_key: Some("zhou2019".into()),
+            ..Default::default()
+        };
+        meta.styled.insert(
+            "american-chemical-society".into(),
+            crate::references::StyledCitation {
+                citation: Some("(1)".into()),
+                bib: Some("Zhou, Y. Nature Energy 2019.".into()),
+            },
+        );
+        let source = f.vault.import_source("Zhou 2019", meta).unwrap();
+
+        let note = f.vault.create_note("Reading", None).unwrap();
+        f.vault
+            .set_citations(
+                &note.summary.id,
+                vec![crate::frontmatter::Citation {
+                    id: source.id.clone(),
+                    page: Some("S12".into()),
+                    quote: Some("thermal conductivity decreases".into()),
+                    kind: Some("experimental".into()),
+                    captured: None,
+                }],
+            )
+            .unwrap();
+        f.vault
+            .save_note(
+                &note.summary.id,
+                "Reading",
+                &format!("As [@{}] shows.", source.id),
+            )
+            .unwrap();
+        f.index.rebuild(&f.vault).unwrap();
+
+        // Throw the database away entirely and start over from the files.
+        drop(std::fs::remove_file(&f.db));
+        let fresh = Index::open(&f.db).unwrap();
+        fresh.rebuild(&f.vault).unwrap();
+
+        // The provenance record, with the page and the source's own words.
+        let read = f.vault.read_note(&note.summary.id).unwrap();
+        assert_eq!(read.summary.sources.len(), 1);
+        assert_eq!(read.summary.sources[0].page.as_deref(), Some("S12"));
+        assert_eq!(
+            read.summary.sources[0].quote.as_deref(),
+            Some("thermal conductivity decreases")
+        );
+        assert_eq!(
+            read.summary.sources[0].kind.as_deref(),
+            Some("experimental")
+        );
+
+        // The paper, including the cached rendering that makes it readable
+        // with Zotero closed.
+        let paper = f
+            .vault
+            .read_note(&source.id)
+            .unwrap()
+            .summary
+            .source
+            .expect("the source metadata must survive");
+        assert_eq!(paper.citation_key.as_deref(), Some("zhou2019"));
+        assert_eq!(
+            paper.styled["american-chemical-society"].bib.as_deref(),
+            Some("Zhou, Y. Nature Energy 2019.")
+        );
+
+        // And the reverse lookup the index exists to answer is back.
+        assert_eq!(
+            fresh.citing(&source.id).unwrap().len(),
+            1,
+            "the rebuilt index did not reconstruct what cites this source"
+        );
+    }
+
+    #[test]
     fn search_matches_body_and_title() {
         let f = Fixture::new();
         let a = f.vault.create_note("Antimony selenide", None).unwrap();

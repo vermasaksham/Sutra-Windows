@@ -236,7 +236,11 @@ fn worth_retrying(e: &io::Error) -> bool {
 /// Split out and generic over the operation so the retry policy can be tested
 /// on any platform. The failure it exists for only happens on Windows, which
 /// is exactly why it must not be tested only on Windows.
-fn rename_with_retry(from: &Path, to: &Path) -> io::Result<()> {
+/// Rename, waiting out a sync client that has the file open.
+///
+/// `pub(crate)` because the vault moves attachments as well as notes, and a
+/// picture is every bit as likely to be held open by OneDrive as a note is.
+pub(crate) fn rename_with_retry(from: &Path, to: &Path) -> io::Result<()> {
     retrying(|| fs::rename(from, to))
 }
 

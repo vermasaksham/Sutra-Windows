@@ -94,6 +94,13 @@ export async function useVault(page: Page, options: VaultOptions) {
     const saved: string[] = [];
     (window as unknown as { __saved: string[] }).__saved = saved;
 
+    // Every document handed to the exporter. Rust is what turns one of these
+    // into a .docx and has its own tests for that; what this suite can see —
+    // and what the v0.2 export defects all lived in — is whether the frontend
+    // put the note's content into the document at all.
+    const exported: unknown[] = [];
+    (window as unknown as { __exported: unknown[] }).__exported = exported;
+
     const summary = (n: (typeof notes)[number]) => {
       const { body, ...rest } = n;
       void body;
@@ -187,8 +194,12 @@ export async function useVault(page: Page, options: VaultOptions) {
           case "set_citations":
             return notes[0] ? summary(notes[0]) : null;
 
+          case "export_docx":
+            exported.push(args.document);
+            // The path a real save dialog would return.
+            return "C:\\Users\\test\\note.docx";
           case "ai_status":
-            return { ready: false, reason: "off in tests" };
+            return { ready: false, reason: "off in tests", keyStorage: "none" };
           case "reference_status":
             return opts.zoteroDown
               ? {
@@ -210,6 +221,8 @@ export async function useVault(page: Page, options: VaultOptions) {
               style: opts.style ?? "acs",
               locale: "en-US",
               hasKey: false,
+              keyInEnvironment: false,
+              keyStorage: "none",
             };
           case "typography":
             return {
@@ -314,4 +327,39 @@ export async function lastSaved(page: Page): Promise<string> {
     const saved = (window as unknown as { __saved: string[] }).__saved;
     return saved.at(-1) ?? "";
   });
+}
+
+/** The document most recently handed to the exporter. */
+export async function lastExported<T = ExportedDocument>(page: Page): Promise<T> {
+  return page.evaluate(() => {
+    const all = (window as unknown as { __exported: unknown[] }).__exported;
+    return all[all.length - 1];
+  }) as Promise<T>;
+}
+
+/** The shape `buildDocument` produces, as much of it as these tests read. */
+export type ExportedRun = {
+  text: string;
+  bold?: boolean;
+  italic?: boolean;
+  code?: boolean;
+  image?: { data: string; width: number; height: number };
+};
+
+export type ExportedBlock =
+  | { kind: "heading"; level: number; runs: ExportedRun[] }
+  | { kind: "paragraph"; runs: ExportedRun[] }
+  | { kind: "quote"; runs: ExportedRun[] }
+  | { kind: "table"; rows: ExportedRun[][][]; headerRow: boolean }
+  | { kind: string; runs?: ExportedRun[] };
+
+export type ExportedDocument = {
+  title: string;
+  blocks: ExportedBlock[];
+  references: ExportedRun[][];
+};
+
+/** All the text in a block's runs, joined. */
+export function textOf(block: { runs?: ExportedRun[] }): string {
+  return (block.runs ?? []).map((r) => r.text).join("");
 }

@@ -184,6 +184,77 @@ pub struct SourceMeta {
     pub styled: BTreeMap<String, crate::references::StyledCitation>,
 }
 
+impl SourceMeta {
+    /// Fold a freshly-fetched record onto the one the vault already holds.
+    ///
+    /// `self` is what the reference manager just said; `existing` is what the
+    /// source note has recorded. The result is what should be written back.
+    ///
+    /// The rule is one sentence: **the library is the authority on every fact
+    /// it actually answered for, and silent about the rest.** A field the
+    /// fetch left empty is not the library saying "this is empty" — it is the
+    /// library not having been asked. `import_zotero_source` takes the cheap
+    /// path (one search response), which carries no collections and no
+    /// attachments at all; before this existed, re-importing a paper through
+    /// it read as "no collections, no PDF" and wrote that over the real
+    /// answers a fuller fetch had recorded earlier.
+    ///
+    /// `styled` is the case that mattered most. Formatting is Zotero's job,
+    /// but a cached rendering is what makes a citation readable with Zotero
+    /// closed — the entire reason the cache exists. A fetch never carries one,
+    /// so replacing the map wholesale silently threw away every style ever
+    /// rendered. Here the two maps are merged per style id, and an incoming
+    /// entry only wins if it says something ([`StyledCitation::is_empty`]
+    /// marks the ones that do not, which are failures rather than answers).
+    ///
+    /// Nothing here invents a value. Every field in the result came either
+    /// from this fetch or from a previous one — never from a guess.
+    ///
+    /// The knowing trade is `citation_key`: keeping the previously fetched one
+    /// when a fetch has none means a library that lost Better BibTeX keeps
+    /// showing the key it used to have. That is the better failure. The key
+    /// was real when it was recorded, and a bibliography that silently loses
+    /// its keys breaks a draft in a way nobody notices until submission.
+    pub fn merged_over(mut self, existing: &SourceMeta) -> Self {
+        fn answered(incoming: Option<String>, held: &Option<String>) -> Option<String> {
+            match incoming {
+                Some(value) if !value.trim().is_empty() => Some(value),
+                _ => held.clone(),
+            }
+        }
+
+        self.authors = answered(self.authors, &existing.authors);
+        self.year = answered(self.year, &existing.year);
+        self.container = answered(self.container, &existing.container);
+        self.doi = answered(self.doi, &existing.doi);
+        self.url = answered(self.url, &existing.url);
+        self.zotero = answered(self.zotero, &existing.zotero);
+        self.citation_key = answered(self.citation_key, &existing.citation_key);
+        self.abstract_text = answered(self.abstract_text, &existing.abstract_text);
+        self.item_type = answered(self.item_type, &existing.item_type);
+        self.added = answered(self.added, &existing.added);
+        self.pdf = answered(self.pdf, &existing.pdf);
+
+        // A fetch that *did* bring collections is authoritative, including
+        // when it brings fewer than before: an item taken out of a collection
+        // in Zotero must stop claiming membership here. Only an empty list —
+        // "not asked" — falls back.
+        if self.collections.is_empty() {
+            self.collections = existing.collections.clone();
+        }
+
+        let mut styled = existing.styled.clone();
+        for (style, rendered) in std::mem::take(&mut self.styled) {
+            if !rendered.is_empty() {
+                styled.insert(style, rendered);
+            }
+        }
+        self.styled = styled;
+
+        self
+    }
+}
+
 /// One note citing one source, at one place in it.
 ///
 /// This is the provenance record section 5 asks for, and it lives in the

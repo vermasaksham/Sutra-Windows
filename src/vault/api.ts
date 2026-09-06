@@ -394,11 +394,23 @@ export type StyledCitation = {
 };
 
 /** The stored reference connection. The key never comes back out. */
+/**
+ * Where a stored API key actually lives.
+ *
+ * Reported rather than assumed: on a platform without a credential store the
+ * key is still plain text in a settings file, and saying so is the difference
+ * between security and the appearance of it.
+ */
+export type KeyStorage = "none" | "environment" | "keychain" | "config-file";
+
 export type ReferenceConfig = {
   account: boolean;
   userId: string | null;
   hasKey: boolean;
   keyInEnvironment: boolean;
+  keyStorage: KeyStorage;
+  /** Why the last save could not store the key securely, if it could not. */
+  warning?: string;
   style: string;
   locale: string;
 };
@@ -758,10 +770,13 @@ export type AiStatus = {
    * is worse than one that says what is missing.
    */
   ready: boolean;
-  /** A key is stored in the config file. */
+  /** A key is stored somewhere the app can reach. */
   hasKey: boolean;
   /** `ANTHROPIC_API_KEY` is set, so nothing need be stored. */
   keyInEnvironment: boolean;
+  keyStorage: KeyStorage;
+  /** Why the last save could not store the key securely, if it could not. */
+  warning?: string;
   model: string;
 };
 

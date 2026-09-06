@@ -3,6 +3,7 @@
 use crate::ai::{self, Assistant as _, Off};
 use crate::error::{Result, SutraError};
 use crate::index::Index;
+use crate::secrets::{self, KeyStorage, SecretStore};
 use crate::typography::Typography;
 use crate::vault::Vault;
 use crate::watcher::VaultWatcher;
@@ -93,6 +94,14 @@ pub struct ReferenceConfig {
     /// True when the key came from the environment, where it is not stored by
     /// this app at all.
     pub key_in_environment: bool,
+    /// Where the key actually is. Shown, rather than assumed, because on a
+    /// platform without a credential store it is still a plaintext file and
+    /// the user is entitled to know that.
+    pub key_storage: KeyStorage,
+    /// Why the last save could not store the key securely, when it could not.
+    /// Carried so a failure reaches the screen instead of being swallowed.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub warning: Option<String>,
     pub style: String,
     pub locale: String,
 }
@@ -139,10 +148,16 @@ pub struct AiStatus {
     /// state someone can leave themselves in, and a panel of buttons that can
     /// only fail is worse than one that says what is missing.
     pub ready: bool,
-    /// A key is stored in the config file.
+    /// A key is stored somewhere this app can reach.
     pub has_key: bool,
     /// `ANTHROPIC_API_KEY` is set in the environment, so no key need be stored.
     pub key_in_environment: bool,
+    /// Where the key actually is. Shown rather than assumed: on a platform
+    /// with no credential store it is still a plaintext file.
+    pub key_storage: KeyStorage,
+    /// Why the last save could not store the key securely, when it could not.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub warning: Option<String>,
     pub model: String,
 }
 
@@ -235,7 +250,13 @@ impl AppState {
 
         let mut config = read_config(app).unwrap_or_default();
         config.vault = Some(root);
-        save_config(app, &config);
+        // Not fatal, and not silent. Failing here costs the "reopen the last
+        // vault" convenience and nothing else — no note, no key — so the
+        // vault still opens, but the reason is said out loud rather than
+        // dropped on the floor.
+        if let Err(e) = save_config(app, &config) {
+            eprintln!("sutra: could not remember the open vault: {e}");
+        }
         Ok(name)
     }
 
@@ -278,6 +299,42 @@ fn index_path(app: &AppHandle, root: &Path) -> PathBuf {
         .unwrap_or_else(|_| std::env::temp_dir())
         .join("index")
         .join(name)
+}
+
+/// The credential store this build uses, built once.
+///
+/// A `OnceLock` rather than app state because it has no configuration and no
+/// lifetime: it is a handle to something the operating system owns.
+fn store() -> &'static dyn SecretStore {
+    static STORE: std::sync::OnceLock<Box<dyn SecretStore>> = std::sync::OnceLock::new();
+    STORE.get_or_init(secrets::platform_store).as_ref()
+}
+
+/// Resolve one key, migrating a plaintext one into the credential store and
+/// clearing the config's copy once the store has confirmed it.
+///
+/// The environment is deliberately *not* passed to [`secrets::resolve`] here.
+/// `provider_for` and `choose` already prefer it, and telling `resolve` about
+/// it would mean a machine with the variable set never migrated the plaintext
+/// key sitting in its config file — it would stay there for ever, unread and
+/// still readable by anything else.
+fn resolved_key(
+    app: &AppHandle,
+    account: &str,
+    plaintext: Option<&str>,
+    clear: impl FnOnce(&mut Config),
+) -> secrets::Resolved {
+    let found = secrets::resolve(store(), account, None, plaintext);
+    if found.clear_plaintext
+        && let Some(mut config) = read_config(app)
+    {
+        clear(&mut config);
+        // Best effort. Failing to clear leaves a stale plaintext copy that the
+        // store already shadows, which is untidy but harmless — and far better
+        // than refusing to start.
+        let _ = save_config(app, &config);
+    }
+    found
 }
 
 /// Which assistant these settings call for.
@@ -338,8 +395,32 @@ pub fn provider_for(settings: &ReferenceSettings, env_key: Option<String>) -> Zo
 }
 
 /// The stored reference settings, or the defaults when there are none.
+///
+/// The key comes back resolved: from the credential store where there is one,
+/// and from the config file only where there is not. Everything downstream —
+/// `provider_for`, the Zotero client — reads `api_key` exactly as before and
+/// needs to know nothing about where it was kept.
 pub fn reference_settings(app: &AppHandle) -> ReferenceSettings {
-    read_config(app).unwrap_or_default().references
+    let mut settings = read_config(app).unwrap_or_default().references;
+    let found = resolved_key(
+        app,
+        secrets::ZOTERO,
+        settings.api_key.as_deref(),
+        |config| {
+            config.references.api_key = None;
+        },
+    );
+    settings.api_key = found.key;
+    settings
+}
+
+/// Where the Zotero key is actually kept.
+fn reference_key_storage(app: &AppHandle, env_key: bool) -> KeyStorage {
+    if env_key {
+        return KeyStorage::Environment;
+    }
+    let plaintext = read_config(app).unwrap_or_default().references.api_key;
+    secrets::resolve(store(), secrets::ZOTERO, None, plaintext.as_deref()).storage
 }
 
 /// The provider the current settings call for.
@@ -365,6 +446,8 @@ pub fn reference_config(app: &AppHandle) -> ReferenceConfig {
                 .as_ref()
                 .is_some_and(|k| !k.trim().is_empty()),
         key_in_environment: env_key.is_some(),
+        key_storage: reference_key_storage(app, env_key.is_some()),
+        warning: None,
         style: settings.style.clone(),
         locale: settings.locale.clone(),
     }
@@ -381,20 +464,38 @@ pub fn set_reference_settings(
     locale: String,
 ) -> ReferenceConfig {
     let mut config = read_config(app).unwrap_or_default();
-    let existing = config.references.api_key.clone();
+    let held = config.references.api_key.clone();
+    let saved = secrets::save(
+        store(),
+        secrets::ZOTERO,
+        api_key.as_deref(),
+        held.as_deref(),
+    );
+
     config.references = ReferenceSettings {
         account,
         user_id,
-        api_key: match api_key {
-            Some(key) if key.trim().is_empty() => None,
-            Some(key) => Some(key),
-            None => existing,
-        },
+        // Empty on every platform that has a credential store: the key went
+        // there instead. Only a store that refused leaves a copy here.
+        api_key: saved.plaintext,
         style,
         locale,
     };
-    save_config(app, &config);
-    reference_config(app)
+
+    let mut warning = saved.warning;
+    if let Err(e) = save_config(app, &config) {
+        // A settings file that would not save used to fail silently, so the
+        // user believed a key was stored when it was not.
+        warning = Some(match warning {
+            Some(first) => format!("{first} Sutra could not save its settings file either: {e}"),
+            None => format!("Sutra could not save its settings file: {e}"),
+        });
+    }
+
+    ReferenceConfig {
+        warning,
+        ..reference_config(app)
+    }
 }
 
 /// How the app is set in type, always in a range that can be read.
@@ -406,7 +507,11 @@ pub fn typography(app: &AppHandle) -> Typography {
 pub fn set_typography(app: &AppHandle, next: Typography) -> Typography {
     let mut config = read_config(app).unwrap_or_default();
     config.typography = next.clamped();
-    save_config(app, &config);
+    // Same judgement as remembering the vault: a lost font size is a nuisance,
+    // not lost work, so it is reported rather than raised.
+    if let Err(e) = save_config(app, &config) {
+        eprintln!("sutra: could not save typography: {e}");
+    }
     config.typography
 }
 
@@ -419,8 +524,30 @@ pub fn font_dir(app: &AppHandle) -> Option<PathBuf> {
 }
 
 /// The stored AI settings, or the defaults when there are none.
+///
+/// Same shape as `reference_settings`: the key arrives resolved, and `choose`
+/// stays the pure function it was.
 fn load_settings(app: &AppHandle) -> AiSettings {
-    read_config(app).unwrap_or_default().ai
+    let mut settings = read_config(app).unwrap_or_default().ai;
+    let found = resolved_key(
+        app,
+        secrets::ANTHROPIC,
+        settings.api_key.as_deref(),
+        |config| {
+            config.ai.api_key = None;
+        },
+    );
+    settings.api_key = found.key;
+    settings
+}
+
+/// Where the assistant's key is actually kept.
+fn ai_key_storage(app: &AppHandle, env_key: bool) -> KeyStorage {
+    if env_key {
+        return KeyStorage::Environment;
+    }
+    let plaintext = read_config(app).unwrap_or_default().ai.api_key;
+    secrets::resolve(store(), secrets::ANTHROPIC, None, plaintext.as_deref()).storage
 }
 
 /// What the frontend may see.
@@ -437,15 +564,42 @@ pub fn ai_status(app: &AppHandle) -> AiStatus {
             .clone()
             .is_some_and(|k| !k.trim().is_empty()),
         key_in_environment: std::env::var("ANTHROPIC_API_KEY").is_ok_and(|k| !k.trim().is_empty()),
+        key_storage: ai_key_storage(
+            app,
+            std::env::var("ANTHROPIC_API_KEY").is_ok_and(|k| !k.trim().is_empty()),
+        ),
+        warning: None,
         model: settings.model.unwrap_or_else(|| ai::DEFAULT_MODEL.into()),
     }
 }
 
 /// Change the AI settings, leaving the remembered vault alone.
-pub fn set_ai_settings(app: &AppHandle, ai: AiSettings) {
+///
+/// Returns the warning to show, if the key could not be stored securely or the
+/// settings file could not be written. `None` means it all worked.
+pub fn set_ai_settings(app: &AppHandle, ai: AiSettings) -> Option<String> {
     let mut config = read_config(app).unwrap_or_default();
-    config.ai = ai;
-    save_config(app, &config);
+    let held = config.ai.api_key.clone();
+    let saved = secrets::save(
+        store(),
+        secrets::ANTHROPIC,
+        ai.api_key.as_deref(),
+        held.as_deref(),
+    );
+
+    config.ai = AiSettings {
+        api_key: saved.plaintext,
+        ..ai
+    };
+
+    let mut warning = saved.warning;
+    if let Err(e) = save_config(app, &config) {
+        warning = Some(match warning {
+            Some(first) => format!("{first} Sutra could not save its settings file either: {e}"),
+            None => format!("Sutra could not save its settings file: {e}"),
+        });
+    }
+    warning
 }
 
 fn read_config(app: &AppHandle) -> Option<Config> {
@@ -461,16 +615,26 @@ fn config_path(app: &AppHandle) -> Option<PathBuf> {
         .map(|d| d.join("sutra.json"))
 }
 
-/// Best-effort persistence. A machine where the config directory is not
-/// writable should still run; it just forgets the vault between launches.
-fn save_config(app: &AppHandle, config: &Config) {
-    let Some(path) = config_path(app) else { return };
+/// Write the settings file, atomically, and say whether it worked.
+///
+/// Two changes from the version that swallowed everything. It goes through
+/// [`crate::note::write_atomic`], the same write the notes use, so an
+/// interrupted save cannot leave a half-written settings file that parses as
+/// "no vault, no key, no fonts". And it returns a `Result`, because a key the
+/// user believes is saved and is not is exactly the failure worth shouting
+/// about — callers that genuinely do not care still have to say so.
+fn save_config(app: &AppHandle, config: &Config) -> Result<()> {
+    let Some(path) = config_path(app) else {
+        return Err(SutraError::NotADirectory(
+            "no application config directory".into(),
+        ));
+    };
     if let Some(parent) = path.parent() {
-        let _ = std::fs::create_dir_all(parent);
+        std::fs::create_dir_all(parent)?;
     }
-    if let Ok(json) = serde_json::to_string_pretty(config) {
-        let _ = std::fs::write(path, json);
-    }
+    let json = serde_json::to_string_pretty(config)
+        .map_err(|e| SutraError::Secret(format!("could not serialise settings: {e}")))?;
+    crate::note::write_atomic(&path, &json)
 }
 
 /// Reopen the vault from the last session, if it is still there.

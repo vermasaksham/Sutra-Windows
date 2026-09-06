@@ -185,22 +185,38 @@ export default function App() {
   // does not change as you type: `setBody` writes to a buffer so a keystroke
   // does not re-render the editor. Reading it here would freeze the numbering
   // at whatever the note said when it opened.
-  const [citeOrder, setCiteOrder] = useState<string[]>([]);
+  /**
+   * Just the `[@ref]`s in the prose, in order of first appearance.
+   *
+   * Deliberately *not* the numbering order. Those are two different questions,
+   * and conflating them hid a bug: the numbering order is the union of what
+   * the prose cites and what the note records, because a recorded source still
+   * needs a place in the reference list. Ask that union "which recorded
+   * sources does the prose not cite?" and the answer is always none, by
+   * construction — which is why the panel could never report that direction.
+   *
+   * The numbering order itself is not held here at all. The citation node
+   * views read it from the module store, and the bibliography derives it from
+   * these refs plus the note's records, by the same function — so there is one
+   * definition of the order rather than two that can disagree.
+   */
+  const [proseRefs, setProseRefs] = useState<string[]>([]);
   const recorded = (note.doc?.sources ?? []).map((c) => c.id).join(",");
   const trackCitations = useCallback(
     (body: string) => {
+      const inProse = citedRefs(body);
       const order = citationOrder(
-        citedRefs(body),
+        inProse,
         recorded ? recorded.split(",") : [],
       );
       // The module store is what the citation node views read; they are
       // mounted by ProseMirror and cannot be handed a prop.
       setCitationOrder(order);
-      setCiteOrder((current) =>
-        current.length === order.length &&
-        current.every((r, i) => r === order[i])
+      setProseRefs((current) =>
+        current.length === inProse.length &&
+        current.every((r, i) => r === inProse[i])
           ? current
-          : order,
+          : inProse,
       );
     },
     [recorded],
@@ -1016,7 +1032,7 @@ export default function App() {
         <ContextPanel
           citations={note.doc.sources ?? []}
           sources={sources}
-          inlineRefs={citeOrder}
+          inlineRefs={proseRefs}
           // A source note shows its paper above the editor instead; a list of
           // what it draws on would be asking the wrong question of it.
           showSources={note.doc.type !== "source"}

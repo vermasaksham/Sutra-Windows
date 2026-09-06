@@ -41,6 +41,12 @@ pub enum SutraError {
     #[error("export failed: {0}")]
     Export(String),
 
+    /// The platform credential store would not answer. Never fatal: the caller
+    /// always has somewhere less private to fall back to, and the point of
+    /// carrying the reason is that the user gets told which happened.
+    #[error("credential store: {0}")]
+    Secret(String),
+
     /// AI assistance. Carries a sentence a person can act on, because every
     /// failure here is either "it is switched off", "the key is wrong" or
     /// "the network is down", and all three have an obvious next step.

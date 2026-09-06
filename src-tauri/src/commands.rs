@@ -989,15 +989,21 @@ pub fn set_ai_settings(
     api_key: Option<String>,
     model: Option<String>,
 ) -> AiStatus {
-    state::set_ai_settings(
+    // An empty key means "remove it", so it is passed through as `Some("")`
+    // rather than filtered away — filtering here would make clearing a key
+    // indistinguishable from not touching the box.
+    let warning = state::set_ai_settings(
         &app,
         AiSettings {
             enabled,
-            api_key: api_key.filter(|k| !k.trim().is_empty()),
+            api_key,
             model: model.filter(|m| !m.trim().is_empty()),
         },
     );
-    state::ai_status(&app)
+    AiStatus {
+        warning,
+        ..state::ai_status(&app)
+    }
 }
 
 /// Ask for a suggestion about the open note.
