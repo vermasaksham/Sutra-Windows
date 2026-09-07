@@ -61,6 +61,8 @@ export type VaultOptions = {
   withQuote?: number;
   /** What a check for updates should report, or "fail" to make it error. */
   update?: { current: string; latest: string; newer: boolean } | "fail";
+  /** Make `app_version` fail, the way a broken IPC call would. */
+  versionFails?: boolean;
 };
 
 /**
@@ -237,6 +239,7 @@ export async function useVault(page: Page, options: VaultOptions) {
             return false;
 
           case "app_version":
+            if (opts.versionFails) throw new Error("no version available");
             return opts.update && opts.update !== "fail"
               ? opts.update.current
               : "0.1.0";
