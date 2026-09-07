@@ -142,13 +142,6 @@ export default function SettingsDialog({
 
         <section className="flex flex-col gap-2 border-t border-border pt-4">
           <h3 className="text-xs font-semibold tracking-wide text-ink-soft uppercase">
-            Version
-          </h3>
-          <UpdateCheck onReport={onReport} />
-        </section>
-
-        <section className="flex flex-col gap-2 border-t border-border pt-4">
-          <h3 className="text-xs font-semibold tracking-wide text-ink-soft uppercase">
             Assistance
           </h3>
           <div className="flex flex-wrap items-center justify-between gap-3">
@@ -168,6 +161,17 @@ export default function SettingsDialog({
               {aiEnabled ? "Change" : "Turn on assistance"}
             </button>
           </div>
+        </section>
+
+        {/* Last, because it is the one thing here that is not a setting.
+            Nothing above it can be changed by knowing the version, and it is
+            what someone scrolls to the bottom looking for when reporting a
+            problem. */}
+        <section className="flex flex-col gap-2 border-t border-border pt-4">
+          <h3 className="text-xs font-semibold tracking-wide text-ink-soft uppercase">
+            Version
+          </h3>
+          <UpdateCheck onReport={onReport} />
         </section>
       </div>
     </div>
