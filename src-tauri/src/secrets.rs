@@ -112,6 +112,14 @@ impl SecretStore for PlatformStore {
 ///
 /// Holds nothing and reports itself insecure, which is what makes the config
 /// file the honest place for a key there.
+///
+/// Genuinely unused on Windows and macOS, where `platform_store` returns the
+/// real thing — the same shape as `SERVICE` above, which only those platforms
+/// read. Windows CI caught this as `struct NoStore is never constructed`,
+/// which a Linux `cargo clippy` cannot see: neither half of a `cfg` is
+/// compiled on the platform it is not for, so each one is only ever checked
+/// where it applies.
+#[cfg_attr(any(windows, target_os = "macos"), allow(dead_code))]
 pub struct NoStore;
 
 impl SecretStore for NoStore {
