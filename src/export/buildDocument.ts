@@ -4,6 +4,7 @@ import { emphasisRuns, marker } from "../notes/citationStyle";
 import { mathToImage } from "./mathToImage";
 import { encodeSvg, rasterise } from "./rasterise";
 import { attachmentUrl } from "../editor/image/attachmentUrl";
+import { titleOf } from "../editor/wikilink/titleStore";
 
 /**
  * A note flattened into something a document writer can consume.
@@ -15,6 +16,23 @@ import { attachmentUrl } from "../editor/image/attachmentUrl";
  * a TeX engine.
  */
 
+/**
+ * A picture sitting inside a line of text rather than on its own.
+ *
+ * Word puts images in runs, so this is not a workaround — it is the shape the
+ * format already has. It exists because an inline formula is part of a
+ * sentence: "the bandgap is $E_g$ eV" is one line, and lifting the formula out
+ * into a block of its own leaves a hole in the prose where the value was.
+ */
+export type InlineImage = {
+  /** A PNG data URL. Always present — Word needs a raster even beside a vector. */
+  data: string;
+  /** The vector copy, for formulas and for attachments that began as SVG. */
+  svg?: string;
+  width: number;
+  height: number;
+};
+
 export type Run = {
   text: string;
   bold?: boolean;
@@ -22,6 +40,8 @@ export type Run = {
   code?: boolean;
   strike?: boolean;
   link?: string;
+  /** Set instead of `text` when this run is a picture. */
+  image?: InlineImage;
 };
 
 export type Block =
@@ -37,7 +57,8 @@ export type Block =
       runs: Run[];
     }
   | { kind: "divider" }
-  | { kind: "table"; rows: string[][]; headerRow: boolean }
+  /** Cells are runs, not strings: a table of measured values carries units, italics, citations and formulas. */
+  | { kind: "table"; rows: Run[][][]; headerRow: boolean }
   /**
    * A picture. `data` is always a PNG data URL — Rust embeds that, and Word
    * requires it even when a vector copy is supplied. `svg` is that vector copy,
@@ -66,7 +87,7 @@ const MARKS: Record<string, keyof Run> = {
   strike: "strike",
 };
 
-function runsFrom(nodes: JSONContent[] | undefined): Run[] {
+async function runsFrom(nodes: JSONContent[] | undefined): Promise<Run[]> {
   const runs: Run[] = [];
   for (const node of nodes ?? []) {
     if (node.type === "text") {
@@ -80,7 +101,14 @@ function runsFrom(nodes: JSONContent[] | undefined): Run[] {
     } else if (node.type === "wikiLink") {
       // A link between notes has no meaning outside the vault, so it exports
       // as the target's title — the same thing it shows on screen.
-      runs.push({ text: String(node.attrs?.targetId ?? ""), italic: true });
+      //
+      // A target that cannot be resolved exports as the raw `[[id]]` rather
+      // than as a bare ULID or as nothing: the id really is what the file
+      // says, and the brackets are what tell a reader it is a reference to
+      // something missing rather than a typo in the prose.
+      const targetId = String(node.attrs?.targetId ?? "");
+      const title = titleOf(targetId);
+      runs.push({ text: title ?? `[[${targetId}]]`, italic: true });
     } else if (node.type === "citation") {
       const ref = String(node.attrs?.ref ?? "");
       const [cited] = resolved([ref]);
@@ -95,24 +123,28 @@ function runsFrom(nodes: JSONContent[] | undefined): Run[] {
       });
     } else if (node.type === "hardBreak") {
       runs.push({ text: "\n" });
+    } else if (node.type === "mathInline") {
+      // In the line, where it was typed. A formula that cannot be rendered
+      // falls back to its own source rather than disappearing — LaTeX in a
+      // monospace run is still the thing the researcher wrote.
+      const latex = String(node.attrs?.latex ?? "");
+      const rendered = await mathToImage(latex, false);
+      runs.push(
+        rendered
+          ? {
+              text: "",
+              image: {
+                data: rendered.png,
+                svg: `data:image/svg+xml;base64,${encodeSvg(rendered.svg)}`,
+                width: rendered.width,
+                height: rendered.height,
+              },
+            }
+          : { text: latex, code: true },
+      );
     }
   }
   return runs;
-}
-
-/** Inline maths becomes its own image block, since a run cannot hold a picture. */
-async function inlineMathBlocks(
-  nodes: JSONContent[] | undefined,
-): Promise<Block[]> {
-  const blocks: Block[] = [];
-  for (const node of nodes ?? []) {
-    if (node.type === "mathInline") {
-      const latex = String(node.attrs?.latex ?? "");
-      const rendered = await mathToImage(latex, false);
-      if (rendered) blocks.push(imageBlock(rendered, latex));
-    }
-  }
-  return blocks;
 }
 
 async function walk(
@@ -126,19 +158,17 @@ async function walk(
       blocks.push({
         kind: "heading",
         level: Number(node.attrs?.level ?? 1),
-        runs: runsFrom(node.content),
+        runs: await runsFrom(node.content),
       });
-      blocks.push(...(await inlineMathBlocks(node.content)));
       break;
 
     case "paragraph":
-      blocks.push({ kind: "paragraph", runs: runsFrom(node.content) });
-      blocks.push(...(await inlineMathBlocks(node.content)));
+      blocks.push({ kind: "paragraph", runs: await runsFrom(node.content) });
       break;
 
     case "blockquote":
       for (const child of node.content ?? []) {
-        blocks.push({ kind: "quote", runs: runsFrom(child.content) });
+        blocks.push({ kind: "quote", runs: await runsFrom(child.content) });
       }
       break;
 
@@ -166,9 +196,8 @@ async function walk(
         depth,
         checked:
           node.type === "taskItem" ? Boolean(node.attrs?.checked) : undefined,
-        runs: runsFrom(first?.content),
+        runs: await runsFrom(first?.content),
       });
-      blocks.push(...(await inlineMathBlocks(first?.content)));
       // Nested lists live inside the item, one level deeper.
       for (const child of rest) await walk(child, blocks, depth + 1, ordered);
       break;
@@ -207,21 +236,25 @@ async function walk(
     }
 
     case "table": {
-      const rows: string[][] = [];
+      // Cells keep their runs. Flattening them to strings used to discard
+      // every mark, every citation and every formula inside a table — which,
+      // in a table of measured values, is most of what the table said.
+      //
+      // A cell holding several paragraphs is joined with a space rather than a
+      // newline: Word does not honour a newline inside a run, so the
+      // alternative is a cell that reads as one word.
+      const rows: Run[][][] = [];
       let headerRow = false;
       for (const row of node.content ?? []) {
-        const cells: string[] = [];
+        const cells: Run[][] = [];
         for (const cell of row.content ?? []) {
           if (cell.type === "tableHeader") headerRow = true;
-          cells.push(
-            (cell.content ?? [])
-              .map((p) =>
-                runsFrom(p.content)
-                  .map((r) => r.text)
-                  .join(""),
-              )
-              .join(" "),
-          );
+          const runs: Run[] = [];
+          for (const paragraph of cell.content ?? []) {
+            if (runs.length > 0) runs.push({ text: " " });
+            runs.push(...(await runsFrom(paragraph.content)));
+          }
+          cells.push(runs);
         }
         rows.push(cells);
       }

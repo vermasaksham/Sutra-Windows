@@ -1,6 +1,6 @@
 [package]
 name = "sutra"
-version = "0.2.0"
+version = "0.2.1"
 description = "Local-first, block-based notes for materials-chemistry research"
 edition = "2024"
 rust-version = "1.85"
@@ -40,6 +40,9 @@ windows-sys = { version = "0.61", features = [
   "Win32_Storage_FileSystem",
   "Win32_Foundation",
 ] }
+
+[target.'cfg(any(windows, target_os = "macos"))'.dependencies]
+keyring = { version = "3", default-features = false, features = ["apple-native", "windows-native"] }
 
 [profile.release]
 # Smaller, faster binaries for shipping. `panic = "abort"` drops the unwinding

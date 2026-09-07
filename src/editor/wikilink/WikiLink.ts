@@ -4,7 +4,21 @@ import { ReactNodeViewRenderer } from "@tiptap/react";
 import WikiLinkView from "./WikiLinkView";
 
 /** `[[` followed by a 26-character ULID and `]]`, anchored at the cursor. */
-const WIKILINK = /^\[\[([0-9A-Z]{26})\]\]/;
+/**
+ * `[[ULID]]`, and `[[ULID|Any Title]]`.
+ *
+ * The second shape is read but never written, in v0.2.1. Writing it is a
+ * vault-wide rewrite of every note, which needs a preview and a way back, so
+ * it waits for v0.3 — but a vault edited by a newer build, or by hand in
+ * Obsidian (where `[[x|y]]` is the alias syntax), must not read as broken
+ * text here in the meantime. Reading first, writing later, is what makes that
+ * migration safe to do at all.
+ *
+ * The id is what resolves. Everything after the pipe is display text with no
+ * authority: a title that has gone stale shows the note's real current name,
+ * because the title is looked up from the id exactly as it always was.
+ */
+const WIKILINK = /^\[\[([0-9A-Z]{26})(?:\|[^\]]*)?\]\]/;
 
 /**
  * A link to another note.

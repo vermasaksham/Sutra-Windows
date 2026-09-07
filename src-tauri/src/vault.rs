@@ -6,6 +6,7 @@
 //! renamed and moved freely without a single `[[id]]` link anywhere in the
 //! vault having to change.
 
+use crate::attachments;
 use crate::citations;
 use crate::error::{Result, SutraError};
 use crate::frontmatter::{self, Citation, Frontmatter, NoteType, SourceMeta};
@@ -13,7 +14,7 @@ use crate::note;
 use crate::tags;
 use crate::views;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Component, Path, PathBuf};
 use std::sync::RwLock;
@@ -347,7 +348,129 @@ impl Vault {
         let contents = fs::read_to_string(self.root.join(&target))?;
         let (parsed, body) = frontmatter::split(&contents)?;
         let fm = parsed.unwrap_or_else(|| Self::synthesise(&target));
-        Ok(summary_of(&fm, body, folder))
+
+        // Bring the note's own attachments with it. Without this the file
+        // moved and its pictures stayed behind: still resolving, because a
+        // reference is resolved against the whole vault, but sitting in a
+        // folder the note has left — so deleting that folder in Explorer, or
+        // moving the note out of a project being archived, silently broke
+        // every figure in it.
+        let moved = self.relocate_attachments(id, &folder, body)?;
+        let body = match moved {
+            Some(rewritten) => {
+                // `updated` is deliberately untouched. Moving a note is not an
+                // edit to it, and a vault whose timestamps move when someone
+                // drags a file has lost the one signal that says when the work
+                // happened.
+                note::write_atomic(
+                    &self.root.join(&target),
+                    &frontmatter::join(&fm, &rewritten)?,
+                )?;
+                rewritten
+            }
+            None => body.to_string(),
+        };
+
+        Ok(summary_of(&fm, &body, folder))
+    }
+
+    /// Move this note's own attachments into `folder`, returning the rewritten
+    /// body when anything changed.
+    ///
+    /// "Its own" means referenced by this note and by no other. An attachment
+    /// two notes point at belongs to neither, so it stays exactly where it is
+    /// and both references keep resolving — moving it would fix one note by
+    /// breaking another.
+    ///
+    /// Establishing that costs a scan of every note in the vault. That is
+    /// acceptable here and would not be on a hot path: moving a note is
+    /// something a person does by hand, one at a time.
+    fn relocate_attachments(&self, id: &str, folder: &str, body: &str) -> Result<Option<String>> {
+        let owned = self.owned_attachments(id, body)?;
+        if owned.is_empty() {
+            return Ok(None);
+        }
+
+        let destination = join_relative(folder, ATTACHMENTS);
+        let directory = self.root.join(&destination);
+        let mut rewritten = body.to_string();
+        let mut changed = false;
+
+        for reference in owned {
+            let Some(name) = Path::new(&reference)
+                .file_name()
+                .and_then(|n| n.to_str())
+                .map(str::to_string)
+            else {
+                continue;
+            };
+            if folder_of(&reference) == destination {
+                continue;
+            }
+            let from = self.root.join(&reference);
+            if !from.is_file() {
+                // The reference is already dangling. Leave it saying what it
+                // says — inventing a new target would hide the fact that the
+                // picture is gone.
+                continue;
+            }
+
+            fs::create_dir_all(&directory)?;
+            hide_from_explorer(&directory);
+
+            // Names are ULID-prefixed, so a clash means the same file is
+            // already there. Take a fresh name rather than overwrite it.
+            let mut to_name = name.clone();
+            if directory.join(&to_name).exists() {
+                to_name = format!("{}_{}", Ulid::generate(), name);
+            }
+            let to_reference = join_relative(&destination, &to_name);
+            note::rename_with_retry(&from, &self.root.join(&to_reference))?;
+
+            rewritten = attachments::retarget(&rewritten, &reference, &to_reference);
+            changed = true;
+        }
+
+        Ok(changed.then_some(rewritten))
+    }
+
+    /// The attachments `body` references that no *other* note also references.
+    ///
+    /// The question this answers is "may Sutra move or trash this file?", and
+    /// the only safe answer is yes when exactly one note points at it. A file
+    /// nothing points at is not reported either: it is not this note's to
+    /// take, and something outside the app may well be using it.
+    fn owned_attachments(&self, id: &str, body: &str) -> Result<Vec<String>> {
+        let mine = attachments::extract(body);
+        if mine.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let mut files = Vec::new();
+        collect(&self.root, &self.root, 0, &mut files)?;
+
+        let mut shared: HashSet<String> = HashSet::new();
+        for relative in files {
+            let Ok(contents) = fs::read_to_string(self.root.join(&relative)) else {
+                continue;
+            };
+            let Ok((parsed, other)) = frontmatter::split(&contents) else {
+                continue;
+            };
+            let other_id = match parsed {
+                Some(fm) => fm.id,
+                None => note::adopted_id(&relative),
+            };
+            if other_id == id {
+                continue;
+            }
+            shared.extend(attachments::extract(other));
+        }
+
+        Ok(mine
+            .into_iter()
+            .filter(|reference| !shared.contains(reference))
+            .collect())
     }
 
     /// Replace a note's page-level metadata.
@@ -420,6 +543,20 @@ impl Vault {
         let trash = self.root.join(SUTRA).join(TRASH);
         fs::create_dir_all(&trash)?;
 
+        // Work out what the note owns *before* moving it: the answer is read
+        // from its body, and the scan that decides "owned" has to be able to
+        // find every other note while this one is still where it says it is.
+        let owned = match fs::read_to_string(self.root.join(&relative)) {
+            Ok(contents) => {
+                let (_, body) = frontmatter::split(&contents)?;
+                self.owned_attachments(id, body)?
+            }
+            // Unreadable is not a reason to refuse the delete. The note is
+            // still moved to the trash; its attachments are simply left alone,
+            // which is the safe direction.
+            Err(_) => Vec::new(),
+        };
+
         let mut target = trash.join(&flattened);
         // Deleting, restoring, and deleting again must not silently overwrite
         // the first copy.
@@ -431,6 +568,30 @@ impl Vault {
             .write()
             .unwrap_or_else(|e| e.into_inner())
             .remove(id);
+
+        // The note's own pictures go to the trash with it. They are moved, not
+        // unlinked: everything in `.sutra/trash` can be dragged back out in
+        // Explorer, so a delete stays as recoverable for a figure as it is for
+        // the note that showed it. A file any other note still references is
+        // not touched — see `owned_attachments`.
+        for reference in owned {
+            let from = self.root.join(&reference);
+            if !from.is_file() {
+                continue;
+            }
+            let mut into = trash.join(reference.replace('/', " - "));
+            if into.exists() {
+                into = trash.join(format!(
+                    "{}.{}",
+                    Ulid::generate(),
+                    reference.replace('/', " - ")
+                ));
+            }
+            // Best effort, and deliberately so: the note is already in the
+            // trash, and failing the whole delete because a picture was locked
+            // would leave the user with a half-deleted note and an error.
+            let _ = note::rename_with_retry(&from, &into);
+        }
         Ok(())
     }
 
@@ -949,9 +1110,32 @@ impl Vault {
             None => None,
         };
         match existing {
-            Some(found) => self.set_source_meta(&found.id, meta),
+            Some(found) => self.merge_source_meta(&found.id, meta),
             None => Ok(self.create_source(title, meta)?.summary),
         }
+    }
+
+    /// Fold freshly-fetched details onto a source note, keeping what the fetch
+    /// had no answer for.
+    ///
+    /// Separate from [`Vault::set_source_meta`], which replaces. Both are
+    /// wanted: editing a source by hand means "this is now the whole truth",
+    /// and re-importing means "here is what the library says, leave the rest".
+    ///
+    /// The merge happens inside `edit`, against the file as it is on disk
+    /// right now, rather than against the summary the caller looked up. The
+    /// two can differ — a sync client may have rewritten the note since — and
+    /// merging onto a stale copy would reintroduce exactly the kind of quiet
+    /// overwrite this whole change exists to remove.
+    pub fn merge_source_meta(&self, id: &str, meta: SourceMeta) -> Result<NoteSummary> {
+        self.edit(id, |fm| {
+            fm.note_type = NoteType::Source;
+            let merged = match fm.source.as_ref() {
+                Some(held) => meta.merged_over(held),
+                None => meta,
+            };
+            fm.source = Some(merged);
+        })
     }
 
     /// Read, change, write. Every metadata setter is this shape.
@@ -1263,8 +1447,21 @@ impl Vault {
     ///
     /// A miss triggers one rescan and one retry, which is how a note created
     /// outside the app becomes reachable without the user doing anything.
+    ///
+    /// A *hit* is checked before it is trusted, which is the part that was
+    /// missing. The map is only updated by the operations this app performs,
+    /// so a note moved in Explorer or by a sync client leaves a stale entry
+    /// pointing at a path that no longer exists. That was not a miss, so no
+    /// rescan happened: the read failed, the watcher took the note out of the
+    /// index, and it stayed gone until something else rebuilt the map.
+    ///
+    /// One `exists` call per lookup is a stat on a path already in memory,
+    /// against a rescan that reads every note in the vault — so the check goes
+    /// on the hit and the rescan stays on the failure.
     fn relative_for(&self, id: &str) -> Result<String> {
-        if let Some(found) = self.lookup(id) {
+        if let Some(found) = self.lookup(id)
+            && self.root.join(&found).is_file()
+        {
             return Ok(found);
         }
         self.list_notes()?;
@@ -1344,13 +1541,38 @@ impl Vault {
     }
 
     /// One past the highest position among a folder's notes.
+    ///
+    /// Reads that one directory rather than the whole vault. It used to call
+    /// `list_notes`, which parses every note in the vault — so creating one
+    /// note in a five-thousand-note vault read five thousand files to work out
+    /// a single integer.
+    ///
+    /// Only the frontmatter's `position` is wanted, but the files still have
+    /// to be opened to get it; the saving is in how many. A note whose
+    /// frontmatter will not parse is skipped rather than treated as position
+    /// zero, which would quietly push a new note above it.
     fn next_position(&self, folder: &str) -> Result<i64> {
-        let highest = self
-            .list_notes()?
-            .iter()
-            .filter(|n| n.folder == folder)
-            .map(|n| n.position)
-            .max();
+        let directory = self.root.join(folder);
+        let Ok(entries) = fs::read_dir(&directory) else {
+            // The folder does not exist yet, so the note being created is its
+            // first.
+            return Ok(0);
+        };
+
+        let mut highest: Option<i64> = None;
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().and_then(|e| e.to_str()) != Some("md") {
+                continue;
+            }
+            let Ok(contents) = fs::read_to_string(&path) else {
+                continue;
+            };
+            let Ok((Some(fm), _)) = frontmatter::split(&contents) else {
+                continue;
+            };
+            highest = Some(highest.map_or(fm.position, |h: i64| h.max(fm.position)));
+        }
         Ok(highest.map_or(0, |p| p + 1))
     }
 
@@ -1908,9 +2130,25 @@ mod tests {
     /// way it is.
     ///
     /// Move a note between two folders and check that every relationship it
-    /// had survives. Nothing here is bookkeeping the move has to perform — the
-    /// links, the backlinks and the attachment reference all keep working
-    /// because none of them ever mentioned where the file was.
+    /// had survives.
+    ///
+    /// Links and backlinks need no bookkeeping at all: they name the note's
+    /// id, and the id is not in the path. That is the point of the layout.
+    ///
+    /// The attachment is the exception, and v0.2.1 corrected what this test
+    /// used to claim about it. A reference like
+    /// `Research/Sb2Se3/.attachments/01H_dsc.png` *is* a path, so it was only
+    /// still resolving after a move because the picture had been left behind
+    /// in a folder the note no longer lived in. That is not a surviving
+    /// relationship, it is a postponed break — delete the old project folder
+    /// and every figure in the moved note goes with it.
+    ///
+    /// So the note's own attachments now travel with it and the body's
+    /// reference is retargeted to match. The body is no longer byte-identical
+    /// across a move, and that is the deliberate change: what must survive is
+    /// the *relationship*, and asserting the bytes was only ever a proxy for
+    /// it. Everything a person wrote is still untouched — see the assertions
+    /// below, which pin the prose and the wikilinks exactly.
     #[test]
     fn moving_a_note_preserves_every_relationship() {
         let vault = TempVault::new();
@@ -1970,7 +2208,42 @@ mod tests {
         assert_eq!(moved.id, id, "the id must not change");
 
         let after = vault.read_note(&id).unwrap();
-        assert_eq!(after.body, before.body, "the body must be untouched");
+
+        // The prose and every wikilink are exactly as they were. Only the
+        // attachment's path moved with the file it names.
+        assert!(
+            after.body.contains("Ribbons align."),
+            "the prose was altered: {}",
+            after.body
+        );
+        assert!(
+            after.body.contains(&format!("[[{}]]", other.summary.id)),
+            "a wikilink was rewritten, and links must never be: {}",
+            after.body
+        );
+        assert_eq!(
+            crate::links::extract(&after.body),
+            crate::links::extract(&before.body),
+            "the links out of this note must be untouched"
+        );
+
+        // The figure followed the note, and still resolves.
+        let moved_reference = attachments::extract(&after.body);
+        assert_eq!(moved_reference.len(), 1);
+        assert!(
+            moved_reference[0].starts_with("Research/SbSeI/Thermodynamics/.attachments/"),
+            "the attachment did not follow the note: {}",
+            moved_reference[0]
+        );
+        assert_eq!(
+            vault.read_attachment(&moved_reference[0]).unwrap(),
+            b"\x89PNG fake"
+        );
+        assert!(
+            !vault.root().join(&reference).exists(),
+            "a copy was left behind in the old folder"
+        );
+
         assert_eq!(after.summary.title, "Sb2Se3 Cp");
         assert_eq!(after.summary.tags, vec!["sb2se3", "cvt"]);
         assert_eq!(after.summary.icon.as_deref(), Some("🧪"));
@@ -1991,10 +2264,6 @@ mod tests {
             vault.read_note(&id).is_ok(),
             "the link target still resolves"
         );
-
-        // The attachment is still readable by the reference in the body, even
-        // though the file did not move with the note.
-        assert_eq!(vault.read_attachment(&reference).unwrap(), b"\x89PNG fake");
 
         // And the old location is empty.
         assert!(
@@ -2164,6 +2433,55 @@ mod tests {
             "updated must not go backwards"
         );
         assert_eq!(after.updated.nanosecond(), 0, "no sub-second noise on disk");
+    }
+
+    #[test]
+    fn a_note_moved_outside_the_app_is_found_again() {
+        // The stale-hit case. The map still points at the old path, which is
+        // not a miss — so before v0.2.1 no rescan happened, the read failed,
+        // and the watcher dropped the note out of the index.
+        let vault = TempVault::new();
+        let note = vault.create_note("Growth", folder("A")).unwrap();
+        let id = note.summary.id.clone();
+        vault.save_note(&id, "Growth", "Ribbons align.").unwrap();
+
+        // Somebody drags it in Explorer, or a sync client does.
+        let from = vault.root().join(vault.relative_for(&id).unwrap());
+        fs::create_dir_all(vault.root().join("B")).unwrap();
+        let to = vault.root().join("B").join("Growth.md");
+        fs::rename(&from, &to).unwrap();
+
+        let found = vault.read_note(&id).expect("the note must still be found");
+        assert_eq!(found.summary.folder, "B");
+        assert_eq!(found.body.trim(), "Ribbons align.");
+        assert_eq!(found.summary.id, id, "and it is the same note");
+    }
+
+    #[test]
+    fn a_note_deleted_outside_the_app_reads_as_gone_not_as_stale() {
+        let vault = TempVault::new();
+        let note = vault.create_note("Growth", folder("A")).unwrap();
+        let id = note.summary.id.clone();
+        fs::remove_file(vault.root().join(vault.relative_for(&id).unwrap())).unwrap();
+        assert!(vault.read_note(&id).is_err());
+    }
+
+    #[test]
+    fn positions_are_counted_from_the_folder_alone() {
+        // `next_position` used to read every note in the vault. It now reads
+        // one directory, so this pins that a busy neighbouring folder does not
+        // push a new note's position up.
+        let vault = TempVault::new();
+        for title in ["One", "Two", "Three"] {
+            vault.create_note(title, folder("Busy")).unwrap();
+        }
+        let first = vault.create_note("First here", folder("Quiet")).unwrap();
+        assert_eq!(
+            first.summary.position, 0,
+            "a note in an empty folder starts at zero"
+        );
+        let second = vault.create_note("Second here", folder("Quiet")).unwrap();
+        assert_eq!(second.summary.position, 1);
     }
 
     #[test]
@@ -2378,6 +2696,205 @@ mod tests {
                 "{attempt} should be refused"
             );
         }
+    }
+
+    #[test]
+    fn an_attachment_follows_its_note_through_a_rename_and_a_move() {
+        // The workflow this pins, end to end: attach a figure, rename the
+        // note, move it to another folder, reopen it, and the figure still
+        // resolves. Before this, the move left the picture in the old folder.
+        let vault = TempVault::new();
+        let note = vault
+            .create_note("Growth", folder("Research/Sb2Se3"))
+            .unwrap();
+        let id = note.summary.id.clone();
+
+        let source = vault.root().join("figure.png");
+        fs::write(&source, b"\x89PNG fake").unwrap();
+        let reference = vault
+            .import_attachment(&source, folder("Research/Sb2Se3"))
+            .unwrap();
+        vault
+            .save_note(&id, "Growth", &format!("Result: ![plot]({reference})"))
+            .unwrap();
+
+        // Rename first: the file moves, the id and the folder do not.
+        vault.save_note(&id, "Growth run 4", "").unwrap();
+        let renamed = vault.read_note(&id).unwrap();
+        vault
+            .save_note(
+                &id,
+                "Growth run 4",
+                &format!("Result: ![plot]({reference})"),
+            )
+            .unwrap();
+        assert_eq!(renamed.summary.folder, "Research/Sb2Se3");
+
+        // Then the move.
+        vault.move_note(&id, "Archive/2026").unwrap();
+
+        let after = vault.read_note(&id).unwrap();
+        assert_eq!(after.summary.folder, "Archive/2026");
+
+        let moved = attachments::extract(&after.body);
+        assert_eq!(moved.len(), 1, "the body still has one attachment");
+        assert!(
+            moved[0].starts_with("Archive/2026/.attachments/"),
+            "the reference did not follow the note: {}",
+            moved[0]
+        );
+        assert_eq!(
+            vault.read_attachment(&moved[0]).unwrap(),
+            b"\x89PNG fake",
+            "the file itself did not follow the note"
+        );
+        assert!(
+            !vault.root().join(&reference).exists(),
+            "the old copy was left behind"
+        );
+    }
+
+    #[test]
+    fn a_moved_note_keeps_its_edit_time() {
+        // Moving is not editing. Rewriting the body to retarget an attachment
+        // must not stamp `updated`, or dragging a folder full of notes would
+        // destroy the record of when the work actually happened.
+        let vault = TempVault::new();
+        let note = vault.create_note("Growth", folder("A")).unwrap();
+        let id = note.summary.id.clone();
+        let source = vault.root().join("f.png");
+        fs::write(&source, b"png").unwrap();
+        let reference = vault.import_attachment(&source, folder("A")).unwrap();
+        vault
+            .save_note(&id, "Growth", &format!("![p]({reference})"))
+            .unwrap();
+
+        let before = vault.read_note(&id).unwrap().summary.updated;
+        vault.move_note(&id, "B").unwrap();
+        assert_eq!(vault.read_note(&id).unwrap().summary.updated, before);
+    }
+
+    #[test]
+    fn an_attachment_two_notes_use_is_left_where_it_is() {
+        // Shared, so it belongs to neither. Moving it would fix one note by
+        // breaking the other, so nothing moves and both references keep
+        // resolving.
+        let vault = TempVault::new();
+        let first = vault.create_note("First", folder("A")).unwrap();
+        let second = vault.create_note("Second", folder("A")).unwrap();
+        let source = vault.root().join("shared.png");
+        fs::write(&source, b"shared bytes").unwrap();
+        let reference = vault.import_attachment(&source, folder("A")).unwrap();
+
+        for note in [&first, &second] {
+            vault
+                .save_note(
+                    &note.summary.id,
+                    &note.summary.title,
+                    &format!("![s]({reference})"),
+                )
+                .unwrap();
+        }
+
+        vault.move_note(&first.summary.id, "B").unwrap();
+
+        assert!(
+            vault.root().join(&reference).exists(),
+            "a shared attachment must not be moved"
+        );
+        assert_eq!(
+            attachments::extract(&vault.read_note(&first.summary.id).unwrap().body),
+            vec![reference.clone()],
+            "the moved note's reference must be left pointing at the shared file"
+        );
+        assert_eq!(
+            vault.read_attachment(&reference).unwrap(),
+            b"shared bytes",
+            "the note that stayed must still resolve it"
+        );
+    }
+
+    #[test]
+    fn deleting_a_note_takes_its_own_attachment_to_the_trash() {
+        let vault = TempVault::new();
+        let note = vault.create_note("Growth", folder("A")).unwrap();
+        let source = vault.root().join("f.png");
+        fs::write(&source, b"the figure").unwrap();
+        let reference = vault.import_attachment(&source, folder("A")).unwrap();
+        vault
+            .save_note(&note.summary.id, "Growth", &format!("![p]({reference})"))
+            .unwrap();
+
+        vault.delete_note(&note.summary.id).unwrap();
+
+        assert!(
+            !vault.root().join(&reference).exists(),
+            "the attachment stayed in the vault after its only note was deleted"
+        );
+        // Trashed, not unlinked: it has to be recoverable by hand.
+        let trash = vault.root().join(SUTRA).join(TRASH);
+        let recovered: Vec<_> = fs::read_dir(&trash)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .filter(|e| e.file_name().to_string_lossy().ends_with(".png"))
+            .collect();
+        assert_eq!(recovered.len(), 1, "the figure is not in the trash");
+        assert_eq!(fs::read(recovered[0].path()).unwrap(), b"the figure");
+    }
+
+    #[test]
+    fn deleting_a_note_leaves_an_attachment_another_note_still_uses() {
+        let vault = TempVault::new();
+        let first = vault.create_note("First", folder("A")).unwrap();
+        let second = vault.create_note("Second", folder("A")).unwrap();
+        let source = vault.root().join("shared.png");
+        fs::write(&source, b"shared").unwrap();
+        let reference = vault.import_attachment(&source, folder("A")).unwrap();
+        for note in [&first, &second] {
+            vault
+                .save_note(
+                    &note.summary.id,
+                    &note.summary.title,
+                    &format!("![s]({reference})"),
+                )
+                .unwrap();
+        }
+
+        vault.delete_note(&first.summary.id).unwrap();
+
+        assert_eq!(
+            vault.read_attachment(&reference).unwrap(),
+            b"shared",
+            "the surviving note's figure was trashed with the other note"
+        );
+    }
+
+    #[test]
+    fn a_note_that_references_nothing_of_ours_is_moved_untouched() {
+        // A remote image and a link to another note are not attachments, and a
+        // move must not rewrite either.
+        let vault = TempVault::new();
+        let note = vault.create_note("Reading", folder("A")).unwrap();
+        let body = "![web](https://example.com/x.png) and [[01HQ3M8K2P0000000000000001]]";
+        vault.save_note(&note.summary.id, "Reading", body).unwrap();
+
+        vault.move_note(&note.summary.id, "B").unwrap();
+
+        assert_eq!(vault.read_note(&note.summary.id).unwrap().body.trim(), body);
+    }
+
+    #[test]
+    fn a_dangling_reference_is_left_saying_what_it_says() {
+        // The picture is already gone. Moving the note must not invent a new
+        // target for it, which would hide the loss.
+        let vault = TempVault::new();
+        let note = vault.create_note("Growth", folder("A")).unwrap();
+        let body = "![p](A/.attachments/01HQ3M8K2P0000000000000001_gone.png)";
+        vault.save_note(&note.summary.id, "Growth", body).unwrap();
+
+        vault.move_note(&note.summary.id, "B").unwrap();
+
+        assert_eq!(vault.read_note(&note.summary.id).unwrap().body.trim(), body);
     }
 
     #[test]
@@ -3095,6 +3612,135 @@ mod tests {
                 .as_deref(),
             Some("10.1000/new")
         );
+    }
+
+    #[test]
+    fn re_importing_keeps_the_cached_citation_styles() {
+        // The whole point of caching how a paper is formatted is that a thesis
+        // draft written on a train still shows "(Ko et al., 2024)" with Zotero
+        // closed. Re-importing the paper must not throw that away — an import
+        // brings fresh *bibliographic* facts, and how those facts were once
+        // rendered is not one of them.
+        let vault = TempVault::new();
+        let source = vault
+            .import_source("Zhou 2019", paper("10.1000/old"))
+            .unwrap();
+
+        vault
+            .cache_style(
+                &source.id,
+                "american-chemical-society",
+                crate::references::StyledCitation {
+                    citation: Some("(1)".into()),
+                    bib: Some("Zhou, Y.; Wang, L. Nature Energy 2019.".into()),
+                },
+            )
+            .unwrap();
+        vault
+            .cache_style(
+                &source.id,
+                "apa",
+                crate::references::StyledCitation {
+                    citation: Some("(Zhou & Wang, 2019)".into()),
+                    bib: Some("Zhou, Y., & Wang, L. (2019).".into()),
+                },
+            )
+            .unwrap();
+
+        // A fresh fetch from the library. `Reference::to_source` builds one of
+        // these with an empty `styled` map, because a search response says
+        // nothing about formatting.
+        vault
+            .import_source("Zhou 2019", paper("10.1000/new"))
+            .unwrap();
+
+        let after = vault.read_note(&source.id).unwrap().summary.source.unwrap();
+        assert_eq!(
+            after.doi.as_deref(),
+            Some("10.1000/new"),
+            "the fresh bibliographic fact must win"
+        );
+        assert_eq!(
+            after.styled.len(),
+            2,
+            "both cached styles must survive the re-import, got {:?}",
+            after.styled.keys().collect::<Vec<_>>()
+        );
+        assert_eq!(
+            after.styled["apa"].citation.as_deref(),
+            Some("(Zhou & Wang, 2019)")
+        );
+    }
+
+    #[test]
+    fn re_importing_keeps_collections_and_the_pdf_when_the_fetch_has_neither() {
+        // `import_zotero_source` takes the cheap path: one search response,
+        // which carries no collections and no attachments. It must not read as
+        // "this paper is now in no collections and has no PDF".
+        let vault = TempVault::new();
+        let mut full = paper("10.1000/x");
+        full.collections = vec!["Sb2Se3".into(), "To read".into()];
+        full.pdf = Some("Zhou et al. - 2019.pdf".into());
+        let source = vault.import_source("Zhou 2019", full).unwrap();
+
+        vault
+            .import_source("Zhou 2019", paper("10.1000/x"))
+            .unwrap();
+
+        let after = vault.read_note(&source.id).unwrap().summary.source.unwrap();
+        assert_eq!(after.collections, vec!["Sb2Se3", "To read"]);
+        assert_eq!(after.pdf.as_deref(), Some("Zhou et al. - 2019.pdf"));
+    }
+
+    #[test]
+    fn a_re_import_that_does_carry_collections_replaces_them() {
+        // The other half of the rule: when the library *does* answer, it is the
+        // authority. An item moved out of a collection in Zotero must not keep
+        // claiming membership here for ever.
+        let vault = TempVault::new();
+        let mut first = paper("10.1000/x");
+        first.collections = vec!["To read".into()];
+        let source = vault.import_source("Zhou 2019", first).unwrap();
+
+        let mut second = paper("10.1000/x");
+        second.collections = vec!["Read".into()];
+        vault.import_source("Zhou 2019", second).unwrap();
+
+        assert_eq!(
+            vault
+                .read_note(&source.id)
+                .unwrap()
+                .summary
+                .source
+                .unwrap()
+                .collections,
+            vec!["Read"]
+        );
+    }
+
+    #[test]
+    fn a_re_import_never_blanks_a_field_it_has_no_answer_for() {
+        // Zotero going quiet on one field is not the same as Zotero saying the
+        // field is empty. Only a real value replaces a real value.
+        let vault = TempVault::new();
+        let mut rich = paper("10.1000/x");
+        rich.citation_key = Some("zhou2019".into());
+        rich.abstract_text = Some("Sb2Se3 thin films were grown by...".into());
+        rich.item_type = Some("journalArticle".into());
+        let source = vault.import_source("Zhou 2019", rich).unwrap();
+
+        // A sparse response: title and key only, as a degraded fetch gives.
+        let sparse = SourceMeta {
+            zotero: Some("ABCD1234".into()),
+            ..Default::default()
+        };
+        vault.import_source("Zhou 2019", sparse).unwrap();
+
+        let after = vault.read_note(&source.id).unwrap().summary.source.unwrap();
+        assert_eq!(after.citation_key.as_deref(), Some("zhou2019"));
+        assert_eq!(after.item_type.as_deref(), Some("journalArticle"));
+        assert!(after.abstract_text.is_some());
+        assert_eq!(after.doi.as_deref(), Some("10.1000/x"));
     }
 
     #[test]

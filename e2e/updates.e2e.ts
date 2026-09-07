@@ -41,9 +41,10 @@ test.describe("checking for updates", () => {
     await openSettings(page);
 
     await page.getByRole("button", { name: "Check for updates" }).click();
-    await expect(
-      page.getByText("Sutra 0.2.0 is out. You have 0.1.0."),
-    ).toBeVisible();
+    // The version you are running stays stated in its own right; the news
+    // about a newer one sits under it rather than swallowing it.
+    await expect(page.getByText("Sutra 0.1.0", { exact: true })).toBeVisible();
+    await expect(page.getByText("0.2.0 is out.")).toBeVisible();
     await expect(page.getByRole("button", { name: "Get 0.2.0" })).toBeVisible();
   });
 
@@ -56,7 +57,25 @@ test.describe("checking for updates", () => {
     await openSettings(page);
 
     await page.getByRole("button", { name: "Check for updates" }).click();
+    await expect(page.getByText("Sutra 0.2.0", { exact: true })).toBeVisible();
     await expect(page.getByText("This is the newest release.")).toBeVisible();
+  });
+
+  test("says the version is unavailable rather than hanging on an ellipsis", async ({
+    page,
+  }) => {
+    // `app_version` failing used to be swallowed, leaving "Sutra …" on screen
+    // for ever — indistinguishable from still loading, and useless to somebody
+    // about to report a bug.
+    await useVault(page, {
+      notes: [{ id: NOTE, title: "Growth", body: "A note." }],
+      versionFails: true,
+    });
+    await page.goto("/");
+    await openSettings(page);
+
+    await expect(page.getByText("Sutra — version unavailable")).toBeVisible();
+    await expect(page.getByText("Sutra …")).toHaveCount(0);
   });
 
   test("a failed check says it failed rather than 'up to date'", async ({

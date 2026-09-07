@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import KeyLocation from "./KeyLocation";
 import {
   CITATION_STYLES,
   zoteroApi,
@@ -135,12 +136,22 @@ export default function ReferenceSettingsPanel({
                 zotero.org/settings/keys/new
               </code>{" "}
               with <strong>Allow library access</strong> ticked. Read-only is
-              enough — Sutra never writes to your library. A key typed here is
-              stored in plain text in the app&rsquo;s config file; setting{" "}
-              <code className="font-mono text-xs">ZOTERO_API_KEY</code> instead
-              stores nothing at all.
+              enough — Sutra never writes to your library.{" "}
+              <KeyLocation
+                storage={config.keyStorage}
+                variable="ZOTERO_API_KEY"
+              />
             </span>
           </label>
+
+          {config.warning && (
+            <p
+              role="alert"
+              className="rounded-lg border border-accent bg-accent-bg px-3 py-2 text-xs text-ink"
+            >
+              {config.warning}
+            </p>
+          )}
 
           <div className="flex flex-wrap items-center gap-2">
             <button

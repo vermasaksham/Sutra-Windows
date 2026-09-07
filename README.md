@@ -4,12 +4,32 @@
 research. Notion's writing experience, but the source of truth is plain markdown
 files on disk, and LaTeX maths and chemical equations are first-class.
 
+## Download
+
+**[Download the latest release for Windows](https://github.com/vermasaksham/Sutra-Windows/releases/latest)**
+
+Take `Sutra_<version>_x64_en-US.msi` and run it. The `_x64-setup.exe` beside it
+is the same application with the other installer; either is fine.
+
+The installer is not code-signed yet, so Windows SmartScreen warns the first
+time: **More info → Run anyway**. Installing over an earlier version keeps
+everything — your vault is a folder of markdown files and the installer does
+not touch it.
+
+Every release, with its notes, is on the
+[releases page](https://github.com/vermasaksham/Sutra-Windows/releases).
+
 ## The one architectural rule
 
 **Markdown files are the source of truth. SQLite is a disposable index.**
 
-- Every note is one `.md` file in a flat vault directory. No folder nesting.
-- Hierarchy lives in YAML frontmatter, not the filesystem.
+- Every note is one `.md` file in a real directory, nested up to four deep.
+- A note's location is where its file is, not something the file claims about
+  itself — so the two can never disagree. (An early version put hierarchy in a
+  frontmatter `parent:` key instead; that is dead, and vaults written that way
+  are migrated with a preview before anything moves.)
+- Identity is a ULID inside the file, so a note can be renamed and moved freely
+  without a single link in the vault having to change.
 - SQLite holds only derived data: full-text search, the folder tree, backlinks.
 - Delete the database and the app rebuilds it on next launch, losing nothing.
 - Nothing is ever stored in SQLite that does not also exist in a markdown file.

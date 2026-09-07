@@ -1,6 +1,7 @@
 import { useState } from "react";
 import SourcePicker, { describe } from "./SourcePicker";
 import { useCitation } from "../editor/citation/citationStore";
+import { divergence, isConsistent, summarise } from "./provenance";
 import { EVIDENCE_KINDS, type Citation, type NoteSummary } from "../vault/api";
 
 /**
@@ -40,8 +41,11 @@ export default function SourcesPanel({
 }) {
   const [picking, setPicking] = useState(false);
   const byId = new Map(sources.map((s) => [s.id, s]));
-  const recorded = new Set(citations.map((c) => c.id));
-  const onlyInProse = inlineRefs.filter((ref) => !recorded.has(ref));
+  // Both directions of disagreement, from one tested function rather than a
+  // filter here — the reverse direction (recorded, never cited) had no filter
+  // at all before v0.2.1 and so was invisible.
+  const found = divergence(citations, inlineRefs);
+  const onlyInProse = found.unrecorded;
 
   const update = (index: number, patch: Partial<Citation>) =>
     onChange(citations.map((c, i) => (i === index ? { ...c, ...patch } : c)));
@@ -179,8 +183,35 @@ export default function SourcesPanel({
         </ul>
       )}
 
+      {!isConsistent(found) && (
+        <div className="mt-3 rounded-lg border border-accent px-3 py-2">
+          <h3 className="text-xs font-semibold tracking-wide text-ink uppercase">
+            Citation consistency
+          </h3>
+          <p className="mt-1 text-xs text-ink-muted">{summarise(found)}</p>
+          <p className="mt-1 text-xs text-ink-muted">
+            Nothing has been changed. Which of these is wrong is yours to say —
+            a paragraph you have not finished writing looks exactly like this.
+          </p>
+        </div>
+      )}
+
+      {found.uncited.length > 0 && (
+        <div className="mt-2 rounded-lg border border-border px-3 py-2">
+          <p className="text-xs text-ink-muted">
+            Recorded here but not cited anywhere in the text, so nothing in the
+            note rests on them:
+          </p>
+          <ul className="mt-1 flex flex-col gap-1">
+            {found.uncited.map((ref) => (
+              <Uncited key={ref} reference={ref} onOpen={() => onOpen(ref)} />
+            ))}
+          </ul>
+        </div>
+      )}
+
       {onlyInProse.length > 0 && (
-        <div className="mt-3 rounded-lg border border-border px-3 py-2">
+        <div className="mt-2 rounded-lg border border-border px-3 py-2">
           <p className="text-xs text-ink-muted">
             Cited in the text but not recorded here, so there is no page or
             quote to trace the claim back to:
@@ -228,6 +259,43 @@ export default function SourcesPanel({
         />
       )}
     </section>
+  );
+}
+
+/**
+ * A source recorded in frontmatter that no sentence cites.
+ *
+ * Offers to open it, and nothing else. There is deliberately no "remove"
+ * button here: a provenance record carries a page number and a transcribed
+ * quote, and a one-click way to delete that because a paragraph is unfinished
+ * is precisely the silent loss this release exists to remove. Removing it is
+ * already possible above, on the entry itself, where the quote is visible.
+ */
+function Uncited({
+  reference,
+  onOpen,
+}: {
+  reference: string;
+  onOpen: () => void;
+}) {
+  const state = useCitation(reference);
+  // A source note that has since been deleted still deserves to be named by
+  // the id the file actually holds, rather than shown as nothing.
+  const name =
+    state.status === "found" ? state.cited.title : `Reference ${reference}`;
+  return (
+    <li className="flex items-center justify-between gap-2">
+      <span className="min-w-0 flex-1 truncate text-sm text-ink-soft">
+        {name}
+      </span>
+      <button
+        type="button"
+        onClick={onOpen}
+        className="sutra-no-print shrink-0 text-xs text-ink-muted transition-colors hover:text-accent"
+      >
+        open
+      </button>
+    </li>
   );
 }
 

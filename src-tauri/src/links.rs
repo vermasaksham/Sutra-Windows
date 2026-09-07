@@ -12,6 +12,24 @@ fn looks_like_ulid(candidate: &str) -> bool {
             .all(|b| b.is_ascii_digit() || b.is_ascii_uppercase())
 }
 
+/// The id half of a link's contents: everything before the first `|`.
+///
+/// `[[ULID|Human Readable Title]]` is read from v0.2.1 and written from v0.3.
+/// The id is the whole of the link's meaning; the title after the pipe is
+/// display text, resolved fresh from the id every time it is shown, so a stale
+/// one can never send a reader to the wrong note. Obsidian reads the same
+/// shape as its alias syntax, which is why it was chosen over the alternatives.
+///
+/// Reading the shape a release before writing it is deliberate: a vault opened
+/// in a newer build, synced back, and opened here again must not lose its
+/// links.
+fn id_of(contents: &str) -> &str {
+    match contents.split_once('|') {
+        Some((id, _)) => id,
+        None => contents,
+    }
+}
+
 /// Every distinct `[[id]]` in `body`, in order of first appearance.
 ///
 /// This is deliberately a scan over raw text rather than a markdown parse.
@@ -30,7 +48,7 @@ pub fn extract(body: &str) -> Vec<String> {
     while let Some(start) = rest.find("[[") {
         let after = &rest[start + 2..];
         let Some(end) = after.find("]]") else { break };
-        let candidate = &after[..end];
+        let candidate = id_of(&after[..end]);
 
         if looks_like_ulid(candidate) && !found.iter().any(|f| f == candidate) {
             found.push(candidate.to_string());
@@ -51,6 +69,29 @@ mod tests {
     #[test]
     fn finds_a_single_link() {
         assert_eq!(extract(&format!("See [[{A}]] for context.")), vec![A]);
+    }
+
+    #[test]
+    fn reads_a_link_that_carries_a_title() {
+        // Written from v0.3, read from v0.2.1. The id is what resolves.
+        assert_eq!(extract(&format!("See [[{A}|Growth of Sb2Se3]].")), vec![A]);
+    }
+
+    #[test]
+    fn a_title_is_display_text_with_no_authority_over_the_id() {
+        // Two links to the same note under different titles are one link.
+        let body = format!("[[{A}|One name]] and [[{A}|Another name]]");
+        assert_eq!(extract(&body), vec![A]);
+    }
+
+    #[test]
+    fn an_empty_title_is_still_a_link() {
+        assert_eq!(extract(&format!("[[{A}|]]")), vec![A]);
+    }
+
+    #[test]
+    fn a_pipe_does_not_rescue_something_that_is_not_an_id() {
+        assert!(extract("[[not-a-ulid|A Title]]").is_empty());
     }
 
     #[test]

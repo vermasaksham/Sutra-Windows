@@ -60,10 +60,25 @@ export function searchTitles(
  * file, and hiding it would misrepresent the note.
  */
 export function linksAsTitles(text: string): string {
-  return text.replace(/\[\[([0-9A-Z]{26})\]\]/g, (whole, id: string) => {
-    const title = titles.get(id);
-    return title ? title : whole;
-  });
+  return text.replace(
+    /\[\[([0-9A-Z]{26})(?:\|[^\]]*)?\]\]/g,
+    (whole, id: string) => {
+      const title = titles.get(id);
+      return title ? title : whole;
+    },
+  );
+}
+
+/**
+ * The title for a note id, outside React.
+ *
+ * The same lookup `useNoteTitle` subscribes to, for callers that are not
+ * components — the exporter, chiefly, which runs once when a button is pressed
+ * and has no render to re-run. `undefined` means no such note, and the caller
+ * decides what that should look like on paper.
+ */
+export function titleOf(id: string): string | undefined {
+  return titles.get(id);
 }
 
 function subscribe(listener: () => void) {

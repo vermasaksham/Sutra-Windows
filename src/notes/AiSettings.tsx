@@ -1,4 +1,5 @@
 import { useState } from "react";
+import KeyLocation from "./KeyLocation";
 import { aiApi, type AiStatus } from "../vault/api";
 
 /**
@@ -101,14 +102,23 @@ export default function AiSettingsDialog({
             className="rounded-lg border border-border bg-surface px-2 py-1 font-mono text-xs text-ink placeholder:text-ink-muted"
           />
           <span className="text-xs text-ink-muted">
-            Stored as plain text in Sutra&rsquo;s config folder, not in your
-            vault — a vault gets synced and shared, and a key does not belong
-            somewhere that happens to. Anything running as you can read that
-            file. Setting <code className="font-mono">ANTHROPIC_API_KEY</code>{" "}
-            in your environment instead stores nothing at all, and is used in
-            preference to this.
+            Never in your vault — a vault gets synced and shared, and a key does
+            not belong somewhere that happens to.{" "}
+            <KeyLocation
+              storage={status.keyStorage}
+              variable="ANTHROPIC_API_KEY"
+            />
           </span>
         </label>
+
+        {status.warning && (
+          <p
+            role="alert"
+            className="rounded-lg border border-accent bg-accent-bg px-3 py-2 text-xs text-ink"
+          >
+            {status.warning}
+          </p>
+        )}
 
         <label className="flex flex-col gap-1 text-sm">
           <span className="text-ink-soft">Model</span>

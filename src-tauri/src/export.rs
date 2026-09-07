@@ -32,6 +32,29 @@ pub struct Run {
     pub strike: bool,
     #[serde(default)]
     pub link: Option<String>,
+    /// A picture standing where text would be — an inline formula.
+    ///
+    /// Word already puts images inside runs, so this is the format's own
+    /// shape rather than a trick. Before it existed, an inline formula was
+    /// lifted out of its sentence and appended as a block, so "the bandgap is
+    /// $E_g$ eV" exported as "the bandgap is  eV" with a picture underneath.
+    #[serde(default)]
+    pub image: Option<InlineImage>,
+}
+
+/// A picture inside a line of text.
+#[derive(Debug, Deserialize)]
+pub struct InlineImage {
+    /// A PNG data URL. Always present: Word needs a raster copy even when a
+    /// vector one is supplied.
+    pub data: String,
+    /// An `image/svg+xml` data URL, when the picture has a vector form.
+    #[serde(default)]
+    pub svg: Option<String>,
+    #[serde(default)]
+    pub width: u32,
+    #[serde(default)]
+    pub height: u32,
 }
 
 #[derive(Debug, Deserialize)]
@@ -59,7 +82,10 @@ pub enum Block {
     },
     Divider,
     Table {
-        rows: Vec<Vec<String>>,
+        /// Rows of cells, each cell a list of runs. Runs rather than strings
+        /// because a research table's content *is* its formatting: a unit in
+        /// italics, a citation, a formula.
+        rows: Vec<Vec<Vec<Run>>>,
         header_row: bool,
     },
     Image {
@@ -105,6 +131,12 @@ const EMU_PER_PIXEL: u32 = 914_400 / 96;
 /// margins, which is about 6.3 inches.
 const MAX_WIDTH_PX: u32 = 600;
 
+/// The widest an inline picture may be. A formula in a sentence is a few
+/// characters wide; anything approaching the column is a display equation that
+/// happened to be typed inline, and letting it run to full width would break
+/// the line it sits in.
+const MAX_INLINE_WIDTH_PX: u32 = 220;
+
 fn decode_data_url(data: &str) -> Result<Vec<u8>> {
     // Data URLs arrive as `data:<type>;base64,....`; take what follows the
     // comma. The declared type is ignored — the caller knows what it asked for,
@@ -124,7 +156,63 @@ fn is_png(bytes: &[u8]) -> bool {
     bytes.starts_with(&[137, 80, 78, 71, 13, 10, 26, 10])
 }
 
-fn styled(run: &Run) -> docx_rs::Run {
+/// Build a picture, registering its vector copy for the weaving pass.
+///
+/// `cap` is the widest the picture may be in pixels. A block image gets the
+/// text column; an inline one gets far less, because a formula that is part of
+/// a sentence must not be taller than the line it sits in.
+fn picture(
+    data: &str,
+    svg: Option<&String>,
+    width: u32,
+    height: u32,
+    cap: u32,
+    vectors: &mut Vec<VectorCopy>,
+) -> Result<Pic> {
+    let bytes = decode_data_url(data)?;
+    if !is_png(&bytes) {
+        return Err(SutraError::Export(
+            "an image did not arrive as a PNG, so it cannot be embedded".into(),
+        ));
+    }
+    // A rendered formula carries its own size; an attachment arrives as 0 and
+    // is scaled to fit.
+    let (w, h) = if width == 0 || height == 0 {
+        (cap, 0)
+    } else if width > cap {
+        (cap, height * cap / width.max(1))
+    } else {
+        (width, height)
+    };
+
+    let mut pic = Pic::new(&bytes);
+    if h > 0 {
+        pic = pic.size(w * EMU_PER_PIXEL, h * EMU_PER_PIXEL);
+    }
+    if let Some(svg) = svg {
+        // `pic.id` is the relationship id docx-rs will write into the
+        // `<a:blip>`. Grab it now, while we still know which picture it
+        // belongs to.
+        vectors.push(VectorCopy {
+            blip: pic.id.clone(),
+            bytes: decode_data_url(svg)?,
+        });
+    }
+    Ok(pic)
+}
+
+fn styled(run: &Run, vectors: &mut Vec<VectorCopy>) -> Result<docx_rs::Run> {
+    if let Some(inline) = &run.image {
+        return Ok(docx_rs::Run::new().add_image(picture(
+            &inline.data,
+            inline.svg.as_ref(),
+            inline.width,
+            inline.height,
+            MAX_INLINE_WIDTH_PX,
+            vectors,
+        )?));
+    }
+
     let mut out = docx_rs::Run::new().add_text(&run.text);
     if run.bold {
         out = out.bold();
@@ -140,13 +228,13 @@ fn styled(run: &Run) -> docx_rs::Run {
         // mean directly rather than relying on one existing in the template.
         out = out.fonts(RunFonts::new().ascii("Consolas")).size(20);
     }
-    out
+    Ok(out)
 }
 
-fn paragraph_of(runs: &[Run]) -> Paragraph {
+fn paragraph_of(runs: &[Run], vectors: &mut Vec<VectorCopy>) -> Result<Paragraph> {
     let mut paragraph = Paragraph::new();
     for run in runs {
-        paragraph = paragraph.add_run(styled(run));
+        paragraph = paragraph.add_run(styled(run, vectors)?);
         // A link's destination is lost otherwise. Rather than build a
         // relationship for every link, the URL follows the text — clumsy, but
         // it survives, and a reader can follow it.
@@ -157,7 +245,7 @@ fn paragraph_of(runs: &[Run]) -> Paragraph {
             }
         }
     }
-    paragraph
+    Ok(paragraph)
 }
 
 /// Build the .docx and write it to `path`.
@@ -179,15 +267,17 @@ pub fn write_docx(document: &ExportDocument, path: &Path) -> Result<()> {
     for block in &document.blocks {
         docx = match block {
             Block::Heading { level, runs } => docx.add_paragraph(
-                paragraph_of(runs).style(&format!("Heading{}", level.clamp(&1, &6))),
+                paragraph_of(runs, &mut vectors)?.style(&format!("Heading{}", level.clamp(&1, &6))),
             ),
-            Block::Paragraph { runs } => docx.add_paragraph(paragraph_of(runs)),
-            Block::Quote { runs } => docx.add_paragraph(paragraph_of(runs).style("Quote").indent(
-                Some(720),
-                None,
-                None,
-                None,
-            )),
+            Block::Paragraph { runs } => docx.add_paragraph(paragraph_of(runs, &mut vectors)?),
+            Block::Quote { runs } => {
+                docx.add_paragraph(paragraph_of(runs, &mut vectors)?.style("Quote").indent(
+                    Some(720),
+                    None,
+                    None,
+                    None,
+                ))
+            }
             Block::Code { text } => {
                 // Each line its own paragraph: Word does not honour newlines
                 // inside a run, so a single paragraph would collapse the
@@ -213,14 +303,14 @@ pub fn write_docx(document: &ExportDocument, path: &Path) -> Result<()> {
                 checked,
                 runs,
             } => {
-                let mut paragraph = paragraph_of(runs);
+                let mut paragraph = paragraph_of(runs, &mut vectors)?;
                 // A checkbox has no Word equivalent that survives round-tripping,
                 // so it becomes a character that reads the same on paper.
                 if let Some(done) = checked {
                     let mark = if *done { "\u{2611} " } else { "\u{2610} " };
                     let mut rebuilt = Paragraph::new().add_run(docx_rs::Run::new().add_text(mark));
                     for run in runs {
-                        rebuilt = rebuilt.add_run(styled(run));
+                        rebuilt = rebuilt.add_run(styled(run, &mut vectors)?);
                     }
                     paragraph = rebuilt;
                 }
@@ -233,25 +323,29 @@ pub fn write_docx(document: &ExportDocument, path: &Path) -> Result<()> {
                 Paragraph::new().add_run(docx_rs::Run::new().add_text("―".repeat(30))),
             ),
             Block::Table { rows, header_row } => {
-                let table_rows: Vec<TableRow> = rows
-                    .iter()
-                    .enumerate()
-                    .map(|(index, cells)| {
-                        TableRow::new(
-                            cells
-                                .iter()
-                                .map(|cell| {
-                                    let bold = *header_row && index == 0;
-                                    let mut run = docx_rs::Run::new().add_text(cell);
-                                    if bold {
-                                        run = run.bold();
-                                    }
-                                    TableCell::new().add_paragraph(Paragraph::new().add_run(run))
-                                })
-                                .collect(),
-                        )
-                    })
-                    .collect();
+                // Built with loops rather than iterator chains because a cell
+                // can now fail (a formula whose picture will not decode) and
+                // registers vector copies as it goes — neither of which fits
+                // through a closure that has to return a `TableCell`.
+                let mut table_rows = Vec::with_capacity(rows.len());
+                for (index, cells) in rows.iter().enumerate() {
+                    let header = *header_row && index == 0;
+                    let mut built = Vec::with_capacity(cells.len());
+                    for cell in cells {
+                        let mut paragraph = Paragraph::new();
+                        for run in cell {
+                            let mut out = styled(run, &mut vectors)?;
+                            // A header row is bold whatever the cell itself
+                            // says; an image run has no text to embolden.
+                            if header && run.image.is_none() {
+                                out = out.bold();
+                            }
+                            paragraph = paragraph.add_run(out);
+                        }
+                        built.push(TableCell::new().add_paragraph(paragraph));
+                    }
+                    table_rows.push(TableRow::new(built));
+                }
                 docx.add_table(Table::new(table_rows).set_grid(vec![]))
             }
             Block::Image {
@@ -261,37 +355,16 @@ pub fn write_docx(document: &ExportDocument, path: &Path) -> Result<()> {
                 height,
                 alt,
             } => {
-                let bytes = decode_data_url(data)?;
-                if !is_png(&bytes) {
-                    return Err(SutraError::Export(
-                        "an image did not arrive as a PNG, so it cannot be embedded".into(),
-                    ));
-                }
-                // A rendered formula carries its own size; an attachment
-                // arrives as 0 and is scaled to fit the column.
-                let (w, h) = if *width == 0 || *height == 0 {
-                    (MAX_WIDTH_PX, 0)
-                } else if *width > MAX_WIDTH_PX {
-                    (MAX_WIDTH_PX, height * MAX_WIDTH_PX / width.max(&1))
-                } else {
-                    (*width, *height)
-                };
-                let mut picture = Pic::new(&bytes);
-                if h > 0 {
-                    picture = picture.size(w * EMU_PER_PIXEL, h * EMU_PER_PIXEL);
-                }
-                if let Some(svg) = svg {
-                    // `picture.id` is the relationship id docx-rs will write
-                    // into the `<a:blip>`. Grab it now, while we still know
-                    // which picture it belongs to.
-                    vectors.push(VectorCopy {
-                        blip: picture.id.clone(),
-                        bytes: decode_data_url(svg)?,
-                    });
-                }
-                let mut out = docx.add_paragraph(
-                    Paragraph::new().add_run(docx_rs::Run::new().add_image(picture)),
-                );
+                let pic = picture(
+                    data,
+                    svg.as_ref(),
+                    *width,
+                    *height,
+                    MAX_WIDTH_PX,
+                    &mut vectors,
+                )?;
+                let mut out = docx
+                    .add_paragraph(Paragraph::new().add_run(docx_rs::Run::new().add_image(pic)));
                 // The LaTeX source, or the alt text, kept as a caption. An
                 // equation that is only a picture is unsearchable otherwise.
                 if !alt.is_empty() {
@@ -312,7 +385,7 @@ pub fn write_docx(document: &ExportDocument, path: &Path) -> Result<()> {
                 .style("Heading2"),
         );
         for reference in &document.references {
-            docx = docx.add_paragraph(paragraph_of(reference));
+            docx = docx.add_paragraph(paragraph_of(reference, &mut vectors)?);
         }
     }
 
@@ -514,41 +587,26 @@ mod tests {
                     level: 2,
                     runs: vec![Run {
                         text: "Transport reaction".into(),
-                        bold: false,
-                        italic: false,
-                        code: false,
-                        strike: false,
-                        link: None,
+                        ..Default::default()
                     }],
                 },
                 Block::Paragraph {
                     runs: vec![
                         Run {
                             text: "Ribbons align ".into(),
-                            bold: false,
-                            italic: false,
-                            code: false,
-                            strike: false,
-                            link: None,
+                            ..Default::default()
                         },
                         Run {
                             text: "strongly".into(),
                             bold: true,
-                            italic: false,
-                            code: false,
-                            strike: false,
-                            link: None,
+                            ..Default::default()
                         },
                     ],
                 },
                 Block::Quote {
                     runs: vec![Run {
                         text: "Worth isolating.".into(),
-                        bold: false,
-                        italic: false,
-                        code: false,
-                        strike: false,
-                        link: None,
+                        ..Default::default()
                     }],
                 },
                 Block::Code {
@@ -560,18 +618,42 @@ mod tests {
                     checked: Some(true),
                     runs: vec![Run {
                         text: "XRD done".into(),
-                        bold: false,
-                        italic: false,
-                        code: false,
-                        strike: false,
-                        link: None,
+                        ..Default::default()
                     }],
                 },
                 Block::Divider,
                 Block::Table {
                     rows: vec![
-                        vec!["Parameter".into(), "Value".into()],
-                        vec!["Source".into(), "560 C".into()],
+                        vec![cell("Parameter"), cell("Value")],
+                        vec![
+                            cell("Source"),
+                            // A unit in italics, and a formula: the two things
+                            // a flattened cell used to destroy.
+                            vec![
+                                Run {
+                                    text: "560 ".into(),
+                                    ..Default::default()
+                                },
+                                Run {
+                                    text: "\u{b0}C".into(),
+                                    italic: true,
+                                    ..Default::default()
+                                },
+                            ],
+                        ],
+                        vec![
+                            cell("Bandgap"),
+                            vec![Run {
+                                text: String::new(),
+                                image: Some(InlineImage {
+                                    data: PNG.into(),
+                                    svg: Some(SVG.into()),
+                                    width: 40,
+                                    height: 16,
+                                }),
+                                ..Default::default()
+                            }],
+                        ],
                     ],
                     header_row: true,
                 },
@@ -599,6 +681,22 @@ mod tests {
                 },
             ]],
         }
+    }
+
+    fn drop_vectors(runs: &mut [Run]) {
+        for run in runs {
+            if let Some(image) = run.image.as_mut() {
+                image.svg = None;
+            }
+        }
+    }
+
+    /// A table cell holding one plain run.
+    fn cell(text: &str) -> Vec<Run> {
+        vec![Run {
+            text: text.into(),
+            ..Default::default()
+        }]
     }
 
     fn write_to_temp(document: &ExportDocument) -> std::path::PathBuf {
@@ -759,14 +857,181 @@ mod tests {
     }
 
     #[test]
+    fn an_inline_formula_stays_inside_its_sentence() {
+        // The defect this pins: `runsFrom` used to ignore `mathInline`, and the
+        // formula was appended as a block after the paragraph. "The bandgap is
+        // $E_g$ eV" exported as "The bandgap is  eV" with a picture underneath.
+        //
+        // In OOXML a paragraph is one `<w:p>`, so the proof is that the text
+        // either side of the formula and the drawing all sit in the same one.
+        let document = ExportDocument {
+            title: "Sb2Se3".into(),
+            blocks: vec![Block::Paragraph {
+                runs: vec![
+                    Run {
+                        text: "The bandgap is ".into(),
+                        ..Default::default()
+                    },
+                    Run {
+                        text: String::new(),
+                        image: Some(InlineImage {
+                            data: PNG.into(),
+                            svg: Some(SVG.into()),
+                            width: 40,
+                            height: 16,
+                        }),
+                        ..Default::default()
+                    },
+                    Run {
+                        text: " eV at room temperature.".into(),
+                        ..Default::default()
+                    },
+                ],
+            }],
+            references: Vec::new(),
+        };
+
+        let path = write_to_temp(&document);
+        let xml = entry(&path, "word/document.xml");
+
+        let paragraph = xml
+            .split("<w:p>")
+            .find(|p| p.contains("The bandgap is "))
+            .expect("no paragraph carrying the sentence");
+        assert!(
+            paragraph.contains("<w:drawing>"),
+            "the formula left its sentence: {paragraph}"
+        );
+        assert!(
+            paragraph.contains(" eV at room temperature."),
+            "the text after the formula was lost: {paragraph}"
+        );
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn a_formula_inside_a_quotation_survives() {
+        // Evidence lives in blockquotes — they are where a source's own words
+        // go. The quote branch never handled inline maths at all, so a formula
+        // in a quoted passage vanished with nothing left behind.
+        let document = ExportDocument {
+            title: "Reading".into(),
+            blocks: vec![Block::Quote {
+                runs: vec![
+                    Run {
+                        text: "we measured ".into(),
+                        ..Default::default()
+                    },
+                    Run {
+                        text: String::new(),
+                        image: Some(InlineImage {
+                            data: PNG.into(),
+                            svg: None,
+                            width: 40,
+                            height: 16,
+                        }),
+                        ..Default::default()
+                    },
+                ],
+            }],
+            references: Vec::new(),
+        };
+
+        let path = write_to_temp(&document);
+        let xml = entry(&path, "word/document.xml");
+        assert!(xml.contains("we measured "));
+        assert!(
+            xml.contains("<w:drawing>"),
+            "the quoted formula did not reach the document"
+        );
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn table_cells_keep_their_formatting_and_formulas() {
+        // Cells used to be `String`, built by concatenating run texts — so a
+        // unit in italics, a citation and a formula all came out as plain text
+        // or not at all. In a table of measured values that is the content.
+        let path = write_to_temp(&sample());
+        let xml = entry(&path, "word/document.xml");
+
+        let table = xml.split("<w:tbl>").nth(1).expect("the sample has a table");
+        assert!(table.contains("560 "), "the value is missing: {table}");
+        assert!(
+            table.contains("<w:i />") || table.contains("<w:i/>"),
+            "the italic unit lost its formatting: {table}"
+        );
+        assert!(
+            table.contains("<w:drawing>"),
+            "the formula in a cell did not reach the document: {table}"
+        );
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn a_header_row_is_bold_but_never_emboldens_a_picture() {
+        let path = write_to_temp(&sample());
+        let xml = entry(&path, "word/document.xml");
+        let table = xml.split("<w:tbl>").nth(1).unwrap();
+        assert!(table.contains("Parameter"));
+        // The picture cell is not in the header row, so this is really a check
+        // that building it did not panic or drop the drawing.
+        assert!(table.contains("<w:drawing>"));
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn an_inline_picture_that_is_not_a_png_is_an_error_not_a_panic() {
+        // The app aborts on panic, so a bad picture must fail the export
+        // rather than take the window with it.
+        let document = ExportDocument {
+            title: "Bad".into(),
+            blocks: vec![Block::Paragraph {
+                runs: vec![Run {
+                    text: String::new(),
+                    image: Some(InlineImage {
+                        data: "data:image/png;base64,bm90IGEgcG5n".into(),
+                        svg: None,
+                        width: 10,
+                        height: 10,
+                    }),
+                    ..Default::default()
+                }],
+            }],
+            references: Vec::new(),
+        };
+        let path =
+            std::env::temp_dir().join(format!("sutra-export-{}.docx", ulid::Ulid::generate()));
+        assert!(write_docx(&document, &path).is_err());
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
     fn a_document_without_vectors_is_left_exactly_as_packed() {
         // Nothing to weave means nothing to rewrite, so the package should be
         // byte-for-byte what docx-rs produced.
         let mut document = sample();
         for block in &mut document.blocks {
-            if let Block::Image { svg, .. } = block {
-                *svg = None;
+            match block {
+                Block::Image { svg, .. } => *svg = None,
+                // Inline pictures carry vectors too, so a document that is
+                // meant to have none has to have these stripped as well.
+                Block::Heading { runs, .. }
+                | Block::Paragraph { runs }
+                | Block::Quote { runs }
+                | Block::ListItem { runs, .. } => drop_vectors(runs),
+                Block::Table { rows, .. } => {
+                    for row in rows {
+                        for cell in row {
+                            drop_vectors(cell);
+                        }
+                    }
+                }
+                Block::Code { .. } | Block::Divider => {}
             }
+        }
+        for reference in &mut document.references {
+            drop_vectors(reference);
         }
         let path = write_to_temp(&document);
         let bytes = std::fs::read(&path).unwrap();

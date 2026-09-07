@@ -4,6 +4,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod ai;
+mod attachments;
 mod citations;
 mod claims;
 mod commands;
@@ -17,6 +18,7 @@ mod note;
 mod protocol;
 mod references;
 mod related;
+mod secrets;
 mod state;
 mod tags;
 mod typography;
