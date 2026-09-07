@@ -205,10 +205,7 @@ export default function App() {
   const trackCitations = useCallback(
     (body: string) => {
       const inProse = citedRefs(body);
-      const order = citationOrder(
-        inProse,
-        recorded ? recorded.split(",") : [],
-      );
+      const order = citationOrder(inProse, recorded ? recorded.split(",") : []);
       // The module store is what the citation node views read; they are
       // mounted by ProseMirror and cannot be handed a prop.
       setCitationOrder(order);

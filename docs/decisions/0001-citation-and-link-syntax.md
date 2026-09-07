@@ -62,7 +62,7 @@ Three further findings, which together are why nothing needs to change:
 
 1. **The current syntax is already valid Pandoc.** A ULID starts with a digit
    and is alphanumeric throughout, so `[@01HQ3M8K2P0000000000000001]` parses
-   cleanly as a citation. It simply does not *resolve*, because no bibliography
+   cleanly as a citation. It simply does not _resolve_, because no bibliography
    is keyed that way.
 2. **That is a bibliography problem, not a syntax problem.** Sutra can export a
    CSL JSON bibliography whose `id` for each entry is the source note's ULID.
@@ -73,7 +73,7 @@ Three further findings, which together are why nothing needs to change:
    only has one at all when BBT is installed, and `SourceMeta.citation_key` is
    `None` otherwise. Making the citation depend on it would reintroduce exactly
    the breakage the ULID exists to prevent. It stays recorded on the source note
-   as a *fact about the library*, and is what the CSL export will use for its
+   as a _fact about the library_, and is what the CSL export will use for its
    human-facing key where one exists.
 
 So the interoperability goal is met by generating the bibliography, not by
@@ -84,9 +84,9 @@ clean export, and Pandoc interoperability — without a body rewrite.
 
 ## What was ruled out
 
-| Option | Why not |
-| --- | --- |
-| `[@ULID\|@citekey]` | `\|` is not a legal Pandoc key character; breaks Pandoc outright. |
-| `[@{ULID}]` (braced) | Legal, but the braces buy nothing: a bare ULID is already a legal key. |
-| Switch to `[@citekey]` | BBT keys are unstable and often absent. Loses identity. |
-| Rewrite citations in v0.2.1 | This is a stabilisation release. No silent body rewriting. |
+| Option                      | Why not                                                                |
+| --------------------------- | ---------------------------------------------------------------------- |
+| `[@ULID\|@citekey]`         | `\|` is not a legal Pandoc key character; breaks Pandoc outright.      |
+| `[@{ULID}]` (braced)        | Legal, but the braces buy nothing: a bare ULID is already a legal key. |
+| Switch to `[@citekey]`      | BBT keys are unstable and often absent. Loses identity.                |
+| Rewrite citations in v0.2.1 | This is a stabilisation release. No silent body rewriting.             |

@@ -54,7 +54,10 @@ test.describe("citation consistency", () => {
           id: NOTE,
           title: "Growth",
           body: `Ribbons align, as [@${ZHOU}] reports.`,
-          sources: [{ id: ZHOU, page: "S12" }, { id: KO, page: "4" }],
+          sources: [
+            { id: ZHOU, page: "S12" },
+            { id: KO, page: "4" },
+          ],
         },
         source(ZHOU, "Zhou 2019"),
         source(KO, "Ko 2024"),

@@ -330,7 +330,9 @@ export async function lastSaved(page: Page): Promise<string> {
 }
 
 /** The document most recently handed to the exporter. */
-export async function lastExported<T = ExportedDocument>(page: Page): Promise<T> {
+export async function lastExported<T = ExportedDocument>(
+  page: Page,
+): Promise<T> {
   return page.evaluate(() => {
     const all = (window as unknown as { __exported: unknown[] }).__exported;
     return all[all.length - 1];

@@ -61,7 +61,9 @@ test.describe("Word export", () => {
     // Never silently dropped: the reference really is in the file, and the
     // brackets say it is a reference to something missing.
     await useVault(page, {
-      notes: [{ id: NOTE, title: "Growth", body: `Compare with [[${OTHER}]].` }],
+      notes: [
+        { id: NOTE, title: "Growth", body: `Compare with [[${OTHER}]].` },
+      ],
     });
     await page.goto("/");
 
@@ -172,10 +174,7 @@ test.describe("Word export", () => {
       cells.some((cell) => cell.some((r) => r.image)),
       "a formula in a cell was lost",
     ).toBe(true);
-    expect(
-      flat.join(" "),
-      "a citation in a cell was lost",
-    ).toMatch(/\(?1\)?/);
+    expect(flat.join(" "), "a citation in a cell was lost").toMatch(/\(?1\)?/);
   });
 
   test("a realistic research note loses nothing", async ({ page }) => {

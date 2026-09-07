@@ -137,7 +137,10 @@ export default function ReferenceSettingsPanel({
               </code>{" "}
               with <strong>Allow library access</strong> ticked. Read-only is
               enough — Sutra never writes to your library.{" "}
-              <KeyLocation storage={config.keyStorage} variable="ZOTERO_API_KEY" />
+              <KeyLocation
+                storage={config.keyStorage}
+                variable="ZOTERO_API_KEY"
+              />
             </span>
           </label>
 

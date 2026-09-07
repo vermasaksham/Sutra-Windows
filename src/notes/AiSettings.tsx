@@ -104,7 +104,10 @@ export default function AiSettingsDialog({
           <span className="text-xs text-ink-muted">
             Never in your vault — a vault gets synced and shared, and a key does
             not belong somewhere that happens to.{" "}
-            <KeyLocation storage={status.keyStorage} variable="ANTHROPIC_API_KEY" />
+            <KeyLocation
+              storage={status.keyStorage}
+              variable="ANTHROPIC_API_KEY"
+            />
           </span>
         </label>
 
