@@ -2,6 +2,7 @@ import { Node, mergeAttributes } from "@tiptap/core";
 import type { MarkdownToken } from "@tiptap/core";
 import { ReactNodeViewRenderer } from "@tiptap/react";
 import WikiLinkView from "./WikiLinkView";
+import { titleOf } from "./titleStore";
 
 /** `[[` followed by a 26-character ULID and `]]`, anchored at the cursor. */
 /**
@@ -96,6 +97,27 @@ export const WikiLink = Node.create({
     },
   }),
 
-  renderMarkdown: (node: { attrs?: { targetId?: string | null } }) =>
-    node.attrs?.targetId ? `[[${node.attrs.targetId}]]` : "",
+  // Written as `[[id|Title]]` from v0.3, and read either way since v0.2.1.
+  //
+  // The id stays first and stays the only thing that resolves; the title is
+  // display text, refreshed from the current note every time the file is
+  // written, so renaming a note updates the words in every link to it without
+  // any link changing what it points at. Obsidian reads the same shape as its
+  // alias syntax, which is what makes a Sutra vault legible in another editor
+  // rather than a page of 26-character strings.
+  //
+  // A target that cannot be resolved is written back as a bare `[[id]]`. No
+  // title is invented for a note that is not there — the id is what the file
+  // actually knows, and a plausible-looking name for a missing note is worse
+  // than an honest identifier.
+  renderMarkdown: (node: { attrs?: { targetId?: string | null } }) => {
+    const targetId = node.attrs?.targetId;
+    if (!targetId) return "";
+    const title = titleOf(targetId)?.trim();
+    // A title containing `]` or `|` would break the shape it is written into,
+    // so such a note keeps the plain form rather than producing markdown that
+    // reads back as something else.
+    const safe = title && !/[[\]|]/.test(title) ? title : null;
+    return safe ? `[[${targetId}|${safe}]]` : `[[${targetId}]]`;
+  },
 });

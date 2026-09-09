@@ -2,6 +2,7 @@ import { expect, test } from "@playwright/test";
 import { lastSaved, useVault } from "./vault";
 
 const NOTE = "01HQ3M8K2P00000000000000A1";
+const OTHER = "01HQ3M8K2P00000000000000B2";
 
 test.describe("writing", () => {
   test("types into the note and saves markdown, not HTML", async ({ page }) => {
@@ -64,5 +65,76 @@ test.describe("writing", () => {
     await page.keyboard.type("# Results");
 
     await expect(page.locator(".sutra-prose h1")).toHaveText("Results");
+  });
+
+  test("a link is written with the target's title beside its id", async ({
+    page,
+  }) => {
+    // The portability fix. A vault opened in a text editor or in Obsidian
+    // should read as note names, not as 26-character identifiers.
+    await useVault(page, {
+      notes: [
+        { id: NOTE, title: "Growth", body: `See [[${OTHER}]] for context.` },
+        { id: OTHER, title: "Phonon transport", body: "" },
+      ],
+    });
+    await page.goto("/");
+
+    await page.locator(".sutra-prose p").first().click();
+    await page.keyboard.press("End");
+    await page.keyboard.type(" More.");
+
+    await expect
+      .poll(() => lastSaved(page), { timeout: 8000 })
+      .toContain(`[[${OTHER}|Phonon transport]]`);
+  });
+
+  test("a link to a note that is gone keeps its bare id", async ({ page }) => {
+    // No title is invented for a note that does not exist. The id is what the
+    // file actually knows.
+    await useVault(page, {
+      notes: [{ id: NOTE, title: "Growth", body: `See [[${OTHER}]].` }],
+    });
+    await page.goto("/");
+
+    await page.locator(".sutra-prose p").first().click();
+    await page.keyboard.press("End");
+    await page.keyboard.type(" More.");
+
+    const saved = await expect
+      .poll(() => lastSaved(page), { timeout: 8000 })
+      .toContain(`[[${OTHER}]]`);
+    void saved;
+  });
+
+  test("a title already carrying an alias resolves by id, not by title", async ({
+    page,
+  }) => {
+    // Stale aliases must be harmless: the file says one thing, the vault says
+    // another, and the id wins.
+    await useVault(page, {
+      notes: [
+        {
+          id: NOTE,
+          title: "Growth",
+          body: `See [[${OTHER}|An old name]] for context.`,
+        },
+        { id: OTHER, title: "Phonon transport", body: "" },
+      ],
+    });
+    await page.goto("/");
+
+    // On screen it shows the note's real current title, not the stale alias.
+    await expect(page.locator(".sutra-wikilink")).toHaveText(
+      "Phonon transport",
+    );
+
+    await page.locator(".sutra-prose p").first().click();
+    await page.keyboard.press("End");
+    await page.keyboard.type(" More.");
+
+    await expect
+      .poll(() => lastSaved(page), { timeout: 8000 })
+      .toContain(`[[${OTHER}|Phonon transport]]`);
   });
 });

@@ -244,6 +244,18 @@ pub(crate) fn rename_with_retry(from: &Path, to: &Path) -> io::Result<()> {
     retrying(|| fs::rename(from, to))
 }
 
+/// Copy a file, retrying the failures a sync client or an antivirus scanner
+/// causes.
+///
+/// The same retry policy as [`rename_with_retry`], and for the same reason: on
+/// Windows another process holding a handle open is a transient failure, not a
+/// permanent one. This exists because moving a note copies its attachments to
+/// the new folder before rewriting the note that points at them — so that an
+/// interruption leaves a duplicate rather than a picture nothing can find.
+pub(crate) fn copy_with_retry(from: &Path, to: &Path) -> io::Result<()> {
+    retrying(|| fs::copy(from, to)).map(|_| ())
+}
+
 fn retrying<T>(mut attempt: impl FnMut() -> io::Result<T>) -> io::Result<T> {
     let mut waited = RENAME_BACKOFF_MS;
     for _ in 1..RENAME_TRIES {

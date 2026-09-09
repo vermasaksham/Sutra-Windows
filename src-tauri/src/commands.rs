@@ -792,6 +792,18 @@ pub fn migration_needed(state: State<'_, AppState>) -> Result<bool> {
     state.with_vault(|vault| vault.needs_migration())
 }
 
+/// Files that claim an id another file already claimed.
+///
+/// Empty is the normal answer. Anything else means two files on disk disagree
+/// about being the same note — a sync client's conflicted copy, a note
+/// duplicated in Explorer, a bad merge — and only one of them can be opened by
+/// id. Both stay on disk and both stay listed; this is what lets the app say
+/// so rather than leaving the second one visible and unreachable.
+#[tauri::command]
+pub fn id_clashes(state: State<'_, AppState>) -> Result<Vec<crate::vault::IdClash>> {
+    state.with_vault(|vault| Ok(vault.id_clashes()))
+}
+
 /// What migrating would do, without doing any of it.
 #[tauri::command]
 pub fn migration_plan(state: State<'_, AppState>) -> Result<MigrationPlan> {

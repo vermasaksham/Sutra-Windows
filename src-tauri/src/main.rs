@@ -5,6 +5,10 @@
 
 mod ai;
 mod attachments;
+/// The performance baseline. Test-only: see benchmarks.rs for what it measures
+/// and why the ceilings are shaped the way they are.
+#[cfg(test)]
+mod benchmarks;
 mod citations;
 mod claims;
 mod commands;
@@ -88,6 +92,7 @@ fn main() {
             commands::list_folders,
             commands::create_folder,
             commands::migration_needed,
+            commands::id_clashes,
             commands::migration_plan,
             commands::migrate_vault,
             commands::capture,

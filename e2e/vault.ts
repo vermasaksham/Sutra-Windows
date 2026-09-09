@@ -63,6 +63,8 @@ export type VaultOptions = {
   update?: { current: string; latest: string; newer: boolean } | "fail";
   /** Make `app_version` fail, the way a broken IPC call would. */
   versionFails?: boolean;
+  /** Files claiming an id another file already claims. */
+  idClashes?: Array<{ id: string; opened: string; shadowed: string }>;
 };
 
 /**
@@ -235,6 +237,8 @@ export async function useVault(page: Page, options: VaultOptions) {
               width: 720,
               fonts: [],
             };
+          case "id_clashes":
+            return opts.idClashes ?? [];
           case "migration_needed":
             return false;
 
