@@ -28,6 +28,88 @@ test.describe("formulas", () => {
       .toContain("$E_g = 1.18$");
   });
 
+  test("the toolbar starts an inline formula, ready to type", async ({
+    page,
+  }) => {
+    // The point of the button: somebody who does not know that `$…$` is the
+    // syntax should still be able to write a formula in a sentence.
+    await useVault(page, {
+      notes: [{ id: NOTE, title: "Growth", body: "The bandgap is" }],
+    });
+    await page.goto("/");
+
+    await page.locator(".sutra-prose p").first().click();
+    await page.keyboard.press("End");
+    await page.keyboard.type(" ");
+    await page.getByRole("button", { name: "Inline equation" }).click();
+
+    // Straight into its input — not a node to hunt for and click.
+    const input = page.locator(".sutra-math-input");
+    await expect(input).toBeVisible();
+    await expect(input).toBeFocused();
+
+    await page.keyboard.type("E = mc^2");
+    await page.keyboard.press("Escape");
+
+    await expect(page.locator(".sutra-math-inline")).toHaveCount(1);
+    await expect
+      .poll(() => lastSaved(page), { timeout: 8000 })
+      .toContain("$E = mc^2$");
+  });
+
+  test("a toolbar formula stays in the sentence it was started in", async ({
+    page,
+  }) => {
+    // The whole difference between this and the Equation button. The formula
+    // must sit between the words, and typing afterwards must continue the same
+    // paragraph rather than a new one.
+    await useVault(page, {
+      notes: [{ id: NOTE, title: "Growth", body: "The bandgap is" }],
+    });
+    await page.goto("/");
+
+    await page.locator(".sutra-prose p").first().click();
+    await page.keyboard.press("End");
+    await page.keyboard.type(" ");
+    await page.getByRole("button", { name: "Inline equation" }).click();
+    await page.keyboard.type("E_g");
+    await page.keyboard.press("Escape");
+    await page.keyboard.type(" eV at room temperature.");
+
+    // One paragraph, holding the words either side of the formula.
+    const paragraphs = page.locator(".sutra-prose p");
+    await expect(paragraphs).toHaveCount(1);
+    await expect(paragraphs.first().locator(".sutra-math-inline")).toHaveCount(
+      1,
+    );
+    await expect(paragraphs.first()).toContainText("The bandgap is");
+    await expect(paragraphs.first()).toContainText("eV at room temperature.");
+
+    await expect
+      .poll(() => lastSaved(page), { timeout: 8000 })
+      .toContain("$E_g$ eV at room temperature.");
+  });
+
+  test("the slash menu starts one too", async ({ page }) => {
+    await useVault(page, {
+      notes: [{ id: NOTE, title: "Growth", body: "Mass and energy: " }],
+    });
+    await page.goto("/");
+
+    await page.locator(".sutra-prose p").first().click();
+    await page.keyboard.press("End");
+    await page.keyboard.type("/inline");
+    await page.getByText("Inline equation").click();
+
+    await expect(page.locator(".sutra-math-input")).toBeFocused();
+    await page.keyboard.type("m");
+    await page.keyboard.press("Escape");
+
+    await expect
+      .poll(() => lastSaved(page), { timeout: 8000 })
+      .toContain("$m$");
+  });
+
   test("editing an inline formula does not box it or grow the line", async ({
     page,
   }) => {

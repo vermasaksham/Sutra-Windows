@@ -182,6 +182,30 @@ const ITEMS: Item[] = [
     can: (e) => e.can().chain().setHorizontalRule().run(),
   },
   {
+    id: "math-inline",
+    label: "Inline equation",
+    // Where the display block gets the summation sign, this gets a symbol of
+    // the size it will actually be: a formula that sits in the sentence.
+    glyph: "x²",
+    group: 4,
+    run: (e) =>
+      e
+        .chain()
+        .focus()
+        // Empty on purpose. The node view opens a blank formula straight into
+        // its input, so the next keystroke is the formula — the same bargain
+        // the display block makes, and the only one that works for a node this
+        // small to click.
+        .insertContent({ type: "mathInline", attrs: { latex: "" } })
+        .run(),
+    can: (e) =>
+      e
+        .can()
+        .chain()
+        .insertContent({ type: "mathInline", attrs: { latex: "" } })
+        .run(),
+  },
+  {
     id: "math",
     label: "Equation",
     glyph: "∑",

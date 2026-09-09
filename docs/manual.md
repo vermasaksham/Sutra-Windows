@@ -90,16 +90,16 @@ appearing.)
 **The slash menu.** Press `/` on an empty line — or anywhere — and a menu
 opens. Keep typing to filter it; press `Enter` to insert.
 
-| Group  | Items                                                           |
-| ------ | --------------------------------------------------------------- |
-| Basic  | Text, Heading 1, Heading 2, Heading 3                           |
-| Lists  | Bulleted list, Numbered list, To-do list                        |
-| Blocks | Code, Quote, Divider, Table, Equation, Chemical equation, Image |
-| Table  | _(only inside a table — see [§5](#5-tables))_                   |
+| Group  | Items                                                                            |
+| ------ | -------------------------------------------------------------------------------- |
+| Basic  | Text, Heading 1, Heading 2, Heading 3                                            |
+| Lists  | Bulleted list, Numbered list, To-do list                                         |
+| Blocks | Code, Quote, Divider, Table, Inline equation, Equation, Chemical equation, Image |
+| Table  | _(only inside a table — see [§5](#5-tables))_                                    |
 
 The menu matches on the item's title, its hint, and extra keywords, so `/h1`,
 `/title`, and `/heading` all reach Heading 1, and `/$$`, `/latex` or `/formula`
-all reach Equation.
+all reach Equation. `/inline` reaches Inline equation.
 
 **One thing to know:** the menu closes when you type a space. Filter with a
 single word — `/bullet`, not `/bulleted list`.
@@ -137,6 +137,12 @@ before the closing one, and it must be on one line.
 
 **Display maths.** Type `$$` at the start of a line and it becomes an empty
 equation block, with the caret already inside it. Or use `/equation`.
+
+**Maths in a sentence.** `/inline` — or the `x²` button on the toolbar —
+starts a formula inside the line you are writing, with the caret already in it.
+It is the same thing as typing `$…$` around a formula; the button exists
+because the dollars are only obvious once somebody has told you about them.
+Press `Esc` and you are back in the sentence, just after the formula.
 
 **Chemistry.** `/chemistry` (also `/ce`, `/reaction`, `/mhchem`) inserts a
 display block pre-filled with `\ce{}` and puts the caret inside the braces —
@@ -630,8 +636,8 @@ nothing can resolve.
 
 A toolbar sits with the note, carrying undo and redo, bold, italic, underline,
 strikethrough and inline code, the three heading levels and body text, the
-three list kinds, quote, code block, divider, equation, chemical equation,
-table, and clear formatting.
+three list kinds, quote, code block, divider, inline equation, equation,
+chemical equation, table, and clear formatting.
 
 It shows only what the editor can actually do where your caret is — a button
 that would do nothing is not drawn, because a dead button reads as a bug in the
