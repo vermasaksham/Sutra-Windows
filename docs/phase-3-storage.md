@@ -11,6 +11,12 @@
 > Everything else here still holds: markdown is the source of truth, the index
 > is disposable, conflicts prompt if dirty and reload if clean, and writes are
 > atomic.
+>
+> This file is kept as the historical record of why those decisions were taken,
+> not as a description of the vault. For what the format actually is now, read
+> `docs/architecture/` — `vault-contract.md` for the note file,
+> `invariants.md` for the boundaries frozen at v0.3, and `index-audit.md` for
+> what is in SQLite and why none of it is precious.
 
 # Phase 3 — storage design
 
