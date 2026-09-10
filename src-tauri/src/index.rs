@@ -961,7 +961,13 @@ fn create_schema(conn: &Connection) -> Result<()> {
 /// for the database being removed; leaving them behind would have a fresh
 /// database inherit the old one's uncommitted pages.
 fn discard(path: &Path) {
-    let _ = std::fs::remove_file(path);
+    // Retried, because on Windows a file another handle still has open cannot be
+    // deleted at all, and the handle is often one that is in the act of closing
+    // — a second Sutra window shutting down, a scanner finishing with the file.
+    // Giving up on the first refusal is how a corrupt index survives its own
+    // discard, and the failure then arrives as an unopenable vault rather than
+    // as one slow startup.
+    let _ = crate::note::retrying(|| std::fs::remove_file(path));
     for suffix in ["-wal", "-shm"] {
         let mut sidecar = path.as_os_str().to_os_string();
         sidecar.push(suffix);
@@ -1171,6 +1177,28 @@ mod tests {
         }
     }
 
+    impl Fixture {
+        /// A second index path, with nothing holding it open.
+        ///
+        /// For the tests that damage the database file on disk. They must not use
+        /// `self.db`, because this fixture keeps a live connection to it, and on
+        /// Windows an open handle makes the file impossible to unlink — so
+        /// `Index::open`'s discard would fail, the damaged bytes would survive,
+        /// and the test would be asserting something about a state Sutra never
+        /// actually meets. A corrupt index is something the app *finds* at
+        /// startup, with nothing of its own attached to it, and that is what this
+        /// reproduces.
+        ///
+        /// It lives under the vault's own `.sutra` folder purely so the fixture's
+        /// cleanup takes it: that folder is excluded from the vault walk, so no
+        /// listing, count or search in any test can see it.
+        fn scratch_db(&self) -> std::path::PathBuf {
+            self.root
+                .join(".sutra")
+                .join(format!("scratch-{}.sqlite", Ulid::generate()))
+        }
+    }
+
     impl Drop for Fixture {
         fn drop(&mut self) {
             let _ = std::fs::remove_dir_all(&self.root);
@@ -1321,13 +1349,17 @@ mod tests {
         f.vault
             .save_note(&note.summary.id, "Recoverable", "Body worth finding.")
             .unwrap();
-        f.index.rebuild(&f.vault).unwrap();
-        drop(std::fs::remove_file(&f.db));
+
+        let db = f.scratch_db();
+        {
+            let index = Index::open(&db).unwrap();
+            index.rebuild(&f.vault).unwrap();
+        }
 
         // Not a database at all.
-        std::fs::write(&f.db, b"this is not a SQLite file, it is garbage").unwrap();
+        std::fs::write(&db, b"this is not a SQLite file, it is garbage").unwrap();
 
-        let reopened = Index::open(&f.db).expect("a corrupt index must not be fatal");
+        let reopened = Index::open(&db).expect("a corrupt index must not be fatal");
         reopened.rebuild(&f.vault).unwrap();
         let found = reopened.search("worth", 10).unwrap();
         assert_eq!(found.len(), 1);
@@ -1439,13 +1471,16 @@ mod tests {
             .save_note(&note.summary.id, "Persistent", "Findable prose.")
             .unwrap();
 
+        let db = f.scratch_db();
+        drop(Index::open(&db).unwrap());
+
         for round in 0..3 {
             // A wrong schema version is what sends `open` down the reset path.
             {
-                let conn = rusqlite::Connection::open(&f.db).unwrap();
+                let conn = rusqlite::Connection::open(&db).unwrap();
                 conn.pragma_update(None, "user_version", 1).unwrap();
             }
-            let reopened = Index::open(&f.db).unwrap_or_else(|e| {
+            let reopened = Index::open(&db).unwrap_or_else(|e| {
                 panic!("reset {round} left the index unopenable: {e}");
             });
             reopened.rebuild(&f.vault).unwrap();
@@ -1465,12 +1500,17 @@ mod tests {
         f.vault
             .save_note(&note.summary.id, "Recoverable", "Body worth finding.")
             .unwrap();
-        f.index.rebuild(&f.vault).unwrap();
 
-        let bytes = std::fs::read(&f.db).unwrap();
-        std::fs::write(&f.db, &bytes[..bytes.len() / 3]).unwrap();
+        let db = f.scratch_db();
+        {
+            let index = Index::open(&db).unwrap();
+            index.rebuild(&f.vault).unwrap();
+        }
 
-        let reopened = Index::open(&f.db).expect("a truncated index must not be fatal");
+        let bytes = std::fs::read(&db).unwrap();
+        std::fs::write(&db, &bytes[..bytes.len() / 3]).unwrap();
+
+        let reopened = Index::open(&db).expect("a truncated index must not be fatal");
         reopened.rebuild(&f.vault).unwrap();
         assert_eq!(reopened.search("worth", 10).unwrap().len(), 1);
     }

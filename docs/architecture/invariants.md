@@ -40,13 +40,14 @@ Sutra reports the disagreement in both directions and changes nothing.
 
 ## Where the rest of the reasoning lives
 
-| Document                               | What it settles                                                        |
-| -------------------------------------- | ---------------------------------------------------------------------- |
-| [vault-contract.md](vault-contract.md) | What is in a note file, and what is deliberately not                   |
-| [attachments.md](attachments.md)       | Who owns a picture, and when it moves                                  |
-| [zotero-pdfs.md](zotero-pdfs.md)       | Why Sutra never copies a PDF out of a Zotero library                   |
-| [index-audit.md](index-audit.md)       | Every column in SQLite, classified, and why none of it is precious     |
-| [migrations.md](migrations.md)         | The six-step contract, and the registry of the two that exist          |
-| [recovery.md](recovery.md)             | What survives what, with the test that holds each answer               |
-| [performance.md](performance.md)       | What costs what at 1k, 10k and 50k notes, and which shapes are allowed |
-| [credentials.md](credentials.md)       | Where secrets live, and the three claims about them                    |
+| Document                                     | What it settles                                                        |
+| -------------------------------------------- | ---------------------------------------------------------------------- |
+| [vault-contract.md](vault-contract.md)       | What is in a note file, and what is deliberately not                   |
+| [attachments.md](attachments.md)             | Who owns a picture, and when it moves                                  |
+| [zotero-pdfs.md](zotero-pdfs.md)             | Why Sutra never copies a PDF out of a Zotero library                   |
+| [index-audit.md](index-audit.md)             | Every column in SQLite, classified, and why none of it is precious     |
+| [migrations.md](migrations.md)               | The six-step contract, and the registry of the two that exist          |
+| [recovery.md](recovery.md)                   | What survives what, with the test that holds each answer               |
+| [performance.md](performance.md)             | What costs what at 1k, 10k and 50k notes, and which shapes are allowed |
+| [credentials.md](credentials.md)             | Where secrets live, and the three claims about them                    |
+| [v0.3-freeze-audit.md](v0.3-freeze-audit.md) | What state these were frozen in, and what was left open                |

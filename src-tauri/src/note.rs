@@ -256,7 +256,13 @@ pub(crate) fn copy_with_retry(from: &Path, to: &Path) -> io::Result<()> {
     retrying(|| fs::copy(from, to)).map(|_| ())
 }
 
-fn retrying<T>(mut attempt: impl FnMut() -> io::Result<T>) -> io::Result<T> {
+/// Run `attempt`, backing off and retrying the failures another process causes.
+///
+/// Exposed to the crate because the index has the same problem for the same
+/// reason: on Windows a file another handle has open cannot be renamed *or*
+/// deleted, and both are transient — the other handle is usually a sync client
+/// or a virus scanner that is about to let go.
+pub(crate) fn retrying<T>(mut attempt: impl FnMut() -> io::Result<T>) -> io::Result<T> {
     let mut waited = RENAME_BACKOFF_MS;
     for _ in 1..RENAME_TRIES {
         match attempt() {
