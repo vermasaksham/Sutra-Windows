@@ -51,3 +51,4 @@ Sutra reports the disagreement in both directions and changes nothing.
 | [performance.md](performance.md)             | What costs what at 1k, 10k and 50k notes, and which shapes are allowed |
 | [credentials.md](credentials.md)             | Where secrets live, and the three claims about them                    |
 | [v0.3-freeze-audit.md](v0.3-freeze-audit.md) | What state these were frozen in, and what was left open                |
+| [../roadmap/v0.4.md](../roadmap/v0.4.md)     | What v0.4 is for, and what it is explicitly not                        |
