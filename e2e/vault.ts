@@ -31,6 +31,8 @@ export type Note = {
   };
   /** The note's recorded citations, as frontmatter holds them. */
   sources?: Array<{ id: string; page?: string; quote?: string }>;
+  /** On a note of `type: chapter`: the notes it assembles, in order. */
+  sequence?: string[];
 };
 
 export type Reference = {
@@ -87,6 +89,9 @@ export async function useVault(page: Page, options: VaultOptions) {
       body: n.body,
       source: n.source as undefined | Record<string, unknown>,
       sources: n.sources ?? [],
+      // Mutable: reordering a chapter writes it back through `save_sequence`,
+      // the way the real one writes frontmatter.
+      sequence: n.sequence ?? [],
     }));
 
     if (opts.theme) localStorage.setItem("sutra.theme", opts.theme);
@@ -237,6 +242,72 @@ export async function useVault(page: Page, options: VaultOptions) {
               width: 720,
               fonts: [],
             };
+          case "list_chapters":
+            return notes.filter((n) => n.type === "chapter").map(summary);
+          case "read_chapter": {
+            const chapter = find(args.id as string);
+            // Every position comes back, including the ones whose note is gone
+            // — the same contract the Rust has, so a test can see the gap.
+            return (chapter?.sequence ?? []).map((id) => {
+              const note = find(id);
+              return note ? { id, note: summary(note) } : { id };
+            });
+          }
+          case "save_sequence": {
+            const chapter = find(args.id as string);
+            if (chapter) {
+              chapter.type = "chapter";
+              chapter.sequence = args.sequence as string[];
+            }
+            return chapter ? summary(chapter) : null;
+          }
+          case "chapter_sections": {
+            const chapter = find(args.id as string);
+            if (!chapter) return [];
+            const sections = [
+              {
+                id: chapter.id,
+                title: chapter.title,
+                body: chapter.body,
+                heading: false,
+              },
+            ];
+            for (const id of chapter.sequence ?? []) {
+              const note = find(id);
+              // Skipped, not held open: an exported document cannot have a hole.
+              if (!note) continue;
+              sections.push({
+                id: note.id,
+                title: note.title,
+                body: note.body,
+                heading: true,
+              });
+            }
+            return sections;
+          }
+          case "chapters_using": {
+            const id = args.id as string;
+            return notes
+              .filter((n) => n.type === "chapter" && n.sequence?.includes(id))
+              .map((n) => ({
+                id: n.id,
+                title: n.title,
+                position: (n.sequence ?? []).indexOf(id),
+                of: (n.sequence ?? []).length,
+              }));
+          }
+          case "create_chapter": {
+            const created: Note = {
+              id: `chapter-${notes.length + 1}`,
+              type: "chapter",
+              title: args.title as string,
+              body: "",
+              sequence: [],
+            };
+            notes.push(created);
+            return { ...summary(created), body: "", adopted: false };
+          }
+
           case "id_clashes":
             return opts.idClashes ?? [];
           case "migration_needed":

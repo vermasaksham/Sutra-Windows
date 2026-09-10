@@ -44,6 +44,7 @@ type Props = {
   onManageTags: () => void;
   onResearchOverview: () => void;
   onNewView: () => void;
+  onNewChapter: () => void;
   onFindDuplicates: () => void;
   /** Whether assistance is switched on, so the command can say which way. */
   aiEnabled: boolean;
@@ -74,6 +75,7 @@ export default function CommandPalette({
   onManageTags,
   onResearchOverview,
   onNewView,
+  onNewChapter,
   onFindDuplicates,
   aiEnabled,
   onAiSettings,
@@ -166,6 +168,14 @@ export default function CommandPalette({
       run: onNewView,
     });
 
+    out.push({
+      id: "new-chapter",
+      label: "New chapter — notes in the order you want them read",
+      group: "Vault",
+      hint: "assembles existing notes; nothing is copied",
+      run: onNewChapter,
+    });
+
     // Only offered while there is a search to save. A search someone has
     // already run is the one moment they know what they want a view to find.
     if (currentSearch.trim() !== "") {
@@ -237,6 +247,7 @@ export default function CommandPalette({
     onManageTags,
     onResearchOverview,
     onNewView,
+    onNewChapter,
     onFindDuplicates,
     aiEnabled,
     onAiSettings,

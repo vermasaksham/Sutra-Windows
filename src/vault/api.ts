@@ -23,7 +23,8 @@ export type NoteType =
   | "task"
   | "daily"
   | "source"
-  | "view";
+  | "view"
+  | "chapter";
 
 /**
  * What each kind is called, including the ones the picker does not offer.
@@ -40,6 +41,7 @@ export const TYPE_LABELS: Record<NoteType, string> = {
   daily: "Daily",
   source: "Source",
   view: "View",
+  chapter: "Chapter",
 };
 
 /**
@@ -49,6 +51,11 @@ export const TYPE_LABELS: Record<NoteType, string> = {
  * someone has written; a view is a saved query, and a note turned into one by
  * a dropdown would be a view with nothing to run. Views are made by saving a
  * query, which is the only way to get one that means anything.
+ *
+ * `chapter` is here, and the difference is worth stating: an empty chapter is a
+ * sensible thing to have, unlike an empty view. It also gives the path for "the
+ * note I have been writing is actually chapter 3" — the body is kept and the
+ * notes get added afterwards.
  */
 export const NOTE_TYPES: ReadonlyArray<{ value: NoteType; label: string }> = [
   { value: "standard", label: "Note" },
@@ -61,6 +68,7 @@ export const NOTE_TYPES: ReadonlyArray<{ value: NoteType; label: string }> = [
   { value: "task", label: "Task" },
   { value: "daily", label: "Daily" },
   { value: "source", label: "Source" },
+  { value: "chapter", label: "Chapter" },
 ];
 
 /** What a source note records about the paper it stands for. */
@@ -616,6 +624,57 @@ export const viewsApi = {
     invoke<NoteDoc>("create_view", { title, query }),
   save: (id: string, query: ViewQuery) =>
     invoke<NoteSummary>("save_view", { id, query }),
+};
+
+/**
+ * One position in a chapter's sequence, resolved against the vault.
+ *
+ * `note` absent means the id names a note the vault no longer has. That is an
+ * answer, not a gap: the chapter still claims the note belongs there, and only
+ * the author can say whether the fix is to drop the entry or restore the note.
+ */
+export type ChapterEntry = { id: string; note?: NoteSummary };
+
+/** A chapter flattened for export: one title and body per section, in order. */
+export type ChapterSection = {
+  id: string;
+  title: string;
+  /** The note body, as markdown, exactly as its file holds it. */
+  body: string;
+  /** Whether the title is written as a heading above the body. */
+  heading: boolean;
+};
+
+/** A chapter that names a given note, and where in it. */
+export type ChapterUse = {
+  id: string;
+  title: string;
+  /** Zero-based. */
+  position: number;
+  of: number;
+};
+
+export const chaptersApi = {
+  /** Every chapter note in the vault. */
+  list: () => invoke<NoteSummary[]>("list_chapters"),
+  create: (title: string, folder: string | null = null) =>
+    invoke<NoteDoc>("create_chapter", { title, folder }),
+  /** What the chapter assembles, in order, including positions whose note is gone. */
+  read: (id: string) => invoke<ChapterEntry[]>("read_chapter", { id }),
+  /** Replace the order. Send the complete list, as with a note's metadata. */
+  save: (id: string, sequence: string[]) =>
+    invoke<NoteSummary>("save_sequence", { id, sequence }),
+  /**
+   * The chapter's own title and body, then each note it names, in order.
+   *
+   * One call rather than one read per note. Positions whose note is gone are
+   * skipped here — a document cannot contain a hole — which is why `read` is a
+   * separate call that reports them.
+   */
+  sections: (id: string) =>
+    invoke<ChapterSection[]>("chapter_sections", { id }),
+  /** Which chapters name this note, and where in each. */
+  using: (id: string) => invoke<ChapterUse[]>("chapters_using", { id }),
 };
 
 /** Which kind of condition this is, and the value it carries. */

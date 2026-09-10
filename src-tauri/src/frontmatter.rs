@@ -40,6 +40,12 @@ pub enum NoteType {
     /// showing its body — the one note in the vault that is read by asking a
     /// question instead of by reading it.
     View,
+    /// An ordered sequence of other notes: a chapter, a section, a paper.
+    ///
+    /// Its own kind because opening one shows the notes it names rather than its
+    /// own body. See docs/decisions/0002-chapter-assembly.md for why the order
+    /// is a list of ids in frontmatter and not a folder, a query or a path.
+    Chapter,
 }
 
 impl NoteType {
@@ -56,6 +62,7 @@ impl NoteType {
             Self::Daily => "daily",
             Self::Source => "source",
             Self::View => "view",
+            Self::Chapter => "chapter",
         }
     }
 
@@ -65,7 +72,7 @@ impl NoteType {
     /// by hand, and the two drifting apart is silent — a note saved as a kind
     /// the UI has never heard of just renders as the default.
     #[cfg(test)]
-    pub fn all() -> [Self; 11] {
+    pub fn all() -> [Self; 12] {
         [
             Self::Standard,
             Self::Literature,
@@ -78,6 +85,7 @@ impl NoteType {
             Self::Daily,
             Self::Source,
             Self::View,
+            Self::Chapter,
         ]
     }
 
@@ -95,6 +103,7 @@ impl NoteType {
             "daily" => Self::Daily,
             "source" => Self::Source,
             "view" => Self::View,
+            "chapter" => Self::Chapter,
             _ => Self::Standard,
         }
     }
@@ -357,6 +366,20 @@ pub struct Frontmatter {
     /// everything else — and so deleting the index cannot lose one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub view: Option<crate::views::Query>,
+    /// Present on a note of `type: chapter`: the notes it assembles, in order.
+    ///
+    /// Ids, not paths or titles, so a note keeps its place in a chapter when it
+    /// is renamed or moved — which is the same reason a link holds an id, and the
+    /// reason this is a list in frontmatter rather than a folder's contents.
+    ///
+    /// Duplicates and repeats are allowed. A methods note really does belong to
+    /// two chapters, and forbidding it would be Sutra deciding something about
+    /// somebody's thesis that is not Sutra's to decide.
+    ///
+    /// An id here naming a note that no longer exists is *reported*, never
+    /// quietly dropped: see `Vault::chapter`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub sequence: Vec<String>,
 }
 
 /// The current time, truncated to whole seconds.
@@ -390,6 +413,7 @@ impl Frontmatter {
             sources: Vec::new(),
             not_duplicates: Vec::new(),
             view: None,
+            sequence: Vec::new(),
         }
     }
 }
@@ -474,6 +498,7 @@ mod tests {
             sources: Vec::new(),
             not_duplicates: Vec::new(),
             view: None,
+            sequence: Vec::new(),
         }
     }
 
@@ -581,6 +606,7 @@ mod tests {
                 "daily",
                 "source",
                 "view",
+                "chapter",
             ]
         );
         // And every one of them survives being written and read back.

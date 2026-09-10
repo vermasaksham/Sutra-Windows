@@ -2,9 +2,11 @@ import type { ReactNode } from "react";
 import Bibliography from "./Bibliography";
 import SourcesPanel from "./SourcesPanel";
 import BacklinksPanel from "./BacklinksPanel";
+import ChapterUses from "./ChapterUses";
 import AiPanel from "./AiPanel";
 import type {
   Backlink,
+  ChapterUse,
   Citation,
   Disagreement,
   Duplicate,
@@ -36,6 +38,7 @@ export default function ContextPanel({
   inlineRefs,
   showSources,
   backlinks,
+  chapterUses,
   duplicates,
   disagreements,
   related,
@@ -60,6 +63,8 @@ export default function ContextPanel({
   /** False for a source note, which shows its own paper above the editor. */
   showSources: boolean;
   backlinks: Backlink[];
+  /** The chapters that assemble this note, so it can say where it is used. */
+  chapterUses: ChapterUse[];
   duplicates: Duplicate[];
   disagreements: Disagreement[];
   related: RelatedNote[];
@@ -122,6 +127,8 @@ export default function ContextPanel({
         )}
 
         <BacklinksPanel backlinks={backlinks} onSelect={onOpen} />
+
+        <ChapterUses uses={chapterUses} onSelect={onOpen} />
 
         {duplicates.length > 0 && (
           <section>
