@@ -25,6 +25,7 @@ import CitationMigrationPrompt from "./notes/CitationMigrationPrompt";
 import CommandPalette from "./notes/CommandPalette";
 import TagManager from "./notes/TagManager";
 import ViewEditor from "./notes/ViewEditor";
+import ChapterPanel from "./notes/ChapterPanel";
 import NoteHeader from "./notes/NoteHeader";
 import NoteList from "./notes/NoteList";
 import Sidebar from "./notes/Sidebar";
@@ -53,8 +54,10 @@ import {
   sourcesApi,
   vaultApi,
   viewsApi,
+  chaptersApi,
   zoteroApi,
   type Backlink,
+  type ChapterUse,
   type Citation,
   type MigrationPlan,
   type NoteSummary,
@@ -86,6 +89,8 @@ export default function App() {
   const [notes, setNotes] = useState<NoteSummary[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [backlinks, setBacklinks] = useState<Backlink[]>([]);
+  /** The chapters assembling the open note, so it can say where it is used. */
+  const [chapterUses, setChapterUses] = useState<ChapterUse[]>([]);
   /** What is typed in the list's search field. "" means not searching. */
   const [query, setQuery] = useState("");
   /** Results for `query`, or null when there is no search running. */
@@ -285,6 +290,18 @@ export default function App() {
       .backlinks(selectedId)
       .then(setBacklinks)
       .catch(() => setBacklinks([]));
+  }, [selectedId, notes]);
+
+  // Read from the chapters' own frontmatter rather than the index, because
+  // membership lives there and a thesis has a dozen chapters, not thousands.
+  // Failure is silence: not knowing which chapters use a note must not stop the
+  // note from opening.
+  useEffect(() => {
+    if (!selectedId) return setChapterUses([]);
+    chaptersApi
+      .using(selectedId)
+      .then(setChapterUses)
+      .catch(() => setChapterUses([]));
   }, [selectedId, notes]);
 
   const refreshFolders = useCallback(() => {
@@ -592,6 +609,26 @@ export default function App() {
     [note, refresh, report],
   );
 
+  /**
+   * A new, empty chapter in the folder being looked at.
+   *
+   * Empty on purpose: a chapter is filled by choosing notes that already exist,
+   * which is the whole difference between assembling a thesis and writing one.
+   */
+  const createChapter = useCallback(
+    async (folder: string | null) => {
+      try {
+        await note.flush();
+        const created = await chaptersApi.create("Untitled chapter", folder);
+        await refresh();
+        setSelectedId(created.id);
+      } catch (cause) {
+        report("Could not create the chapter", cause);
+      }
+    },
+    [note, refresh, report],
+  );
+
   const moveNote = useCallback(
     async (folder: string) => {
       if (!selectedId) return;
@@ -751,12 +788,26 @@ export default function App() {
     try {
       // Built here rather than in Rust because the pieces that need a browser
       // — rasterising formulas, reading attachments — only exist on this side.
-      // One section: the note being read. The list is the point — a chapter is
-      // several notes in order, and the exporter already takes them that way.
-      const document = await buildDocument(
-        [{ title: note.doc.title, body: note.doc.body }],
-        citedRefs(note.doc.body),
-      );
+      //
+      // A chapter exports as its own body followed by the notes it names, in
+      // order; every other note exports as itself. One list either way, which is
+      // the shape the exporter was rebuilt around in 0.3 so that this branch
+      // could be four lines rather than a second export path.
+      //
+      // The chapter's sections come from disk rather than from the buffer, so
+      // what is exported is what is saved. For the single-note case the buffer is
+      // used, because an export of the paragraph you just typed should contain
+      // it.
+      const sections =
+        note.doc.type === "chapter"
+          ? await chaptersApi.sections(note.doc.id)
+          : [{ title: note.doc.title, body: note.doc.body, heading: false }];
+      // Across every section: a reference cited in the third note of a chapter
+      // belongs in the chapter's bibliography.
+      const refs = [
+        ...new Set(sections.flatMap((section) => citedRefs(section.body))),
+      ];
+      const document = await buildDocument(sections, refs);
       const saved = await exportApi.docx(document);
       if (saved) setError(`Exported ${saved}`);
     } catch (cause) {
@@ -1025,6 +1076,20 @@ export default function App() {
                 trackCitations(markdown);
               }}
             />
+            {note.doc.type === "chapter" && (
+              // Below the body, because that is the order the chapter exports
+              // in: its own prose is the opening argument, and the notes it
+              // assembles follow. The screen showing the document's order is
+              // worth more than putting the list first.
+              <div className="mt-8 border-t border-border pt-4">
+                <ChapterPanel
+                  key={note.doc.id}
+                  id={note.doc.id}
+                  onOpen={(id) => void select(id)}
+                  onReport={report}
+                />
+              </div>
+            )}
           </div>
         ) : (
           <div className="grid h-full place-items-center px-6">
@@ -1062,6 +1127,7 @@ export default function App() {
           // what it draws on would be asking the wrong question of it.
           showSources={note.doc.type !== "source"}
           backlinks={backlinks}
+          chapterUses={chapterUses}
           duplicates={duplicates}
           disagreements={disagreements}
           related={related}
@@ -1177,6 +1243,7 @@ export default function App() {
           onManageTags={() => setTagsOpen(true)}
           onResearchOverview={() => setOverviewOpen(true)}
           onNewView={() => void editView(null)}
+          onNewChapter={() => void createChapter(activeFolder)}
           onFindDuplicates={() => setDuplicatesOpen(true)}
           aiEnabled={ai?.enabled ?? false}
           onAiSettings={() => setAiSettingsOpen(true)}

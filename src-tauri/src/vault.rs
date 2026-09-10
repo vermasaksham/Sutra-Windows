@@ -5027,7 +5027,9 @@ mod tests {
             .set_sequence(&chapter.summary.id, vec![id.clone()])
             .unwrap();
 
-        vault.save_note(&id, "Growth of the films", "Prose.").unwrap();
+        vault
+            .save_note(&id, "Growth of the films", "Prose.")
+            .unwrap();
         vault.move_note(&id, "Chapter 3").unwrap();
 
         let entries = vault.chapter(&chapter.summary.id).unwrap();
@@ -5169,7 +5171,9 @@ mod tests {
         assert_eq!(sections[1].title, "Optics");
 
         assert!(
-            vault.chapter(&chapter.summary.id).unwrap()[0].note.is_none(),
+            vault.chapter(&chapter.summary.id).unwrap()[0]
+                .note
+                .is_none(),
             "and the missing one is still reported where a person can see it"
         );
     }
@@ -5192,7 +5196,10 @@ mod tests {
             before,
             "reading a chapter's sequence must not rewrite the note"
         );
-        assert!(!before.contains("sequence"), "and nothing writes an empty one");
+        assert!(
+            !before.contains("sequence"),
+            "and nothing writes an empty one"
+        );
     }
 
     /// Setting a sequence on an ordinary note makes it a chapter.
