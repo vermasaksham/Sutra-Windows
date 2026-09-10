@@ -328,7 +328,7 @@ fn compile_condition(condition: &Condition, params: &mut Vec<Box<dyn ToSql>>) ->
                 return "1".into();
             }
             params.push(Box::new(crate::index::fts_query(query)));
-            "n.id IN (SELECT id FROM notes_fts WHERE notes_fts MATCH ?)".into()
+            "n.rowid IN (SELECT rowid FROM notes_fts WHERE notes_fts MATCH ?)".into()
         }
         // `updated` is stored as RFC 3339 in UTC, so it sorts and compares as
         // text. Comparing against the bare date works because every timestamp

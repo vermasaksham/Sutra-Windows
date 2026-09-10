@@ -402,7 +402,14 @@
 .sutra-math-inline {
   cursor: pointer;
   border-radius: 4px;
+  /* The padding is for the hover highlight, which would otherwise clamp the
+     glyphs. The matching negative margin takes it back out of the line box, so
+     the formula advances the text exactly as far as it draws: without this a
+     formula ending a clause pushed the comma away from it — "E = mc² ," — and
+     inline maths that does not sit tight against its punctuation reads as a
+     picture dropped into the sentence rather than part of it. */
   padding: 0 0.15em;
+  margin: 0 -0.15em;
   transition: background-color var(--duration-fast) var(--ease-out);
 }
 

@@ -20,7 +20,7 @@ use std::sync::Mutex;
 /// Bumped whenever the schema changes. On mismatch the index is dropped and
 /// rebuilt rather than migrated — migrations are for data you cannot recreate,
 /// and this is not that.
-const SCHEMA_VERSION: i32 = 8;
+const SCHEMA_VERSION: i32 = 9;
 
 const SCHEMA: &str = r#"
 CREATE TABLE notes (
@@ -39,6 +39,15 @@ CREATE TABLE notes (
     -- Derived from the body, like everything else here. Kept so the note list
     -- can show a preview without re-reading every file in the vault.
     excerpt   TEXT NOT NULL DEFAULT '',
+    -- The body, as markdown, exactly as the file holds it.
+    --
+    -- This is a copy, not the original: the file on disk is the note. It lives
+    -- here because `notes_fts` is an external-content index over this table
+    -- (below), and because several questions — a backlink's preview, whether
+    -- two notes are near-duplicates, whether their numbers disagree — need a
+    -- body *by id*, which an FTS table cannot answer without reading all of
+    -- them.
+    body      TEXT NOT NULL DEFAULT '',
     -- Both JSON, because the index is derived and its shape is nobody else's
     -- business. `source` is what a source note records about its paper;
     -- `sources` is what this note cites.
@@ -72,19 +81,50 @@ CREATE TABLE note_sources (
 );
 CREATE INDEX note_sources_by_source ON note_sources(source_id);
 
--- Contentless-adjacent: we store the text because the body is not otherwise in
--- the database, and FTS5 needs something to tokenise.
+-- The search index, and *only* the index: `content = 'notes'` means FTS5 stores
+-- the inverted index and reads column text back from `notes` when it needs it,
+-- so the body is stored once rather than twice.
+--
+-- It used to carry its own copy of the text alongside an `id UNINDEXED` column,
+-- and that column is what made this worth changing. An UNINDEXED column has no
+-- index, so `WHERE id = ?` on an FTS table is a full scan of every note in the
+-- vault — which meant saving one note scanned the whole vault to delete its old
+-- row, and asking for a note's backlinks scanned the whole vault once per
+-- backlink. Both are now rowid lookups: `notes_fts.rowid` *is* `notes.rowid`.
+--
+-- The three columns are named for the columns of `notes` they mirror; FTS5
+-- requires that. `tags` is the JSON array `notes` stores, so a tag is still
+-- searchable as a word — `unicode61` discards the brackets and quotes around
+-- it. Search therefore matches a tag and a prose mention of the same word
+-- alike, which for a research vault is closer to what was meant than an exact
+-- tag filter would be.
 CREATE VIRTUAL TABLE notes_fts USING fts5(
-    id UNINDEXED,
     title,
     body,
-    -- Tags are indexed too, so clicking one finds the notes carrying it.
-    -- Search then matches a tag and a prose mention of the same word alike,
-    -- which for a research vault is closer to what was meant than an exact
-    -- tag filter would be.
     tags,
+    content = 'notes',
+    content_rowid = 'rowid',
     tokenize = "unicode61 remove_diacritics 2"
 );
+
+-- An external-content index is not maintained for you: these three triggers are
+-- what keep it in step with `notes`. The `'delete'` form has to be handed the
+-- values the row held, which is exactly what `old.*` is, and is why the delete
+-- and update triggers spell every column out.
+CREATE TRIGGER notes_fts_after_insert AFTER INSERT ON notes BEGIN
+    INSERT INTO notes_fts (rowid, title, body, tags)
+    VALUES (new.rowid, new.title, new.body, new.tags);
+END;
+CREATE TRIGGER notes_fts_after_delete AFTER DELETE ON notes BEGIN
+    INSERT INTO notes_fts (notes_fts, rowid, title, body, tags)
+    VALUES ('delete', old.rowid, old.title, old.body, old.tags);
+END;
+CREATE TRIGGER notes_fts_after_update AFTER UPDATE ON notes BEGIN
+    INSERT INTO notes_fts (notes_fts, rowid, title, body, tags)
+    VALUES ('delete', old.rowid, old.title, old.body, old.tags);
+    INSERT INTO notes_fts (rowid, title, body, tags)
+    VALUES (new.rowid, new.title, new.body, new.tags);
+END;
 
 -- FTS5's own term dictionary, exposed as a table: (term, doc, cnt). Not
 -- storage — a view over the index that already exists — and the only honest
@@ -196,8 +236,17 @@ impl Index {
         let mut guard = self.conn.lock().unwrap_or_else(|e| e.into_inner());
         let tx = guard.transaction()?;
 
+        // `notes` first: its delete trigger takes each note out of the search
+        // index, so by the time `delete-all` runs the index should already be
+        // empty and the command is a no-op that also resets FTS5's internal
+        // state. The order matters — `delete-all` first would leave the
+        // triggers issuing `'delete'` for rows that were no longer there, and
+        // an external-content index does not survive that.
         tx.execute("DELETE FROM notes", [])?;
-        tx.execute("DELETE FROM notes_fts", [])?;
+        tx.execute(
+            "INSERT INTO notes_fts (notes_fts) VALUES ('delete-all')",
+            [],
+        )?;
         tx.execute("DELETE FROM links", [])?;
 
         let mut count = 0;
@@ -285,10 +334,10 @@ impl Index {
 
         let guard = self.conn.lock().unwrap_or_else(|e| e.into_inner());
         let mut stmt = guard.prepare(
-            "SELECT id, title, snippet(notes_fts, 2, '<mark>', '</mark>', '…', 12)
-             FROM notes_fts
+            "SELECT n.id, n.title, snippet(notes_fts, 1, '<mark>', '</mark>', '…', 12)
+             FROM notes_fts JOIN notes n ON n.rowid = notes_fts.rowid
              WHERE notes_fts MATCH ?1
-             ORDER BY rank
+             ORDER BY notes_fts.rank
              LIMIT ?2",
         )?;
 
@@ -431,7 +480,8 @@ impl Index {
         let mut shared: HashMap<String, (usize, f64)> = HashMap::new();
         for (term, idf) in distinctive(&guard, body, total)? {
             let mut stmt = guard.prepare(
-                "SELECT id FROM notes_fts WHERE notes_fts MATCH ?1 ORDER BY rank LIMIT ?2",
+                "SELECT n.id FROM notes_fts JOIN notes n ON n.rowid = notes_fts.rowid \
+                  WHERE notes_fts MATCH ?1 ORDER BY notes_fts.rank LIMIT ?2",
             )?;
             let quoted = format!("\"{}\"", term.replace('"', "\"\""));
             for row in
@@ -504,9 +554,9 @@ impl Index {
 
         let guard = self.conn.lock().unwrap_or_else(|e| e.into_inner());
         let mut stmt = guard.prepare(
-            "SELECT f.id, f.title, f.body, COALESCE(n.folder, '') \
-               FROM notes_fts f LEFT JOIN notes n ON n.id = f.id \
-              WHERE notes_fts MATCH ?1 ORDER BY rank LIMIT ?2",
+            "SELECT n.id, n.title, n.body, n.folder \
+               FROM notes_fts f JOIN notes n ON n.rowid = f.rowid \
+              WHERE notes_fts MATCH ?1 ORDER BY f.rank LIMIT ?2",
         )?;
         let rows = stmt.query_map(params![query, CANDIDATES as i64], |row| {
             Ok((
@@ -550,7 +600,7 @@ impl Index {
 
         let guard = self.conn.lock().unwrap_or_else(|e| e.into_inner());
         let mut stmt = guard.prepare(
-            "SELECT n.id, n.title, f.body FROM notes n JOIN notes_fts f ON f.id = n.id \
+            "SELECT n.id, n.title, n.body FROM notes n \
               WHERE n.id <> ?1 AND ( \
                 n.id IN (SELECT b.note_id FROM note_tags a JOIN note_tags b ON b.tag = a.tag \
                           WHERE a.note_id = ?1) \
@@ -608,10 +658,8 @@ impl Index {
     pub fn duplicate_pairs(&self, limit: usize) -> Result<Vec<DuplicatePair>> {
         let notes: Vec<(String, String, String, String)> = {
             let guard = self.conn.lock().unwrap_or_else(|e| e.into_inner());
-            let mut stmt = guard.prepare(
-                "SELECT n.id, n.title, f.body, n.folder FROM notes n \
-                   JOIN notes_fts f ON f.id = n.id ORDER BY n.title",
-            )?;
+            let mut stmt = guard
+                .prepare("SELECT n.id, n.title, n.body, n.folder FROM notes n ORDER BY n.title")?;
             let rows = stmt.query_map([], |row| {
                 Ok((
                     row.get::<_, String>(0)?,
@@ -698,9 +746,7 @@ impl Index {
     pub fn backlinks(&self, id: &str) -> Result<Vec<Backlink>> {
         let guard = self.conn.lock().unwrap_or_else(|e| e.into_inner());
         let mut stmt = guard.prepare(
-            "SELECT n.id, n.title,
-                    COALESCE((SELECT substr(f.body, 1, 160) FROM notes_fts f
-                              WHERE f.id = n.id), '')
+            "SELECT n.id, n.title, substr(n.body, 1, 160)
              FROM links l
              JOIN notes n ON n.id = l.source
              WHERE l.target = ?1
@@ -852,10 +898,55 @@ pub struct DuplicatePair {
     pub score: f64,
 }
 
+/// Whether this file is an index of the current schema that can actually be
+/// read.
+///
+/// Two questions, and it used to ask only the first. `PRAGMA user_version`
+/// reads bytes 60-63 of the *header*, which survives a file being truncated —
+/// so a database cut short by an interrupted write, a full disk or a killed
+/// process still reported the right version, was judged usable, was not
+/// discarded, and then failed on the first real query with "database disk
+/// image is malformed". The index is meant to be disposable; that made it
+/// fatal.
+///
+/// The probe fixes it by touching a table rather than the header. `SELECT 1
+/// FROM notes LIMIT 1` reads the b-tree root, which is enough to prove the
+/// schema pages are there, and stops at the first row rather than scanning —
+/// so it costs the same on a vault of five notes and one of fifty thousand.
+/// A full `PRAGMA integrity_check` would be the thorough answer and is not
+/// worth its cost on every launch: anything it would catch that this does not
+/// is caught by the query that hits it, and the response is the same either
+/// way — throw the index away and rebuild from the markdown.
 fn schema_matches(conn: &Connection) -> bool {
-    conn.query_row("PRAGMA user_version", [], |row| row.get::<_, i32>(0))
+    let right_version = conn
+        .query_row("PRAGMA user_version", [], |row| row.get::<_, i32>(0))
         .map(|v| v == SCHEMA_VERSION)
-        .unwrap_or(false)
+        .unwrap_or(false);
+
+    right_version && readable(conn, "notes") && readable(conn, "notes_fts")
+}
+
+/// Whether one table can actually be read.
+///
+/// Both are probed, and the second is the one that matters most. Truncating a
+/// database leaves its first pages intact, so `notes` — small, and near the
+/// front — often survives while `notes_fts` does not; the failure then arrives
+/// as `vtable constructor failed: notes_fts` from whichever query first
+/// touches full-text search, long after opening appeared to succeed. An FTS5
+/// virtual table also holds the bulk of the bytes, which makes it the most
+/// likely part of the file to be cut short in the first place.
+///
+/// `LIMIT 1` stops at the first row, so this costs the same on a vault of five
+/// notes and one of fifty thousand.
+fn readable(conn: &Connection, table: &str) -> bool {
+    // An *empty* index is perfectly valid — a new vault, or one whose notes
+    // have all been deleted — and `query_row` reports no rows as an error, so
+    // the two have to be told apart. Anything else means the pages behind this
+    // table cannot be read.
+    match conn.query_row(&format!("SELECT 1 FROM {table} LIMIT 1"), [], |_| Ok(())) {
+        Ok(()) | Err(rusqlite::Error::QueryReturnedNoRows) => true,
+        Err(_) => false,
+    }
 }
 
 fn create_schema(conn: &Connection) -> Result<()> {
@@ -870,7 +961,13 @@ fn create_schema(conn: &Connection) -> Result<()> {
 /// for the database being removed; leaving them behind would have a fresh
 /// database inherit the old one's uncommitted pages.
 fn discard(path: &Path) {
-    let _ = std::fs::remove_file(path);
+    // Retried, because on Windows a file another handle still has open cannot be
+    // deleted at all, and the handle is often one that is in the act of closing
+    // — a second Sutra window shutting down, a scanner finishing with the file.
+    // Giving up on the first refusal is how a corrupt index survives its own
+    // discard, and the failure then arrives as an unopenable vault rather than
+    // as one slow startup.
+    let _ = crate::note::retrying(|| std::fs::remove_file(path));
     for suffix in ["-wal", "-shm"] {
         let mut sidecar = path.as_os_str().to_os_string();
         sidecar.push(suffix);
@@ -900,6 +997,13 @@ fn reset_schema(conn: &Connection) -> Result<()> {
 /// tries twice and lets `create_schema` be the thing that reports a real
 /// failure.
 fn drop_everything(conn: &Connection) {
+    // Triggers first, and by name. Dropping a table takes its own triggers with
+    // it, so this is belt and braces — but the braces matter: a trigger that
+    // outlived its table would make `CREATE TRIGGER` fail, and the failure would
+    // arrive as an unopenable vault rather than as a stale index.
+    for name in trigger_names(conn).unwrap_or_default() {
+        let _ = conn.execute_batch(&format!(r#"DROP TRIGGER IF EXISTS "{name}""#));
+    }
     for _ in 0..2 {
         let Ok(names) = table_names(conn) else { return };
         if names.is_empty() {
@@ -909,6 +1013,15 @@ fn drop_everything(conn: &Connection) {
             let _ = conn.execute_batch(&format!(r#"DROP TABLE IF EXISTS "{name}""#));
         }
     }
+}
+
+fn trigger_names(conn: &Connection) -> Result<Vec<String>> {
+    let mut stmt = conn.prepare("SELECT name FROM sqlite_master WHERE type = 'trigger'")?;
+    let names = stmt
+        .query_map([], |row| row.get::<_, String>(0))?
+        .filter_map(std::result::Result::ok)
+        .collect();
+    Ok(names)
 }
 
 fn table_names(conn: &Connection) -> Result<Vec<String>> {
@@ -925,8 +1038,8 @@ fn table_names(conn: &Connection) -> Result<Vec<String>> {
 fn insert_note(tx: &rusqlite::Transaction<'_>, note: &NoteSummary, body: &str) -> Result<()> {
     let tags = serde_json::to_string(&note.tags).unwrap_or_else(|_| "[]".into());
     tx.execute(
-        "INSERT INTO notes (id, note_type, title, folder, position, tags, icon, cover, excerpt, source, sources, updated)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+        "INSERT INTO notes (id, note_type, title, folder, position, tags, icon, cover, excerpt, body, source, sources, updated)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
         params![
             note.id,
             note.note_type.as_str(),
@@ -937,6 +1050,7 @@ fn insert_note(tx: &rusqlite::Transaction<'_>, note: &NoteSummary, body: &str) -
             note.icon,
             note.cover,
             note.excerpt,
+            body,
             note.source
                 .as_ref()
                 .map(|s| serde_json::to_string(s).unwrap_or_else(|_| "null".into())),
@@ -945,10 +1059,6 @@ fn insert_note(tx: &rusqlite::Transaction<'_>, note: &NoteSummary, body: &str) -
                 .format(&time::format_description::well_known::Rfc3339)
                 .unwrap_or_default(),
         ],
-    )?;
-    tx.execute(
-        "INSERT INTO notes_fts (id, title, body, tags) VALUES (?1, ?2, ?3, ?4)",
-        params![note.id, note.title, body, note.tags.join(" ")],
     )?;
     for tag in &note.tags {
         // Trimmed and de-duplicated by the primary key: `#xrd` and `#xrd/`
@@ -985,8 +1095,10 @@ fn insert_note(tx: &rusqlite::Transaction<'_>, note: &NoteSummary, body: &str) -
 }
 
 fn remove_note(tx: &rusqlite::Transaction<'_>, id: &str) -> Result<()> {
+    // The search index goes with it, through the trigger on `notes`. Deleting
+    // from `notes_fts` directly is not possible on an external-content table,
+    // and no longer needs to be.
     tx.execute("DELETE FROM notes WHERE id = ?1", [id])?;
-    tx.execute("DELETE FROM notes_fts WHERE id = ?1", [id])?;
     tx.execute("DELETE FROM links WHERE source = ?1", [id])?;
     tx.execute("DELETE FROM note_sources WHERE note_id = ?1", [id])?;
     tx.execute("DELETE FROM note_tags WHERE note_id = ?1", [id])?;
@@ -1062,6 +1174,28 @@ mod tests {
                 root,
                 db,
             }
+        }
+    }
+
+    impl Fixture {
+        /// A second index path, with nothing holding it open.
+        ///
+        /// For the tests that damage the database file on disk. They must not use
+        /// `self.db`, because this fixture keeps a live connection to it, and on
+        /// Windows an open handle makes the file impossible to unlink — so
+        /// `Index::open`'s discard would fail, the damaged bytes would survive,
+        /// and the test would be asserting something about a state Sutra never
+        /// actually meets. A corrupt index is something the app *finds* at
+        /// startup, with nothing of its own attached to it, and that is what this
+        /// reproduces.
+        ///
+        /// It lives under the vault's own `.sutra` folder purely so the fixture's
+        /// cleanup takes it: that folder is excluded from the vault walk, so no
+        /// listing, count or search in any test can see it.
+        fn scratch_db(&self) -> std::path::PathBuf {
+            self.root
+                .join(".sutra")
+                .join(format!("scratch-{}.sqlite", Ulid::generate()))
         }
     }
 
@@ -1151,6 +1285,7 @@ mod tests {
                     quote: Some("thermal conductivity decreases".into()),
                     kind: Some("experimental".into()),
                     captured: None,
+                    ..Default::default()
                 }],
             )
             .unwrap();
@@ -1202,6 +1337,182 @@ mod tests {
             1,
             "the rebuilt index did not reconstruct what cites this source"
         );
+    }
+
+    #[test]
+    fn a_corrupt_database_is_discarded_and_rebuilt() {
+        // The index is disposable, so corruption is a nuisance rather than a
+        // loss — but only if opening one actually recovers instead of
+        // propagating an error to a user whose research is all still on disk.
+        let f = Fixture::new();
+        let note = f.vault.create_note("Recoverable", None).unwrap();
+        f.vault
+            .save_note(&note.summary.id, "Recoverable", "Body worth finding.")
+            .unwrap();
+
+        let db = f.scratch_db();
+        {
+            let index = Index::open(&db).unwrap();
+            index.rebuild(&f.vault).unwrap();
+        }
+
+        // Not a database at all.
+        std::fs::write(&db, b"this is not a SQLite file, it is garbage").unwrap();
+
+        let reopened = Index::open(&db).expect("a corrupt index must not be fatal");
+        reopened.rebuild(&f.vault).unwrap();
+        let found = reopened.search("worth", 10).unwrap();
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].title, "Recoverable");
+    }
+
+    /// The search index must not remember a sentence the note no longer holds.
+    ///
+    /// This is the invariant the external-content FTS table has to earn. The
+    /// index no longer keeps its own copy of the text — it reads the body back
+    /// from `notes` — and its rows are kept in step by triggers rather than by
+    /// hand. If a trigger were missing or fired in the wrong order, search
+    /// would go on finding deleted prose, and no other test would notice.
+    #[test]
+    fn an_edit_removes_the_old_text_from_search() {
+        let f = Fixture::new();
+        let note = f.vault.create_note("Growth log", None).unwrap();
+        let id = note.summary.id.clone();
+        let first = f
+            .vault
+            .save_note(
+                &id,
+                "Growth log",
+                "The seed layer was sputtered molybdenum.",
+            )
+            .unwrap();
+        f.index
+            .upsert(&first, "The seed layer was sputtered molybdenum.")
+            .unwrap();
+        assert_eq!(f.index.search("molybdenum", 10).unwrap().len(), 1);
+
+        let second = f
+            .vault
+            .save_note(
+                &id,
+                "Growth log",
+                "The seed layer was evaporated tellurium.",
+            )
+            .unwrap();
+        f.index
+            .upsert(&second, "The seed layer was evaporated tellurium.")
+            .unwrap();
+
+        assert!(
+            f.index.search("molybdenum", 10).unwrap().is_empty(),
+            "search still finds a word the note no longer contains"
+        );
+        assert_eq!(f.index.search("tellurium", 10).unwrap().len(), 1);
+    }
+
+    /// Removing a note removes it from search, without touching `notes_fts`.
+    #[test]
+    fn removing_a_note_removes_it_from_search() {
+        let f = Fixture::new();
+        let note = f.vault.create_note("Doomed", None).unwrap();
+        let saved = f
+            .vault
+            .save_note(&note.summary.id, "Doomed", "A sentence about stibnite.")
+            .unwrap();
+        f.index
+            .upsert(&saved, "A sentence about stibnite.")
+            .unwrap();
+        assert_eq!(f.index.search("stibnite", 10).unwrap().len(), 1);
+
+        f.index.remove(&note.summary.id).unwrap();
+        assert!(f.index.search("stibnite", 10).unwrap().is_empty());
+    }
+
+    /// A backlink's preview comes from the linking note's own row.
+    ///
+    /// It used to come from a subquery against `notes_fts`, which had no index
+    /// on the id it was matching — so a note with twenty backlinks scanned the
+    /// whole vault twenty times. The preview is the same; where it is read from
+    /// is the point.
+    #[test]
+    fn a_backlink_carries_a_preview_of_the_linking_note() {
+        let f = Fixture::new();
+        let target = f.vault.create_note("Transport", None).unwrap();
+        let source = f.vault.create_note("Run 14", None).unwrap();
+        let body = format!("Following the model in [[{}]] closely.", target.summary.id);
+        let saved = f
+            .vault
+            .save_note(&source.summary.id, "Run 14", &body)
+            .unwrap();
+        f.index.upsert(&saved, &body).unwrap();
+
+        let found = f.index.backlinks(&target.summary.id).unwrap();
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].title, "Run 14");
+        assert!(
+            found[0].excerpt.contains("Following the model"),
+            "the preview should be the linking note's own text, got {:?}",
+            found[0].excerpt
+        );
+    }
+
+    /// Opening a database whose schema was reset, twice.
+    ///
+    /// The schema now contains triggers, and a trigger left behind by a failed
+    /// reset would make the next `CREATE TRIGGER` fail — which would arrive as
+    /// a vault that cannot be opened at all, rather than as an index that needs
+    /// rebuilding. Resetting the same file repeatedly is the cheapest way to
+    /// prove that cannot happen.
+    #[test]
+    fn a_schema_reset_can_run_again_on_the_same_file() {
+        let f = Fixture::new();
+        let note = f.vault.create_note("Persistent", None).unwrap();
+        f.vault
+            .save_note(&note.summary.id, "Persistent", "Findable prose.")
+            .unwrap();
+
+        let db = f.scratch_db();
+        drop(Index::open(&db).unwrap());
+
+        for round in 0..3 {
+            // A wrong schema version is what sends `open` down the reset path.
+            {
+                let conn = rusqlite::Connection::open(&db).unwrap();
+                conn.pragma_update(None, "user_version", 1).unwrap();
+            }
+            let reopened = Index::open(&db).unwrap_or_else(|e| {
+                panic!("reset {round} left the index unopenable: {e}");
+            });
+            reopened.rebuild(&f.vault).unwrap();
+            assert_eq!(
+                reopened.search("Findable", 10).unwrap().len(),
+                1,
+                "search stopped working after reset {round}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_truncated_database_is_discarded_and_rebuilt() {
+        // Half a file is the shape an interrupted write leaves behind.
+        let f = Fixture::new();
+        let note = f.vault.create_note("Recoverable", None).unwrap();
+        f.vault
+            .save_note(&note.summary.id, "Recoverable", "Body worth finding.")
+            .unwrap();
+
+        let db = f.scratch_db();
+        {
+            let index = Index::open(&db).unwrap();
+            index.rebuild(&f.vault).unwrap();
+        }
+
+        let bytes = std::fs::read(&db).unwrap();
+        std::fs::write(&db, &bytes[..bytes.len() / 3]).unwrap();
+
+        let reopened = Index::open(&db).expect("a truncated index must not be fatal");
+        reopened.rebuild(&f.vault).unwrap();
+        assert_eq!(reopened.search("worth", 10).unwrap().len(), 1);
     }
 
     #[test]

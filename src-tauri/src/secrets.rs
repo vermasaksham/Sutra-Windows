@@ -482,6 +482,106 @@ mod tests {
         assert_eq!(store.get(ANTHROPIC).unwrap(), None);
     }
 
+    /// Removing a key removes *both* copies.
+    ///
+    /// The one that is easy to forget is the plaintext copy. On a machine whose
+    /// credential store once refused, the key is in the settings file, and a user
+    /// who clears the box has said to forget it — leaving the file's copy behind
+    /// would mean the key is still on disk and the UI says there is none.
+    #[test]
+    fn removing_a_key_clears_the_plaintext_copy_too() {
+        let store = MemoryStore::new();
+        store.set(ANTHROPIC, "sk-in-the-store").unwrap();
+
+        let saved = save(&store, ANTHROPIC, Some(""), Some("sk-in-the-file"));
+
+        assert_eq!(saved.storage, KeyStorage::None);
+        assert_eq!(
+            saved.plaintext, None,
+            "the settings file must not keep a key the user has just removed"
+        );
+        assert_eq!(store.get(ANTHROPIC).unwrap(), None);
+    }
+
+    /// Whitespace is not a key, so it removes rather than stores one.
+    #[test]
+    fn a_key_of_only_spaces_removes_rather_than_stores() {
+        let store = MemoryStore::new();
+        store.set(ANTHROPIC, "sk-real").unwrap();
+        let saved = save(&store, ANTHROPIC, Some("   "), None);
+        assert_eq!(saved.storage, KeyStorage::None);
+        assert_eq!(store.get(ANTHROPIC).unwrap(), None);
+        assert_eq!(saved.plaintext, None);
+    }
+
+    /// Nothing Sutra says out loud about a key repeats the key.
+    ///
+    /// The warnings exist because saving to a credential store can fail, and a
+    /// warning is exactly the sort of string that gets copied into a bug report
+    /// or a screenshot. `plaintext` is the one field allowed to hold the key —
+    /// that is what it is for — and it goes to the settings file, never to a
+    /// message.
+    #[test]
+    fn a_warning_never_repeats_the_key() {
+        const KEY: &str = "sk-ant-do-not-print-me";
+
+        for store in [MemoryStore::failing(), MemoryStore::insecure()] {
+            let saved = save(&store, ANTHROPIC, Some(KEY), None);
+            let warning = saved.warning.expect("a refused store must say so");
+            assert!(
+                !warning.contains(KEY),
+                "the warning repeated the key: {warning}"
+            );
+        }
+    }
+
+    /// No line this program prints interpolates a credential.
+    ///
+    /// A mechanical check over the crate's own source, and the only kind of test
+    /// that can hold this claim: the failure it guards against is somebody adding
+    /// a debug line during an investigation and leaving it in. Sutra logs to
+    /// stderr, which on Windows means the console the app was started from and,
+    /// for a release build, nowhere at all — but "nowhere at all" is a property
+    /// of the build, not a reason to print a key.
+    #[test]
+    fn no_line_this_program_prints_interpolates_a_credential() {
+        let source = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+        let mut offenders = Vec::new();
+
+        for entry in std::fs::read_dir(&source).expect("the crate has a src directory") {
+            let path = entry.expect("readable directory entry").path();
+            if path.extension().and_then(|e| e.to_str()) != Some("rs") {
+                continue;
+            }
+            let text = std::fs::read_to_string(&path).expect("readable source file");
+            for (number, line) in text.lines().enumerate() {
+                if !line.contains("println!") {
+                    continue;
+                }
+                // What a leak looks like: the name of a credential inside the
+                // braces of a format string, or passed as an argument to one.
+                let lowered = line.to_lowercase();
+                if ["key", "secret", "token", "password"]
+                    .iter()
+                    .any(|word| lowered.contains(word))
+                {
+                    offenders.push(format!(
+                        "{}:{}: {}",
+                        path.file_name().unwrap_or_default().to_string_lossy(),
+                        number + 1,
+                        line.trim()
+                    ));
+                }
+            }
+        }
+
+        assert!(
+            offenders.is_empty(),
+            "these lines print something named like a credential:\n{}",
+            offenders.join("\n")
+        );
+    }
+
     #[test]
     fn an_untouched_box_leaves_the_stored_key_alone() {
         let store = MemoryStore::new();

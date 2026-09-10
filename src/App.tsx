@@ -20,6 +20,7 @@ import ExportMenu from "./notes/ExportMenu";
 import FolderBar from "./notes/FolderBar";
 import ConflictPrompt from "./notes/ConflictPrompt";
 import MigrationPrompt from "./notes/MigrationPrompt";
+import IdClashNotice from "./notes/IdClashNotice";
 import CitationMigrationPrompt from "./notes/CitationMigrationPrompt";
 import CommandPalette from "./notes/CommandPalette";
 import TagManager from "./notes/TagManager";
@@ -37,13 +38,13 @@ import { LITERATURE_TEMPLATE } from "./editor/voices/voiceRules";
 import { setCurrentFolder } from "./notes/folderStore";
 import { MOD, shortcut } from "./platform";
 import { useNote } from "./notes/useNote";
-import type { Editor as TiptapEditor } from "@tiptap/core";
 import {
   exportApi,
   indexApi,
   foldersApi,
   legacyCitationsApi,
   migrationApi,
+  type IdClash,
   notesApi,
   aiApi,
   contextApi,
@@ -155,7 +156,6 @@ export default function App() {
    *  the input is three components down. */
   const [focusSearch, setFocusSearch] = useState(0);
   const [error, setError] = useState<string | null>(null);
-  const [editor, setEditor] = useState<TiptapEditor | null>(null);
   const [exporting, setExporting] = useState(false);
 
   /** Report a failed command instead of swallowing it. */
@@ -509,6 +509,30 @@ export default function App() {
       });
   }, [vault, notes]);
 
+  /**
+   * Files claiming an id another file already claims.
+   *
+   * Refreshed whenever the note list is, because that is the scan that finds
+   * them — a conflicted copy can appear at any time while the app is open, not
+   * only when the vault is first read.
+   */
+  const [clashes, setClashes] = useState<IdClash[]>([]);
+  useEffect(() => {
+    if (!vault) return;
+    let cancelled = false;
+    migrationApi
+      .idClashes()
+      .then((found) => {
+        if (!cancelled) setClashes(found);
+      })
+      // Not fatal and not worth a toast: the notes are all still listed, and
+      // the worst case is that the warning is missing rather than wrong.
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [vault, notes]);
+
   // Asked once per vault, on open. A vault laid out the old way still works —
   // its notes open and its links resolve — so this is an offer, not a gate.
   useEffect(() => {
@@ -720,14 +744,17 @@ export default function App() {
   );
 
   async function exportDocx() {
-    if (!note.doc || !editor) return;
+    // No editor in the condition, and none used below: exporting reads the
+    // note's markdown, so it does not depend on anything being mounted.
+    if (!note.doc) return;
     setExporting(true);
     try {
       // Built here rather than in Rust because the pieces that need a browser
       // — rasterising formulas, reading attachments — only exist on this side.
+      // One section: the note being read. The list is the point — a chapter is
+      // several notes in order, and the exporter already takes them that way.
       const document = await buildDocument(
-        note.doc.title,
-        editor.getJSON(),
+        [{ title: note.doc.title, body: note.doc.body }],
         citedRefs(note.doc.body),
       );
       const saved = await exportApi.docx(document);
@@ -825,6 +852,8 @@ export default function App() {
               );
           }}
         />
+
+        <IdClashNotice clashes={clashes} />
 
         <NoteList
           onLiteratureNote={(key) => {
@@ -995,7 +1024,6 @@ export default function App() {
                 note.setBody(markdown);
                 trackCitations(markdown);
               }}
-              onReady={setEditor}
             />
           </div>
         ) : (

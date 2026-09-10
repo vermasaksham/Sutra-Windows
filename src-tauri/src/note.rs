@@ -244,7 +244,25 @@ pub(crate) fn rename_with_retry(from: &Path, to: &Path) -> io::Result<()> {
     retrying(|| fs::rename(from, to))
 }
 
-fn retrying<T>(mut attempt: impl FnMut() -> io::Result<T>) -> io::Result<T> {
+/// Copy a file, retrying the failures a sync client or an antivirus scanner
+/// causes.
+///
+/// The same retry policy as [`rename_with_retry`], and for the same reason: on
+/// Windows another process holding a handle open is a transient failure, not a
+/// permanent one. This exists because moving a note copies its attachments to
+/// the new folder before rewriting the note that points at them — so that an
+/// interruption leaves a duplicate rather than a picture nothing can find.
+pub(crate) fn copy_with_retry(from: &Path, to: &Path) -> io::Result<()> {
+    retrying(|| fs::copy(from, to)).map(|_| ())
+}
+
+/// Run `attempt`, backing off and retrying the failures another process causes.
+///
+/// Exposed to the crate because the index has the same problem for the same
+/// reason: on Windows a file another handle has open cannot be renamed *or*
+/// deleted, and both are transient — the other handle is usually a sync client
+/// or a virus scanner that is about to let go.
+pub(crate) fn retrying<T>(mut attempt: impl FnMut() -> io::Result<T>) -> io::Result<T> {
     let mut waited = RENAME_BACKOFF_MS;
     for _ in 1..RENAME_TRIES {
         match attempt() {

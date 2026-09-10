@@ -125,6 +125,34 @@ pub struct Vault {
     /// rather than propagated: a panic in an unrelated command must not make
     /// the vault permanently unopenable.
     paths: RwLock<HashMap<String, String>>,
+    /// Files that claimed an id already taken, from the last scan. Derived
+    /// state about the *filesystem*, not about the notes, so it lives here
+    /// rather than in the index.
+    clashes: RwLock<Vec<IdClash>>,
+}
+
+/// The outcome of bringing a note's own attachments with it.
+///
+/// Two things, because the order they are used in is what makes an interrupted
+/// move harmless: the rewritten body has to be on disk before the files it no
+/// longer points at are removed.
+struct Relocated {
+    /// The body with every moved reference retargeted.
+    body: String,
+    /// Vault-relative paths of the copies left at the old locations, to be
+    /// removed once the body above has been written.
+    originals: Vec<String>,
+}
+
+/// Two files claiming one note id.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct IdClash {
+    pub id: String,
+    /// The file `read_note` will open — the canonical one.
+    pub opened: String,
+    /// The file that is on disk, listed, and unreachable by id.
+    pub shadowed: String,
 }
 
 impl Vault {
@@ -146,6 +174,7 @@ impl Vault {
         let vault = Self {
             root,
             paths: RwLock::new(HashMap::new()),
+            clashes: RwLock::new(Vec::new()),
         };
         // Populate the map once up front, so the first note the user opens does
         // not pay for a full scan.
@@ -191,6 +220,7 @@ impl Vault {
 
         let mut notes = Vec::new();
         let mut map = HashMap::with_capacity(files.len());
+        let mut clashes = Vec::new();
 
         for relative in files {
             let Ok(contents) = fs::read_to_string(self.root.join(&relative)) else {
@@ -201,9 +231,28 @@ impl Vault {
             };
             let fm = parsed.unwrap_or_else(|| Self::synthesise(&relative));
             // Two files claiming one id is possible — a copied note, a bad
-            // merge. First one wins and the second is left out of the map
-            // rather than silently shadowing it.
-            map.entry(fm.id.clone()).or_insert_with(|| relative.clone());
+            // merge, a sync client's conflicted copy. First one wins and the
+            // second is left out of the map rather than silently shadowing it.
+            //
+            // Recorded rather than only resolved. Both files stay on disk and
+            // both stay listed; what was missing was any way for the app to
+            // *say so*, which left the second copy visible in the note list
+            // but unreachable — clicking it opened the first. Preserve, warn,
+            // let the researcher reconcile: guessing which of two versions of
+            // their work to discard is not a decision this program gets to
+            // make.
+            match map.entry(fm.id.clone()) {
+                std::collections::hash_map::Entry::Vacant(slot) => {
+                    slot.insert(relative.clone());
+                }
+                std::collections::hash_map::Entry::Occupied(taken) => {
+                    clashes.push(IdClash {
+                        id: fm.id.clone(),
+                        opened: taken.get().clone(),
+                        shadowed: relative.clone(),
+                    });
+                }
+            }
             notes.push(summary_of(&fm, body, folder_of(&relative)));
         }
 
@@ -215,7 +264,21 @@ impl Vault {
         });
 
         *self.paths.write().unwrap_or_else(|e| e.into_inner()) = map;
+        *self.clashes.write().unwrap_or_else(|e| e.into_inner()) = clashes;
         Ok(notes)
+    }
+
+    /// Files that claim an id another file already claimed.
+    ///
+    /// Refreshed by every scan, so it describes the vault as last read. Empty
+    /// is the normal answer; anything else is worth showing the researcher,
+    /// because it means two files on disk disagree about being the same note
+    /// and only one of them is reachable by id.
+    pub fn id_clashes(&self) -> Vec<IdClash> {
+        self.clashes
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()
     }
 
     /// Every folder in the vault, `/`-separated, shallowest first.
@@ -357,16 +420,28 @@ impl Vault {
         // every figure in it.
         let moved = self.relocate_attachments(id, &folder, body)?;
         let body = match moved {
-            Some(rewritten) => {
+            Some(Relocated { body, originals }) => {
                 // `updated` is deliberately untouched. Moving a note is not an
                 // edit to it, and a vault whose timestamps move when someone
                 // drags a file has lost the one signal that says when the work
                 // happened.
-                note::write_atomic(
-                    &self.root.join(&target),
-                    &frontmatter::join(&fm, &rewritten)?,
-                )?;
-                rewritten
+                note::write_atomic(&self.root.join(&target), &frontmatter::join(&fm, &body)?)?;
+
+                // Only now, with the body committed, do the copies at the old
+                // paths stop being the ones the note relies on. This ordering is
+                // the whole reason attachments are copied rather than renamed:
+                // between the copy and this line every reference in the note
+                // still resolves, so a crash — or a laptop lid — leaves a
+                // duplicate file, which is visible and harmless, rather than a
+                // figure that no longer loads.
+                //
+                // A failure to remove one is not a failure of the move. The note
+                // is where it should be and its pictures are beside it; a stray
+                // copy in the old folder is untidy, not wrong.
+                for original in originals {
+                    let _ = fs::remove_file(self.root.join(original));
+                }
+                body
             }
             None => body.to_string(),
         };
@@ -385,7 +460,12 @@ impl Vault {
     /// Establishing that costs a scan of every note in the vault. That is
     /// acceptable here and would not be on a hot path: moving a note is
     /// something a person does by hand, one at a time.
-    fn relocate_attachments(&self, id: &str, folder: &str, body: &str) -> Result<Option<String>> {
+    fn relocate_attachments(
+        &self,
+        id: &str,
+        folder: &str,
+        body: &str,
+    ) -> Result<Option<Relocated>> {
         let owned = self.owned_attachments(id, body)?;
         if owned.is_empty() {
             return Ok(None);
@@ -394,7 +474,7 @@ impl Vault {
         let destination = join_relative(folder, ATTACHMENTS);
         let directory = self.root.join(&destination);
         let mut rewritten = body.to_string();
-        let mut changed = false;
+        let mut originals = Vec::new();
 
         for reference in owned {
             let Some(name) = Path::new(&reference)
@@ -425,13 +505,21 @@ impl Vault {
                 to_name = format!("{}_{}", Ulid::generate(), name);
             }
             let to_reference = join_relative(&destination, &to_name);
-            note::rename_with_retry(&from, &self.root.join(&to_reference))?;
+            // Copied, not renamed. See the caller for why the original cannot be
+            // removed until the rewritten body has been written.
+            note::copy_with_retry(&from, &self.root.join(&to_reference))?;
 
             rewritten = attachments::retarget(&rewritten, &reference, &to_reference);
-            changed = true;
+            originals.push(reference);
         }
 
-        Ok(changed.then_some(rewritten))
+        if originals.is_empty() {
+            return Ok(None);
+        }
+        Ok(Some(Relocated {
+            body: rewritten,
+            originals,
+        }))
     }
 
     /// The attachments `body` references that no *other* note also references.
@@ -696,7 +784,22 @@ impl Vault {
                 flattened.push(note.title.clone());
             }
 
-            let folder = ancestors.join("/");
+            // This migration turns claimed parents into folders. A note that
+            // claims no parent has nothing to turn into anything, so it keeps
+            // the folder it is in — the filename may still be tidied, but the
+            // location is not the migration's to change.
+            //
+            // It used to derive every note's folder from its chain of claims,
+            // including the notes that had no claim, whose chain is empty and
+            // whose folder therefore came out as the vault root. So a single
+            // note still claiming a parent was enough to make the plan propose
+            // flattening every organised note in the vault into the root — and
+            // that is exactly the state a half-finished migration leaves behind.
+            let folder = if note.parent.is_none() {
+                folder_of(&note.relative)
+            } else {
+                ancestors.join("/")
+            };
             let claimed = taken.entry(folder.clone()).or_default();
             let stem = note::file_stem(&note.title);
             let mut name = format!("{stem}.md");
@@ -765,8 +868,18 @@ impl Vault {
         Ok(plan.moves.len())
     }
 
-    /// Copy every markdown file into a timestamped folder under `.sutra`.
-    fn back_up(&self) -> Result<PathBuf> {
+    /// Copy every markdown file into a folder of its own under `.sutra/backups/`.
+    ///
+    /// The shared first step of every migration, and the reason `migrate` and
+    /// `migrate_citations` can be described by one contract: detect, plan,
+    /// preview, **back up**, apply, verify. A migration rewrites files the user
+    /// did not ask to have rewritten, in bulk, and the only honest answer to
+    /// "what if it gets it wrong" is a copy of what was there before.
+    ///
+    /// Only the markdown. Attachments are never touched by a migration, and
+    /// copying a vault's worth of PDFs to rename some text files would turn a
+    /// two-second operation into a ten-minute one.
+    pub fn back_up(&self) -> Result<PathBuf> {
         let directory = self
             .root
             .join(SUTRA)
@@ -878,6 +991,7 @@ impl Vault {
         self.edit(&doc.summary.id, |fm| {
             fm.note_type = NoteType::Literature;
             fm.sources = vec![Citation {
+                eid: Ulid::generate().to_string(),
                 id: source_id.to_string(),
                 captured: Some(frontmatter::now()),
                 ..Default::default()
@@ -945,7 +1059,22 @@ impl Vault {
 
     /// Replace a note's citations. The caller sends the complete desired list,
     /// for the same reason `set_meta` does.
+    ///
+    /// Every entry that arrives without an evidence id is given one. Minting
+    /// happens here, on the way to disk, rather than in the frontend: the id
+    /// is a fact about a record that exists, and a record only exists once it
+    /// has been written. Entries that already carry one keep it, so editing a
+    /// page number does not re-identify the evidence.
     pub fn set_citations(&self, id: &str, citations: Vec<Citation>) -> Result<NoteSummary> {
+        let citations = citations
+            .into_iter()
+            .map(|mut citation| {
+                if citation.eid.trim().is_empty() {
+                    citation.eid = Ulid::generate().to_string();
+                }
+                citation
+            })
+            .collect();
         self.edit(id, |fm| {
             fm.sources = citations;
         })
@@ -1071,6 +1200,12 @@ impl Vault {
     /// whole vault would destroy the one signal telling you what you were
     /// actually working on.
     pub fn migrate_citations(&self, mapping: &HashMap<String, String>) -> Result<usize> {
+        // This rewrites prose in every note in the vault, which makes it a
+        // migration in every sense that matters — so it takes the same first
+        // step as the layout one. It did not, for two releases, and the
+        // difference between the two was invisible from outside.
+        self.back_up()?;
+
         let mut changed = 0;
         let mut files = Vec::new();
         collect(&self.root, &self.root, 0, &mut files)?;
@@ -1637,6 +1772,9 @@ fn ancestry(note: &LegacyNote, by_id: &HashMap<&str, &LegacyNote>) -> (Vec<Strin
     let mut chain = Vec::new();
     let mut seen = std::collections::HashSet::new();
     let mut current = note.parent.as_deref();
+    // Where the chain of claims ran out, if that ancestor already lives
+    // somewhere. See below for why this is not the same as the vault root.
+    let mut anchor = String::new();
 
     while let Some(id) = current {
         if !seen.insert(id.to_string()) {
@@ -1644,10 +1782,28 @@ fn ancestry(note: &LegacyNote, by_id: &HashMap<&str, &LegacyNote>) -> (Vec<Strin
         }
         let Some(ancestor) = by_id.get(id) else { break };
         chain.push(note::file_stem(&ancestor.title));
+        if ancestor.parent.is_none() {
+            // The topmost claim, and its own folder is already the truth — so
+            // the chain hangs off that folder rather than off the root.
+            //
+            // In a vault that has never been migrated this changes nothing:
+            // every note is flat in the root and the anchor is empty. It matters
+            // when a run was interrupted part-way through clearing the claims,
+            // because then an ancestor whose claim has already gone is sitting in
+            // `Research/`, and computing this note's home from the root would
+            // move it back out of the folder the same migration just put it in.
+            anchor = folder_of(&ancestor.relative);
+            break;
+        }
         current = ancestor.parent.as_deref();
     }
 
     chain.reverse();
+    if !anchor.is_empty() {
+        let mut full: Vec<String> = anchor.split('/').map(str::to_string).collect();
+        full.append(&mut chain);
+        chain = full;
+    }
     let deep = chain.len() > MAX_DEPTH;
     chain.truncate(MAX_DEPTH);
     (chain, deep)
@@ -1752,6 +1908,19 @@ fn to_relative(path: &Path) -> String {
         .join("/")
 }
 
+/// A filename folded to the form filesystems compare by.
+///
+/// Case only. Unicode normalisation is deliberately *not* applied: HFS+ and
+/// APFS normalise to NFD while Linux stores whatever bytes it was given, so a
+/// title like "Sb\u{2082}Se\u{2083}" or an accented name can round-trip
+/// differently — but folding it here would make two genuinely different titles
+/// collide, and the cost of that is a note that cannot be created. Case is the
+/// collision that actually bites, and the one every affected filesystem agrees
+/// about.
+fn fold_name(name: &str) -> String {
+    name.to_lowercase()
+}
+
 /// A filename for `title` that nothing else in `directory` is already using.
 ///
 /// `keep` is the note's own current path, so re-saving a note under its
@@ -1762,13 +1931,30 @@ fn unique_name(directory: &Path, title: &str, keep: Option<&str>) -> String {
         .and_then(|k| Path::new(k).file_name())
         .and_then(|n| n.to_str());
 
+    // Names already in this directory, folded for comparison.
+    //
+    // Testing `directory.join(&name).exists()` was the obvious thing and it is
+    // wrong across platforms: NTFS and APFS treat "Growth.md" and "growth.md"
+    // as one file, ext4 treats them as two. A vault written on Linux with both
+    // therefore cannot be checked out on Windows, and a note created there
+    // silently overwrites the other. Comparing case-folded names makes the
+    // answer the same everywhere, at the cost of a suffix that a Linux-only
+    // user did not strictly need — the safe direction, since a vault is a
+    // folder people sync between machines.
+    let taken: HashSet<String> = fs::read_dir(directory)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter_map(|entry| entry.file_name().to_str().map(fold_name))
+        .collect();
+
     for attempt in 0..1000 {
         let name = if attempt == 0 {
             note::file_name(title)
         } else {
             format!("{stem} {}.md", attempt + 1)
         };
-        if Some(name.as_str()) == keep_name || !directory.join(&name).exists() {
+        if Some(name.as_str()) == keep_name || !taken.contains(&fold_name(&name)) {
             return name;
         }
     }
@@ -2814,6 +3000,93 @@ mod tests {
         );
     }
 
+    /// A move interrupted anywhere still leaves every figure loading.
+    ///
+    /// Moving a note is three writes — rename the note, put its attachments
+    /// beside it, rewrite the references — and a laptop lid can close between
+    /// any two of them. The ordering is chosen so that no gap between them is a
+    /// broken state: the attachment is *copied* first, so both the old and the
+    /// new path hold the file while the body still names the old one; the body
+    /// is written next; only then is the old copy removed.
+    ///
+    /// The two intermediate states are built here by hand, because the point is
+    /// not that Sutra reaches them — it is that a vault found in one of them is
+    /// a vault whose pictures all still load.
+    #[test]
+    fn an_interrupted_move_never_leaves_a_figure_that_cannot_load() {
+        let vault = TempVault::new();
+        let note = vault.create_note("Growth", folder("A")).unwrap();
+        let id = note.summary.id.clone();
+        let source = vault.root().join("figure.png");
+        fs::write(&source, b"the figure").unwrap();
+        let old_reference = vault.import_attachment(&source, folder("A")).unwrap();
+        vault
+            .save_note(&id, "Growth", &format!("![f]({old_reference})"))
+            .unwrap();
+
+        let name = Path::new(&old_reference).file_name().unwrap();
+        let new_reference = format!("B/{ATTACHMENTS}/{}", name.to_str().unwrap());
+
+        // State 1: copied, body not yet rewritten. The note still names the old
+        // path, and the old path is still there to be named.
+        fs::create_dir_all(vault.root().join("B").join(ATTACHMENTS)).unwrap();
+        fs::copy(
+            vault.root().join(&old_reference),
+            vault.root().join(&new_reference),
+        )
+        .unwrap();
+        assert_eq!(
+            vault.read_attachment(&old_reference).unwrap(),
+            b"the figure",
+            "between the copy and the rewrite, the old reference must still resolve"
+        );
+
+        // State 2: body rewritten, old copy not yet removed. The note names the
+        // new path, which exists; the stray copy is untidy and harmless.
+        vault
+            .save_note(&id, "Growth", &format!("![f]({new_reference})"))
+            .unwrap();
+        for reference in attachments::extract(&vault.read_note(&id).unwrap().body) {
+            assert_eq!(
+                vault.read_attachment(&reference).unwrap(),
+                b"the figure",
+                "after the rewrite, {reference} must resolve"
+            );
+        }
+    }
+
+    /// A completed move leaves one copy of the picture, not two.
+    ///
+    /// The copy-then-delete ordering above is only safe if the delete actually
+    /// happens; otherwise every move would quietly double the vault's figures.
+    #[test]
+    fn a_completed_move_leaves_no_stray_copy_behind() {
+        let vault = TempVault::new();
+        let note = vault.create_note("Growth", folder("A")).unwrap();
+        let id = note.summary.id.clone();
+        let source = vault.root().join("figure.png");
+        fs::write(&source, b"the figure").unwrap();
+        let reference = vault.import_attachment(&source, folder("A")).unwrap();
+        vault
+            .save_note(&id, "Growth", &format!("![f]({reference})"))
+            .unwrap();
+
+        vault.move_note(&id, "B").unwrap();
+
+        assert!(
+            !vault.root().join(&reference).exists(),
+            "the picture was copied to the new folder but never removed from the old"
+        );
+        let after = attachments::extract(&vault.read_note(&id).unwrap().body);
+        assert_eq!(after.len(), 1);
+        assert!(
+            after[0].starts_with("B/"),
+            "the reference should name the new folder, got {:?}",
+            after[0]
+        );
+        assert_eq!(vault.read_attachment(&after[0]).unwrap(), b"the figure");
+    }
+
     #[test]
     fn deleting_a_note_takes_its_own_attachment_to_the_trash() {
         let vault = TempVault::new();
@@ -3160,6 +3433,126 @@ mod tests {
         assert!(targets.contains(&"Research/Sb2Se3.md"));
         assert!(targets.contains(&"Research/Sb2Se3/Cp.md"));
         assert!(plan.flattened.is_empty());
+    }
+
+    /// A note that claims no parent is not the migration's business.
+    ///
+    /// This is the bug that made an interrupted migration dangerous. The plan
+    /// derived every note's target folder from its chain of `parent` claims —
+    /// including notes that had no claim at all, whose chain is empty and whose
+    /// target therefore came out as the vault root. So a single note still
+    /// claiming a parent was enough to make the plan propose flattening every
+    /// organised note in the vault into the root.
+    ///
+    /// And that is exactly the state a half-finished migration leaves behind:
+    /// files already in their new folders, claims cleared one at a time. The
+    /// second run would have undone the first.
+    #[test]
+    fn a_note_with_no_claim_is_left_in_the_folder_it_is_in() {
+        let vault = TempVault::new();
+        // One legacy note, so the vault does need migrating at all.
+        legacy(&vault, A, "Research", None);
+
+        // And one note already where it belongs, claiming nothing.
+        let organised = vault
+            .create_note("Growth log", folder("Research/Sb2Se3"))
+            .unwrap();
+
+        let plan = vault.migration_plan().unwrap();
+        for (from, to) in &plan.moves {
+            assert!(
+                !from.starts_with("Research/Sb2Se3/"),
+                "the plan wants to move an already-organised note to {to}"
+            );
+        }
+
+        vault.migrate().unwrap();
+        assert_eq!(
+            vault
+                .read_note(&organised.summary.id)
+                .unwrap()
+                .summary
+                .folder,
+            "Research/Sb2Se3",
+            "migrating flattened a note that was already in the right place"
+        );
+    }
+
+    /// Running the migration twice must change nothing the second time.
+    ///
+    /// An interrupted run is indistinguishable from a completed one that is
+    /// asked to run again, so idempotence is the property that makes
+    /// interruption survivable. It has to hold at depth: the resumed run sees
+    /// some claims cleared and some not, and must still compute the same
+    /// destination for a note whose parent's claim has already gone.
+    #[test]
+    fn migrating_a_second_time_moves_nothing() {
+        let vault = TempVault::new();
+        legacy(&vault, A, "Research", None);
+        legacy(&vault, B, "Sb2Se3", Some(A));
+        legacy(&vault, C, "Cp", Some(B));
+
+        vault.migrate().unwrap();
+        let after_first: Vec<String> = vault
+            .list_notes()
+            .unwrap()
+            .into_iter()
+            .map(|n| format!("{}/{}", n.folder, n.title))
+            .collect();
+
+        // Nothing claims a parent any more, so there is nothing to do — but the
+        // plan must say so rather than proposing to move everything to the root.
+        assert!(vault.migration_plan().unwrap().moves.is_empty());
+        vault.migrate().unwrap();
+
+        let after_second: Vec<String> = vault
+            .list_notes()
+            .unwrap()
+            .into_iter()
+            .map(|n| format!("{}/{}", n.folder, n.title))
+            .collect();
+        assert_eq!(after_first, after_second);
+    }
+
+    /// A migration interrupted between clearing one claim and the next.
+    ///
+    /// Built by hand, because the point is not that Sutra reaches this state but
+    /// that a vault found in it can be finished. The files are in their new
+    /// folders; the parent notes' claims are cleared; the deepest note's is not.
+    /// Finishing must leave it where it already is.
+    #[test]
+    fn a_migration_interrupted_half_way_finishes_where_it_left_off() {
+        let vault = TempVault::new();
+        legacy(&vault, A, "Research", None);
+        legacy(&vault, B, "Sb2Se3", Some(A));
+        legacy(&vault, C, "Cp", Some(B));
+        vault.migrate().unwrap();
+
+        // Put the deepest note's claim back: the run got as far as moving every
+        // file and clearing its ancestors, and stopped before this one.
+        let path = vault.root().join("Research/Sb2Se3/Cp.md");
+        let contents = fs::read_to_string(&path).unwrap();
+        let (fm, body) = frontmatter::split(&contents).unwrap();
+        let mut fm = fm.unwrap();
+        fm.parent = Some(B.to_string());
+        let body = body.to_string();
+        note::write_atomic(&path, &frontmatter::join(&fm, &body).unwrap()).unwrap();
+        vault.list_notes().unwrap();
+
+        assert!(
+            vault.needs_migration().unwrap(),
+            "a note still claiming a parent means the vault is not finished"
+        );
+
+        vault.migrate().unwrap();
+
+        assert_eq!(
+            vault.read_note(C).unwrap().summary.folder,
+            "Research/Sb2Se3",
+            "finishing the migration moved the note out of the folder it was already in"
+        );
+        assert!(!vault.needs_migration().unwrap());
+        assert!(vault.root().join("Research/Sb2Se3/Cp.md").is_file());
     }
 
     #[test]
@@ -3804,6 +4197,70 @@ mod tests {
         );
     }
 
+    /// The citation migration keeps a copy first, like the other one.
+    ///
+    /// It rewrites prose in every note in the vault, which makes it a migration
+    /// in every sense the invariant means — "every migration detects, plans,
+    /// previews, backs up, applies and verifies". For two releases this one
+    /// skipped the backup, and nothing outside the code could tell.
+    #[test]
+    fn migrating_citations_keeps_a_copy_of_every_note_first() {
+        let vault = TempVault::new();
+        let source = vault.create_source("S", paper("10.1000/x")).unwrap();
+        let note = vault.create_note("Citing", folder("Research")).unwrap();
+        vault
+            .save_note(&note.summary.id, "Citing", "See [@ABCD1234].")
+            .unwrap();
+
+        let mut mapping = HashMap::new();
+        mapping.insert("ABCD1234".to_string(), source.summary.id.clone());
+        vault.migrate_citations(&mapping).unwrap();
+
+        let backups = vault.root().join(SUTRA).join("backups");
+        let run = fs::read_dir(&backups)
+            .expect("a migration must leave a backup folder")
+            .next()
+            .expect("and something in it")
+            .unwrap();
+        let kept = fs::read_to_string(run.path().join("Research").join("Citing.md"))
+            .expect("the note it was about to rewrite");
+        assert!(
+            kept.contains("[@ABCD1234]"),
+            "the copy should hold the note as it was before the rewrite: {kept}"
+        );
+    }
+
+    /// Running the citation migration again changes nothing.
+    ///
+    /// The keys it could resolve are gone from the prose, so there is nothing
+    /// left to find; the ones it could not are still there, still unresolved,
+    /// and still not deleted.
+    #[test]
+    fn migrating_citations_a_second_time_changes_nothing() {
+        let vault = TempVault::new();
+        let source = vault.create_source("S", paper("10.1000/x")).unwrap();
+        let note = vault.create_note("Citing", None).unwrap();
+        vault
+            .save_note(
+                &note.summary.id,
+                "Citing",
+                "As [@ABCD1234] shows, unlike [@ZZZZ9999].",
+            )
+            .unwrap();
+
+        let mut mapping = HashMap::new();
+        mapping.insert("ABCD1234".to_string(), source.summary.id.clone());
+        assert_eq!(vault.migrate_citations(&mapping).unwrap(), 1);
+        let once = vault.read_note(&note.summary.id).unwrap().body;
+
+        assert_eq!(
+            vault.migrate_citations(&mapping).unwrap(),
+            0,
+            "the second run found something to rewrite"
+        );
+        assert_eq!(vault.read_note(&note.summary.id).unwrap().body, once);
+    }
+
     #[test]
     fn migrating_does_not_stamp_updated_across_the_vault() {
         // Rewriting a reference into the form that means the same thing is not
@@ -4134,6 +4591,297 @@ mod tests {
     /// rule here is that neither copy may be *hidden*: whichever one the app
     /// opens, the other is still a file in the vault with its text intact, and
     /// the listing does not silently drop it.
+    // ---- v0.3: recovery -----------------------------------------------------
+
+    #[test]
+    fn a_whole_folder_moved_outside_the_app_is_found_again() {
+        // Dragging a project folder in Explorer is an ordinary thing to do.
+        // Every note in it keeps its id and its content; only the folder
+        // changes, because the folder was never anything but where the file
+        // is.
+        let vault = TempVault::new();
+        let a = vault
+            .create_note("Growth", folder("Research/Sb2Se3"))
+            .unwrap();
+        let b = vault
+            .create_note("Phonons", folder("Research/Sb2Se3"))
+            .unwrap();
+        vault
+            .save_note(&a.summary.id, "Growth", "Ribbons align.")
+            .unwrap();
+
+        fs::create_dir_all(vault.root().join("Archive")).unwrap();
+        fs::rename(
+            vault.root().join("Research/Sb2Se3"),
+            vault.root().join("Archive/Sb2Se3"),
+        )
+        .unwrap();
+
+        let moved = vault.read_note(&a.summary.id).expect("note must be found");
+        assert_eq!(moved.summary.folder, "Archive/Sb2Se3");
+        assert_eq!(moved.body.trim(), "Ribbons align.");
+        assert_eq!(
+            vault.read_note(&b.summary.id).unwrap().summary.folder,
+            "Archive/Sb2Se3"
+        );
+    }
+
+    #[test]
+    fn a_note_with_malformed_frontmatter_does_not_take_the_vault_down() {
+        // One broken file must not stop the other notes being listed. It is a
+        // corrupted note, not a corrupted vault, and the distinction is the
+        // difference between losing one file and losing an afternoon.
+        let vault = TempVault::new();
+        let good = vault.create_note("Fine", None).unwrap();
+        vault
+            .save_note(&good.summary.id, "Fine", "Readable.")
+            .unwrap();
+
+        fs::write(
+            vault.root().join("Broken.md"),
+            "---\nid: [this is not\n  valid: yaml: at all\n---\n\nBody.\n",
+        )
+        .unwrap();
+
+        let notes = vault.list_notes().expect("listing must still work");
+        assert!(
+            notes.iter().any(|n| n.title == "Fine"),
+            "a broken neighbour hid a good note"
+        );
+        // And the broken file is still on disk, untouched.
+        assert!(vault.root().join("Broken.md").exists());
+    }
+
+    #[test]
+    fn a_note_left_half_written_does_not_replace_the_good_one() {
+        // `write_atomic` writes a temp file and renames. An interruption
+        // leaves the temp file behind and the note as it was — never a note
+        // with half its body.
+        let vault = TempVault::new();
+        let note = vault.create_note("Growth", None).unwrap();
+        let id = note.summary.id.clone();
+        vault
+            .save_note(&id, "Growth", "The complete body.")
+            .unwrap();
+
+        // The debris an interrupted write leaves.
+        let path = vault.root().join(vault.relative_for(&id).unwrap());
+        fs::write(path.with_extension("md.tmp"), "half a bo").unwrap();
+
+        assert_eq!(
+            vault.read_note(&id).unwrap().body.trim(),
+            "The complete body."
+        );
+        // And the leftover is not mistaken for a note.
+        let notes = vault.list_notes().unwrap();
+        assert_eq!(notes.len(), 1, "a .tmp file was listed as a note");
+    }
+
+    #[test]
+    fn a_source_whose_zotero_item_vanished_keeps_everything_recorded() {
+        // Deleting an item in Zotero must not reach back into the vault. What
+        // Sutra recorded is the researcher's, and it stays.
+        let vault = TempVault::new();
+        let mut meta = paper("10.1000/x");
+        meta.citation_key = Some("zhou2019".into());
+        meta.styled.insert(
+            "american-chemical-society".into(),
+            crate::references::StyledCitation {
+                citation: Some("(1)".into()),
+                bib: Some("Zhou, Y. Nature Energy 2019.".into()),
+            },
+        );
+        let source = vault.import_source("Zhou 2019", meta).unwrap();
+
+        // Zotero is now gone; nothing in the vault changes, because nothing in
+        // the vault ever asked it at read time.
+        let after = vault.read_note(&source.id).unwrap().summary.source.unwrap();
+        assert_eq!(after.zotero.as_deref(), Some("ABCD1234"));
+        assert_eq!(after.citation_key.as_deref(), Some("zhou2019"));
+        assert_eq!(
+            after.styled["american-chemical-society"].bib.as_deref(),
+            Some("Zhou, Y. Nature Energy 2019.")
+        );
+    }
+
+    // ---- v0.3: evidence identity ------------------------------------------
+
+    #[test]
+    fn every_recorded_piece_of_evidence_gets_its_own_id() {
+        // `id` says which paper; `eid` says which reading of it. Without the
+        // second, two records of the same source at the same page are the same
+        // record as far as anything outside this note can tell.
+        let vault = TempVault::new();
+        let source = vault
+            .import_source("Zhou 2019", paper("10.1000/x"))
+            .unwrap();
+        let note = vault.create_note("Reading", None).unwrap();
+
+        vault
+            .set_citations(
+                &note.summary.id,
+                vec![
+                    Citation {
+                        id: source.id.clone(),
+                        page: Some("S12".into()),
+                        ..Default::default()
+                    },
+                    Citation {
+                        id: source.id.clone(),
+                        page: Some("S12".into()),
+                        ..Default::default()
+                    },
+                ],
+            )
+            .unwrap();
+
+        let recorded = vault.read_note(&note.summary.id).unwrap().summary.sources;
+        assert_eq!(recorded.len(), 2);
+        assert!(!recorded[0].eid.is_empty(), "no evidence id was minted");
+        assert_ne!(
+            recorded[0].eid, recorded[1].eid,
+            "two readings of one page must be two pieces of evidence"
+        );
+    }
+
+    #[test]
+    fn an_evidence_id_survives_editing_the_record_around_it() {
+        // Correcting a page number is not a new observation. If the id moved,
+        // nothing could hold a reference to a piece of evidence for longer
+        // than one edit.
+        let vault = TempVault::new();
+        let source = vault
+            .import_source("Zhou 2019", paper("10.1000/x"))
+            .unwrap();
+        let note = vault.create_note("Reading", None).unwrap();
+        vault
+            .set_citations(
+                &note.summary.id,
+                vec![Citation {
+                    id: source.id.clone(),
+                    page: Some("S12".into()),
+                    ..Default::default()
+                }],
+            )
+            .unwrap();
+
+        let mut held = vault.read_note(&note.summary.id).unwrap().summary.sources;
+        let original = held[0].eid.clone();
+        held[0].page = Some("S13".into());
+        held[0].quote = Some("thermal conductivity decreases".into());
+        vault.set_citations(&note.summary.id, held).unwrap();
+
+        let after = vault.read_note(&note.summary.id).unwrap().summary.sources;
+        assert_eq!(after[0].eid, original, "the evidence was re-identified");
+        assert_eq!(after[0].page.as_deref(), Some("S13"));
+    }
+
+    #[test]
+    fn a_v0_2_note_without_evidence_ids_is_read_unchanged() {
+        // Backward compatibility, at the byte level: opening a v0.2 vault must
+        // not rewrite it, and an absent `eid` is absent, not empty-string.
+        let vault = TempVault::new();
+        let note = vault.create_note("Reading", None).unwrap();
+        let path = vault.path_for(&note.summary.id).unwrap();
+        let raw = fs::read_to_string(&path).unwrap();
+        let legacy = raw.replace(
+            "tags: []",
+            "tags: []\nsources:\n  - id: 01HQ3M8K2P0000000000000001\n    page: S12",
+        );
+        fs::write(&path, &legacy).unwrap();
+
+        let read = vault.read_note(&note.summary.id).unwrap();
+        assert_eq!(read.summary.sources.len(), 1);
+        assert_eq!(read.summary.sources[0].page.as_deref(), Some("S12"));
+        assert!(
+            read.summary.sources[0].eid.is_empty(),
+            "reading must not invent an id"
+        );
+        assert_eq!(
+            fs::read_to_string(&path).unwrap(),
+            legacy,
+            "opening a v0.2 note rewrote it"
+        );
+    }
+
+    // ---- v0.3: two files, one id -------------------------------------------
+
+    #[test]
+    fn two_files_claiming_one_id_are_reported_not_just_resolved() {
+        let vault = TempVault::new();
+        let doc = vault.create_note("Growth", None).unwrap();
+        let id = doc.summary.id.clone();
+        vault.save_note(&id, "Growth", "the version here").unwrap();
+
+        let original = vault.root().join(vault.relative_for(&id).unwrap());
+        let copy = vault.root().join("Growth (conflicted copy).md");
+        fs::write(&copy, fs::read_to_string(&original).unwrap()).unwrap();
+
+        vault.list_notes().unwrap();
+        let clashes = vault.id_clashes();
+        assert_eq!(clashes.len(), 1, "the clash was not reported");
+        assert_eq!(clashes[0].id, id);
+        assert!(clashes[0].opened.ends_with("Growth.md"));
+        assert!(clashes[0].shadowed.contains("conflicted copy"));
+
+        // Both files still on disk. Reporting is not deleting.
+        assert!(original.exists() && copy.exists());
+    }
+
+    #[test]
+    fn a_vault_with_no_clashes_reports_none() {
+        let vault = TempVault::new();
+        vault.create_note("One", None).unwrap();
+        vault.create_note("Two", None).unwrap();
+        vault.list_notes().unwrap();
+        assert!(vault.id_clashes().is_empty());
+    }
+
+    // ---- v0.3: filename collisions -----------------------------------------
+
+    #[test]
+    fn a_title_differing_only_in_case_gets_its_own_file() {
+        // NTFS and APFS treat these as one file; ext4 as two. Whichever this
+        // test runs on, the vault must be one that opens on all of them.
+        let vault = TempVault::new();
+        let first = vault.create_note("Growth", None).unwrap();
+        let second = vault.create_note("growth", None).unwrap();
+
+        let a = vault.relative_for(&first.summary.id).unwrap();
+        let b = vault.relative_for(&second.summary.id).unwrap();
+        assert_ne!(
+            a.to_lowercase(),
+            b.to_lowercase(),
+            "two notes share a filename once case is folded: {a} and {b}"
+        );
+        // And both still open as themselves.
+        assert_eq!(
+            vault.read_note(&first.summary.id).unwrap().summary.title,
+            "Growth"
+        );
+        assert_eq!(
+            vault.read_note(&second.summary.id).unwrap().summary.title,
+            "growth"
+        );
+    }
+
+    #[test]
+    fn a_unicode_title_keeps_its_characters() {
+        // A materials vault is full of these. Dropping them would turn
+        // "Sb₂Se₃ growth" into "growth" and lose the note in a list.
+        let vault = TempVault::new();
+        let note = vault.create_note("Sb₂Se₃ growth — α phase", None).unwrap();
+        let relative = vault.relative_for(&note.summary.id).unwrap();
+        assert!(
+            relative.contains("Sb₂Se₃"),
+            "characters were stripped: {relative}"
+        );
+        assert_eq!(
+            vault.read_note(&note.summary.id).unwrap().summary.title,
+            "Sb₂Se₃ growth — α phase"
+        );
+    }
+
     #[test]
     fn a_conflicted_copy_hides_neither_version() {
         let vault = TempVault::new();

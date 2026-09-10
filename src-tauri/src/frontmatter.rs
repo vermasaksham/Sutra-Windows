@@ -263,6 +263,20 @@ impl SourceMeta {
 /// with none of this software installed.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct Citation {
+    /// This piece of evidence's own ULID — its identity, not the source's.
+    ///
+    /// The distinction v0.3 freezes. `id` says *which paper*; `eid` says
+    /// *which reading of it*. Without one, two records of the same source at
+    /// the same page are indistinguishable, nothing outside the note can point
+    /// at a particular quote, and a citation cannot be told apart from a
+    /// second citation of the same work — so evidence could never become a
+    /// thing in its own right without changing the file format again.
+    ///
+    /// `#[serde(default)]` and skipped when empty, so a v0.2 note that has
+    /// none stays valid and unchanged on disk. One is minted when a citation
+    /// is written through the app; nothing rewrites a vault to add them.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub eid: String,
     /// The source note's ULID. Not a Zotero key: a source is a note in the
     /// vault, so a citation keeps working whether or not Zotero ever exists
     /// again on this machine.

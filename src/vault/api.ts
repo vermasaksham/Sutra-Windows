@@ -184,8 +184,24 @@ export type MigrationPlan = {
   skipped: string[];
 };
 
+/**
+ * Two files claiming one note id.
+ *
+ * Reported, never resolved automatically: both files stay on disk, and which
+ * of two versions of somebody's research to discard is theirs to decide.
+ */
+export type IdClash = {
+  id: string;
+  /** The file Sutra opens for this id. */
+  opened: string;
+  /** The file that is on disk, listed, and unreachable by id. */
+  shadowed: string;
+};
+
 export const migrationApi = {
   needed: () => invoke<boolean>("migration_needed"),
+  /** Files claiming an id another file already claims. Empty is normal. */
+  idClashes: () => invoke<IdClash[]>("id_clashes"),
   plan: () => invoke<MigrationPlan>("migration_plan"),
   /** Copies every note first. Resolves the number of files moved. */
   run: () => invoke<number>("migrate_vault"),

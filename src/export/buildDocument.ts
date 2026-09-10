@@ -1,4 +1,5 @@
 import type { JSONContent } from "@tiptap/core";
+import { parseBody } from "./parseBody";
 import { positionOf, resolved } from "../editor/citation/citationStore";
 import { emphasisRuns, marker } from "../notes/citationStyle";
 import { mathToImage } from "./mathToImage";
@@ -355,13 +356,56 @@ function intrinsicSize(
   });
 }
 
+/**
+ * One note in a document, in the order it should appear.
+ *
+ * The unit of export is a note body as markdown, not an editor: a document is an
+ * ordered list of these, and the list happens to have one entry today. Nothing
+ * here reads the vault or decides what the order should be — that decision
+ * belongs to whatever assembles the list, and no such thing exists yet.
+ */
+export type Section = {
+  title: string;
+  /** The body as markdown, exactly as the note's file holds it. */
+  body: string;
+  /**
+   * Write the title as a level-1 heading above the body.
+   *
+   * Off for a single-note export, where the title is already the document's
+   * title and repeating it would print it twice.
+   */
+  heading?: boolean;
+};
+
+/**
+ * Build a document from an ordered list of note bodies.
+ *
+ * The first section's title is the document's title. Every section's markdown is
+ * parsed with the editor's own conversion (see `parseBody`) and walked into the
+ * same flat block list, so a document of five notes is one continuous document
+ * rather than five stitched-together ones — which is what a chapter has to be.
+ *
+ * Deliberately not here: anything that decides *which* notes, or in what order.
+ * A `sequence:` in frontmatter, transcluding one note into another, a chapter
+ * builder — none of those exist, and none of them will need this function to
+ * change when they do.
+ */
 export async function buildDocument(
-  title: string,
-  doc: JSONContent,
+  sections: Section[],
   citedRefs: string[],
 ): Promise<ExportDocument> {
   const blocks: Block[] = [];
-  await walk(doc, blocks);
+  for (const section of sections) {
+    if (section.heading) {
+      blocks.push({
+        kind: "heading",
+        level: 1,
+        runs: [{ text: section.title }],
+      });
+    }
+    await walk(parseBody(section.body), blocks);
+  }
+  const title = sections[0]?.title ?? "";
 
   // Split each entry into runs so italics survive into Word.
   //

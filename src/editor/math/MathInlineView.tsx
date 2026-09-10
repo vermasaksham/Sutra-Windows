@@ -1,12 +1,21 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { NodeViewWrapper, type NodeViewProps } from "@tiptap/react";
 import { renderMath } from "./render";
+import { caretAt, isBlank } from "./source";
 
 /**
  * Inline maths: rendered by default, raw LaTeX when you click it.
  *
  * An empty formula still shows something clickable — a freshly inserted node
  * would otherwise be a zero-width gap the user cannot find again.
+ *
+ * A *blank* one opens straight into its input, which is what makes inserting
+ * one from the toolbar work at all: the alternative is dropping an empty node
+ * mid-sentence and expecting the author to find and click a few pixels of
+ * nothing. The block view has opened this way since 0.2.0 for exactly the same
+ * reason; this is the same rule applied to the inline node, and `isBlank`
+ * rather than `latex === ""` so a pre-filled wrapper like `\ce{}` — which
+ * renders to almost nothing — counts as blank too.
  */
 export default function MathInlineView({
   node,
@@ -16,14 +25,21 @@ export default function MathInlineView({
   getPos,
 }: NodeViewProps) {
   const latex = (node.attrs.latex as string) ?? "";
-  const [editing, setEditing] = useState(false);
+  const [editing, setEditing] = useState(isBlank(latex));
   const [draft, setDraft] = useState(latex);
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => setDraft(latex), [latex]);
 
   useEffect(() => {
-    if (editing) inputRef.current?.focus();
+    const input = inputRef.current;
+    if (!editing || !input) return;
+    input.focus();
+    // Inside the first empty pair of braces, so choosing an inline chemical
+    // formula puts the caret where the reaction goes rather than after the
+    // wrapper the author did not type.
+    const caret = caretAt(input.value);
+    input.setSelectionRange(caret, caret);
   }, [editing]);
 
   // Re-rendering KaTeX on every keystroke of the surrounding document would be

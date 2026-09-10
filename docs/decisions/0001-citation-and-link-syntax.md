@@ -1,6 +1,6 @@
 # Link and citation syntax in the markdown
 
-Status: **decided for v0.2.1**, with the migration deferred to v0.3.
+Status: **frozen at v0.3.** Links resolved; citation serialization settled and unchanged.
 
 ## The problem
 
@@ -15,7 +15,7 @@ human-understandable files".
 
 ## Links: `[[ULID|Title]]`
 
-**Decision: parse it in v0.2.1, write it in v0.3.**
+**Decision: parse it in v0.2.1, write it from v0.3. Both now done.**
 
 The id stays first and stays authoritative. Everything after the pipe is
 display text with no power to resolve anything, so a stale title can never send
@@ -35,11 +35,27 @@ Checked before choosing it:
   Two notes called "Growth" produce two links carrying the same display text
   and different ids, which is correct.
 
-Writing it is a rewrite of every note in the vault, so it needs a preview, a
-backup and a way back — the same treatment the `parent:` migration got. That is
-v0.3 work. Reading it a release early is what makes that migration safe: a vault
-edited by a newer build, or by hand in Obsidian, must not read as broken text
-in v0.2.1.
+**How v0.3 writes it, and why there is no vault-wide migration.**
+
+Links gain their titles _as notes are saved_, from `renderMarkdown`. A note you
+edit gets readable links; a note you never open is never touched. There is no
+sweep, no preview step and no backup, because there is no bulk operation to
+preview — which is a better answer than the migration originally planned, and
+it falls out of the fact that the id was always the only thing that resolved.
+
+Three consequences, all deliberate:
+
+- **Renaming a note refreshes every link to it** the next time each citing note
+  is saved. The alias is display text with no authority, so a stale one is
+  harmless until then, and correct afterwards.
+- **A missing target keeps its bare `[[id]]`.** No title is invented for a note
+  that is not there.
+- **A title containing `]` or `|` keeps the plain form**, because writing it
+  would produce markdown that reads back as something else.
+
+The cost is that saving a v0.2 note changes bytes the author did not type. That
+is a real change and is called out in the release notes; it is additive, it
+never alters what a link points at, and it is the whole point of the feature.
 
 ## Citations: unchanged, and here is why
 

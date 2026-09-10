@@ -175,6 +175,23 @@ export const SLASH_ITEMS: SlashItem[] = [
         .run(),
   },
   {
+    id: "math-inline",
+    title: "Inline equation",
+    hint: "Maths inside the sentence",
+    keywords: ["latex", "katex", "formula", "$", "inline", "maths", "math"],
+    icon: MathIcon,
+    group: "Blocks",
+    run: (editor, range) =>
+      editor
+        .chain()
+        .focus()
+        .deleteRange(range)
+        // Empty, like the display block: the node opens into its input, so the
+        // next keystroke goes into the formula rather than into the prose.
+        .insertContent({ type: "mathInline", attrs: { latex: "" } })
+        .run(),
+  },
+  {
     id: "math",
     title: "Equation",
     hint: "Display maths block",
