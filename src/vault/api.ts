@@ -23,7 +23,8 @@ export type NoteType =
   | "task"
   | "daily"
   | "source"
-  | "view";
+  | "view"
+  | "chapter";
 
 /**
  * What each kind is called, including the ones the picker does not offer.
@@ -40,6 +41,7 @@ export const TYPE_LABELS: Record<NoteType, string> = {
   daily: "Daily",
   source: "Source",
   view: "View",
+  chapter: "Chapter",
 };
 
 /**
@@ -49,6 +51,11 @@ export const TYPE_LABELS: Record<NoteType, string> = {
  * someone has written; a view is a saved query, and a note turned into one by
  * a dropdown would be a view with nothing to run. Views are made by saving a
  * query, which is the only way to get one that means anything.
+ *
+ * `chapter` is here, and the difference is worth stating: an empty chapter is a
+ * sensible thing to have, unlike an empty view. It also gives the path for "the
+ * note I have been writing is actually chapter 3" — the body is kept and the
+ * notes get added afterwards.
  */
 export const NOTE_TYPES: ReadonlyArray<{ value: NoteType; label: string }> = [
   { value: "standard", label: "Note" },
@@ -61,6 +68,7 @@ export const NOTE_TYPES: ReadonlyArray<{ value: NoteType; label: string }> = [
   { value: "task", label: "Task" },
   { value: "daily", label: "Daily" },
   { value: "source", label: "Source" },
+  { value: "chapter", label: "Chapter" },
 ];
 
 /** What a source note records about the paper it stands for. */

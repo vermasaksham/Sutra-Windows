@@ -144,6 +144,46 @@ struct Relocated {
     originals: Vec<String>,
 }
 
+/// One position in a chapter, resolved against the vault.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ChapterEntry {
+    /// The id the chapter's `sequence:` holds at this position.
+    pub id: String,
+    /// The note that id names, or `None` when the vault no longer has it.
+    ///
+    /// `None` is a real answer, not an absence of one. The chapter still claims
+    /// this note belongs here, and only the author can say whether the right fix
+    /// is to remove the entry or to restore the note from the trash.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub note: Option<NoteSummary>,
+}
+
+/// A chapter flattened for export: one title and body per section, in order.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ChapterSection {
+    pub id: String,
+    pub title: String,
+    /// The note body, as markdown, exactly as the file holds it.
+    pub body: String,
+    /// Whether to write the title as a heading above the body. False for the
+    /// chapter's own section, whose title is the document's title.
+    pub heading: bool,
+}
+
+/// A chapter that names a given note, and where in it.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ChapterUse {
+    pub id: String,
+    pub title: String,
+    /// Zero-based position in the chapter's sequence.
+    pub position: usize,
+    /// How many notes the chapter holds, so "3 of 12" can be shown.
+    pub of: usize,
+}
+
 /// Two files claiming one note id.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -1149,6 +1189,145 @@ impl Vault {
             .into_iter()
             .filter(|n| n.note_type == NoteType::View)
             .collect())
+    }
+
+    // ---- chapters ------------------------------------------------------------
+
+    /// Create a chapter note in a folder.
+    ///
+    /// An ordinary note with a type and an empty sequence. Its body is not
+    /// wasted: a chapter shows its notes rather than its body, but the body is
+    /// still where the argument the chapter is making gets written down, and it
+    /// still exports ahead of the notes it assembles.
+    pub fn create_chapter(&self, title: &str, folder: Option<String>) -> Result<NoteDoc> {
+        let doc = self.create_note(title, folder)?;
+        let summary = self.edit(&doc.summary.id, |fm| {
+            fm.note_type = NoteType::Chapter;
+        })?;
+        Ok(NoteDoc {
+            summary,
+            body: String::new(),
+            adopted: false,
+        })
+    }
+
+    /// Replace the notes a chapter assembles. Makes the note a chapter if it
+    /// was not one.
+    ///
+    /// The caller sends the complete order, for the same reason `set_meta` does:
+    /// a patch would have to distinguish "move this one" from "remove this one"
+    /// over an IPC boundary, and the whole list is a dozen ids.
+    ///
+    /// Nothing is validated away. An id naming a note that has been deleted is
+    /// stored as given and reported by [`Vault::chapter`], because a chapter is
+    /// a claim about what belongs in it and Sutra deleting that claim would be
+    /// deciding something about somebody's thesis. Duplicates are kept for the
+    /// same reason.
+    pub fn set_sequence(&self, id: &str, sequence: Vec<String>) -> Result<NoteSummary> {
+        self.edit(id, |fm| {
+            fm.note_type = NoteType::Chapter;
+            fm.sequence = sequence.clone();
+        })
+    }
+
+    /// What a chapter assembles, in order, resolved against the vault.
+    ///
+    /// Every position in the sequence comes back, including the ones whose id no
+    /// longer names anything. That is the point: a note deleted out from under a
+    /// chapter is something the author has to see, and a list that silently
+    /// closed the gap would be a list that lies about what the chapter said.
+    pub fn chapter(&self, id: &str) -> Result<Vec<ChapterEntry>> {
+        let sequence = self.sequence_of(id)?;
+        // One listing, not one read per entry: a chapter of forty notes would
+        // otherwise be forty directory walks.
+        let known: HashMap<String, NoteSummary> = self
+            .list_notes()?
+            .into_iter()
+            .map(|note| (note.id.clone(), note))
+            .collect();
+
+        Ok(sequence
+            .into_iter()
+            .map(|id| ChapterEntry {
+                note: known.get(&id).cloned(),
+                id,
+            })
+            .collect())
+    }
+
+    /// The ids a chapter names, in order, straight from its frontmatter.
+    ///
+    /// Empty for a note that is not a chapter, which is not an error: the note is
+    /// still a note and still says what it says.
+    pub fn sequence_of(&self, id: &str) -> Result<Vec<String>> {
+        let relative = self.relative_for(id)?;
+        let contents = fs::read_to_string(self.root.join(&relative))?;
+        let (parsed, _) = frontmatter::split(&contents)?;
+        Ok(parsed.map(|fm| fm.sequence).unwrap_or_default())
+    }
+
+    /// A chapter as an ordered list of titles and bodies, ready to export.
+    ///
+    /// The chapter's own title and body come first, then each note it names. The
+    /// shape is what `buildDocument` already takes — an ordered list of note
+    /// bodies as markdown — which is why the export path was built that way in
+    /// v0.3 before anything could assemble one.
+    ///
+    /// A position whose note is gone is skipped here rather than reported: an
+    /// exported document cannot contain a hole, and `chapter` is the call that
+    /// exists to say what is missing before anybody exports it.
+    pub fn chapter_sections(&self, id: &str) -> Result<Vec<ChapterSection>> {
+        let own = self.read_note(id)?;
+        let mut sections = vec![ChapterSection {
+            id: own.summary.id,
+            title: own.summary.title,
+            body: own.body,
+            heading: false,
+        }];
+
+        for entry in self.chapter(id)? {
+            let Some(note) = entry.note else { continue };
+            let Ok(doc) = self.read_note(&note.id) else {
+                continue;
+            };
+            sections.push(ChapterSection {
+                id: doc.summary.id,
+                title: doc.summary.title,
+                body: doc.body,
+                heading: true,
+            });
+        }
+        Ok(sections)
+    }
+
+    /// Every chapter note in the vault, wherever it sits.
+    pub fn list_chapters(&self) -> Result<Vec<NoteSummary>> {
+        Ok(self
+            .list_notes()?
+            .into_iter()
+            .filter(|n| n.note_type == NoteType::Chapter)
+            .collect())
+    }
+
+    /// The chapters that name this note, and where in each.
+    ///
+    /// Answered by reading the chapters rather than the index, because it is
+    /// asked when a note is open — one note at a time, by a person — and the
+    /// number of chapters in a thesis is a dozen.
+    pub fn chapters_using(&self, id: &str) -> Result<Vec<ChapterUse>> {
+        let mut out = Vec::new();
+        for chapter in self.list_chapters()? {
+            let sequence = self.sequence_of(&chapter.id)?;
+            if let Some(at) = sequence.iter().position(|held| held == id) {
+                out.push(ChapterUse {
+                    id: chapter.id,
+                    title: chapter.title,
+                    position: at,
+                    of: sequence.len(),
+                });
+            }
+        }
+        Ok(out)
     }
 
     /// The source note already standing for this Zotero item, if there is one.
@@ -4801,6 +4980,254 @@ mod tests {
             fs::read_to_string(&path).unwrap(),
             legacy,
             "opening a v0.2 note rewrote it"
+        );
+    }
+
+    // ---- v0.4: chapters ----------------------------------------------------
+
+    #[test]
+    fn a_chapter_is_a_note_that_names_other_notes_in_order() {
+        let vault = TempVault::new();
+        let a = vault.create_note("Growth", None).unwrap();
+        let b = vault.create_note("Optics", None).unwrap();
+        let chapter = vault.create_chapter("3. Sb2Se3", None).unwrap();
+
+        assert_eq!(chapter.summary.note_type, NoteType::Chapter);
+        vault
+            .set_sequence(
+                &chapter.summary.id,
+                vec![b.summary.id.clone(), a.summary.id.clone()],
+            )
+            .unwrap();
+
+        let entries = vault.chapter(&chapter.summary.id).unwrap();
+        let titles: Vec<&str> = entries
+            .iter()
+            .map(|e| e.note.as_ref().unwrap().title.as_str())
+            .collect();
+        assert_eq!(
+            titles,
+            vec!["Optics", "Growth"],
+            "the chapter's order is the order it was given, not the notes' own"
+        );
+    }
+
+    /// The chapter holds ids, so renaming and moving a note cannot lose its place.
+    ///
+    /// This is the same property a link has, for the same reason, and it is the
+    /// whole argument for `sequence:` being a list of ids rather than a folder's
+    /// contents or a list of titles.
+    #[test]
+    fn renaming_and_moving_a_note_keeps_its_place_in_a_chapter() {
+        let vault = TempVault::new();
+        let note = vault.create_note("Growth", folder("Drafts")).unwrap();
+        let id = note.summary.id.clone();
+        let chapter = vault.create_chapter("3. Sb2Se3", None).unwrap();
+        vault
+            .set_sequence(&chapter.summary.id, vec![id.clone()])
+            .unwrap();
+
+        vault.save_note(&id, "Growth of the films", "Prose.").unwrap();
+        vault.move_note(&id, "Chapter 3").unwrap();
+
+        let entries = vault.chapter(&chapter.summary.id).unwrap();
+        assert_eq!(entries.len(), 1);
+        let note = entries[0].note.as_ref().expect("still resolves");
+        assert_eq!(note.id, id);
+        assert_eq!(note.title, "Growth of the films");
+        assert_eq!(note.folder, "Chapter 3");
+    }
+
+    /// A note deleted out from under a chapter is reported, not dropped.
+    ///
+    /// The chapter still claims the note belongs there, and only the author can
+    /// say whether the fix is to remove the entry or restore the note. A list
+    /// that quietly closed the gap would be a list that lies about what the
+    /// chapter said — and it would do it at the exact moment somebody is checking
+    /// whether their chapter is complete.
+    #[test]
+    fn a_chapter_reports_a_note_that_is_gone_rather_than_dropping_it() {
+        let vault = TempVault::new();
+        let a = vault.create_note("Growth", None).unwrap();
+        let b = vault.create_note("Optics", None).unwrap();
+        let chapter = vault.create_chapter("3. Sb2Se3", None).unwrap();
+        vault
+            .set_sequence(
+                &chapter.summary.id,
+                vec![a.summary.id.clone(), b.summary.id.clone()],
+            )
+            .unwrap();
+
+        vault.delete_note(&a.summary.id).unwrap();
+
+        let entries = vault.chapter(&chapter.summary.id).unwrap();
+        assert_eq!(entries.len(), 2, "the position must still be there");
+        assert_eq!(entries[0].id, a.summary.id);
+        assert!(
+            entries[0].note.is_none(),
+            "a deleted note must resolve to nothing rather than to another note"
+        );
+        assert!(entries[1].note.is_some());
+
+        // And the claim survives on disk, so restoring the note restores the
+        // chapter without the author having to remember what was in it.
+        assert_eq!(
+            vault.sequence_of(&chapter.summary.id).unwrap(),
+            vec![a.summary.id.clone(), b.summary.id.clone()]
+        );
+    }
+
+    /// One note may belong to two chapters, and twice to one.
+    #[test]
+    fn a_note_may_appear_in_two_chapters_and_twice_in_one() {
+        let vault = TempVault::new();
+        let methods = vault.create_note("Methods", None).unwrap();
+        let three = vault.create_chapter("3. Growth", None).unwrap();
+        let four = vault.create_chapter("4. Optics", None).unwrap();
+
+        vault
+            .set_sequence(
+                &three.summary.id,
+                vec![methods.summary.id.clone(), methods.summary.id.clone()],
+            )
+            .unwrap();
+        vault
+            .set_sequence(&four.summary.id, vec![methods.summary.id.clone()])
+            .unwrap();
+
+        assert_eq!(vault.chapter(&three.summary.id).unwrap().len(), 2);
+        assert_eq!(vault.chapter(&four.summary.id).unwrap().len(), 1);
+
+        let used = vault.chapters_using(&methods.summary.id).unwrap();
+        assert_eq!(used.len(), 2, "both chapters should be reported");
+        let titles: Vec<&str> = used.iter().map(|u| u.title.as_str()).collect();
+        assert!(titles.contains(&"3. Growth") && titles.contains(&"4. Optics"));
+    }
+
+    /// Exporting a chapter is the chapter's own body followed by its notes.
+    #[test]
+    fn a_chapter_exports_as_its_own_body_then_its_notes_in_order() {
+        let vault = TempVault::new();
+        let a = vault.create_note("Growth", None).unwrap();
+        vault
+            .save_note(&a.summary.id, "Growth", "How the films were made.")
+            .unwrap();
+        let b = vault.create_note("Optics", None).unwrap();
+        vault
+            .save_note(&b.summary.id, "Optics", "What they absorbed.")
+            .unwrap();
+
+        let chapter = vault.create_chapter("3. Sb2Se3", None).unwrap();
+        vault
+            .save_note(&chapter.summary.id, "3. Sb2Se3", "The opening argument.")
+            .unwrap();
+        vault
+            .set_sequence(
+                &chapter.summary.id,
+                vec![a.summary.id.clone(), b.summary.id.clone()],
+            )
+            .unwrap();
+
+        let sections = vault.chapter_sections(&chapter.summary.id).unwrap();
+        assert_eq!(sections.len(), 3);
+
+        assert_eq!(sections[0].title, "3. Sb2Se3");
+        assert_eq!(sections[0].body.trim(), "The opening argument.");
+        assert!(
+            !sections[0].heading,
+            "the chapter's own title is the document's title, not a heading in it"
+        );
+
+        assert_eq!(sections[1].title, "Growth");
+        assert!(sections[1].heading);
+        assert_eq!(sections[2].title, "Optics");
+        assert_eq!(sections[2].body.trim(), "What they absorbed.");
+    }
+
+    /// An export cannot contain a hole, so a missing note is skipped there —
+    /// which is exactly why `chapter` reports it separately.
+    #[test]
+    fn exporting_skips_a_missing_note_that_the_chapter_still_reports() {
+        let vault = TempVault::new();
+        let a = vault.create_note("Growth", None).unwrap();
+        let b = vault.create_note("Optics", None).unwrap();
+        let chapter = vault.create_chapter("3. Sb2Se3", None).unwrap();
+        vault
+            .set_sequence(
+                &chapter.summary.id,
+                vec![a.summary.id.clone(), b.summary.id.clone()],
+            )
+            .unwrap();
+        vault.delete_note(&a.summary.id).unwrap();
+
+        let sections = vault.chapter_sections(&chapter.summary.id).unwrap();
+        assert_eq!(
+            sections.len(),
+            2,
+            "the chapter itself plus the one note that is still there"
+        );
+        assert_eq!(sections[1].title, "Optics");
+
+        assert!(
+            vault.chapter(&chapter.summary.id).unwrap()[0].note.is_none(),
+            "and the missing one is still reported where a person can see it"
+        );
+    }
+
+    /// A v0.3 note with no `sequence:` is not a chapter and is read unchanged.
+    #[test]
+    fn a_note_without_a_sequence_is_read_unchanged() {
+        let vault = TempVault::new();
+        let note = vault.create_note("Ordinary", None).unwrap();
+        let path = vault.path_for(&note.summary.id).unwrap();
+        let before = fs::read_to_string(&path).unwrap();
+
+        assert!(
+            vault.sequence_of(&note.summary.id).unwrap().is_empty(),
+            "no sequence is an empty one, not an error"
+        );
+        assert!(vault.chapter(&note.summary.id).unwrap().is_empty());
+        assert_eq!(
+            fs::read_to_string(&path).unwrap(),
+            before,
+            "reading a chapter's sequence must not rewrite the note"
+        );
+        assert!(!before.contains("sequence"), "and nothing writes an empty one");
+    }
+
+    /// Setting a sequence on an ordinary note makes it a chapter.
+    #[test]
+    fn setting_a_sequence_makes_a_note_a_chapter() {
+        let vault = TempVault::new();
+        let note = vault.create_note("Was ordinary", None).unwrap();
+        let member = vault.create_note("A note", None).unwrap();
+
+        let summary = vault
+            .set_sequence(&note.summary.id, vec![member.summary.id.clone()])
+            .unwrap();
+        assert_eq!(summary.note_type, NoteType::Chapter);
+        assert_eq!(
+            vault.list_chapters().unwrap().len(),
+            1,
+            "and it is listed as one"
+        );
+    }
+
+    /// Emptying a chapter's sequence writes no key rather than an empty list.
+    #[test]
+    fn an_emptied_sequence_leaves_no_key_in_the_file() {
+        let vault = TempVault::new();
+        let member = vault.create_note("A note", None).unwrap();
+        let chapter = vault.create_chapter("3. Sb2Se3", None).unwrap();
+        vault
+            .set_sequence(&chapter.summary.id, vec![member.summary.id.clone()])
+            .unwrap();
+        vault.set_sequence(&chapter.summary.id, Vec::new()).unwrap();
+
+        let raw = fs::read_to_string(vault.path_for(&chapter.summary.id).unwrap()).unwrap();
+        assert!(
+            !raw.contains("sequence"),
+            "an empty sequence should be absent, not `sequence: []`: {raw}"
         );
     }
 

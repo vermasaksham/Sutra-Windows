@@ -883,6 +883,77 @@ pub fn save_view(state: State<'_, AppState>, id: String, query: Query) -> Result
     })
 }
 
+// ---- chapters ----------------------------------------------------------------
+
+/// Every chapter note in the vault.
+#[tauri::command]
+pub fn list_chapters(state: State<'_, AppState>) -> Result<Vec<NoteSummary>> {
+    state.with_vault(|vault| vault.list_chapters())
+}
+
+/// Create a chapter note.
+#[tauri::command]
+pub fn create_chapter(
+    state: State<'_, AppState>,
+    title: String,
+    folder: Option<String>,
+) -> Result<NoteDoc> {
+    state.with_both(|vault, index| {
+        let doc = vault.create_chapter(&title, folder.clone())?;
+        index.upsert(&doc.summary, &doc.body)?;
+        Ok(doc)
+    })
+}
+
+/// What a chapter assembles, in order.
+///
+/// Entries whose note is gone come back with no note rather than being left out,
+/// so the panel can say a position is empty instead of quietly renumbering.
+#[tauri::command]
+pub fn read_chapter(
+    state: State<'_, AppState>,
+    id: String,
+) -> Result<Vec<crate::vault::ChapterEntry>> {
+    state.with_vault(|vault| vault.chapter(&id))
+}
+
+/// Replace the notes a chapter assembles, in order.
+#[tauri::command]
+pub fn save_sequence(
+    state: State<'_, AppState>,
+    id: String,
+    sequence: Vec<String>,
+) -> Result<NoteSummary> {
+    state.with_both(|vault, index| {
+        let summary = vault.set_sequence(&id, sequence.clone())?;
+        let doc = vault.read_note(&id)?;
+        index.upsert(&summary, &doc.body)?;
+        Ok(summary)
+    })
+}
+
+/// A chapter flattened for export: its own title and body, then each note it
+/// names, in order.
+///
+/// One call rather than one per note, because a chapter of forty notes over an
+/// IPC boundary is forty round trips for a document nobody is reading yet.
+#[tauri::command]
+pub fn chapter_sections(
+    state: State<'_, AppState>,
+    id: String,
+) -> Result<Vec<crate::vault::ChapterSection>> {
+    state.with_vault(|vault| vault.chapter_sections(&id))
+}
+
+/// The chapters that name this note, and where in each.
+#[tauri::command]
+pub fn chapters_using(
+    state: State<'_, AppState>,
+    id: String,
+) -> Result<Vec<crate::vault::ChapterUse>> {
+    state.with_vault(|vault| vault.chapters_using(&id))
+}
+
 // ---- context -----------------------------------------------------------------
 
 /// Notes near this one, each with a line saying why.
