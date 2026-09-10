@@ -2,6 +2,12 @@
 
 Frozen at v0.3.
 
+> **Clarified at v0.4, not weakened.** Ownership and access are different
+> things: Sutra may read a Zotero-managed PDF, and reading transfers nothing. The
+> file stays externally owned, and Sutra never moves, renames, modifies, deletes
+> or duplicates it. See
+> [`../decisions/0003-pdf-ownership-and-access.md`](../decisions/0003-pdf-ownership-and-access.md).
+
 ## The boundary
 
 > Zotero stores the literature. Sutra stores what the researcher thinks about
