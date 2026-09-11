@@ -5,11 +5,16 @@ only the project's owner can create.
 
 ## Cutting a release
 
-1. Bump the version in the three files that carry it — `package.json`,
-   `src-tauri/tauri.conf.json`, `src-tauri/Cargo.toml`. They must agree; the
-   release workflow refuses to publish if they do not, because an installer
-   whose internal version differs from the tag on its download page installs as
-   one version and reports itself as another.
+1. Bump the version with `npm version X.Y.Z --no-git-tag-version`, which does
+   `package.json` and `package-lock.json`, then by hand in
+   `src-tauri/tauri.conf.json`, `src-tauri/Cargo.toml` and the `sutra` entry in
+   `src-tauri/Cargo.lock`. The lockfiles are not optional: `npm ci` and a
+   `--locked` cargo build both refuse a lockfile that disagrees with its
+   manifest. The release workflow refuses to publish unless the first three
+   agree with the tag, because an installer whose internal version differs from
+   the tag on its download page installs as one version and reports itself as
+   another. `the_version_shown_is_the_version_the_installer_carries` catches
+   the same disagreement at commit time.
 2. Write `docs/releases/vX.Y.Z.md`. It becomes the release notes verbatim.
    Without it the workflow falls back to generated notes and says so.
 3. Either push a tag, or run the **Release** workflow from the Actions tab and
@@ -19,10 +24,23 @@ only the project's owner can create.
    git tag v0.2.0 && git push origin v0.2.0
    ```
 
-   The workflow runs the full Windows checks, builds the installers, and
-   attaches them to a public release. The dispatch route exists because pushing
-   a tag needs push rights on tag refs, which not everyone who should be able
-   to cut a release has.
+   The workflow runs the full Windows checks, builds the installer, and
+   attaches it to a public release. The dispatch route exists because pushing a
+   tag needs push rights on tag refs, which not everyone who should be able to
+   cut a release has.
+
+## One installer
+
+From v0.3.0 a release carries `Sutra_<version>_x64-setup.exe` and nothing else.
+The `.msi` was dropped because two installers for one application is a choice
+the person downloading has no basis to make, and this is a personal project
+with no fleet deployment to serve — which is the one thing an `.msi` is
+genuinely better at. `--bundles nsis` in the build step is what decides it;
+`tauri.conf.json` says the same so a local `npm run tauri:build` produces what
+CI does.
+
+Bringing the `.msi` back is adding `msi` in both places. Nothing else in the
+release path knows the difference.
 
 ## Not done yet: code signing
 

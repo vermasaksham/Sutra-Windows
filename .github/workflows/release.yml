@@ -98,7 +98,7 @@ jobs:
             notes_args=(--generate-notes)
           fi
           gh release create "$TAG" \
-            installers/msi/*.msi installers/nsis/*.exe \
+            installers/nsis/*.exe \
             --target "$GITHUB_SHA" \
             --title "Sutra $TAG" \
             "${notes_args[@]}"
