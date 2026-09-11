@@ -8,8 +8,9 @@ files on disk, and LaTeX maths and chemical equations are first-class.
 
 **[Download the latest release for Windows](https://github.com/vermasaksham/Sutra-Windows/releases/latest)**
 
-Take `Sutra_<version>_x64_en-US.msi` and run it. The `_x64-setup.exe` beside it
-is the same application with the other installer; either is fine.
+Take `Sutra_<version>_x64-setup.exe` and run it. It is the only installer; a
+personal project does not need two of them, and one file on the page is one
+fewer decision for somebody who just wants to try the app.
 
 The installer is not code-signed yet, so Windows SmartScreen warns the first
 time: **More info → Run anyway**. Installing over an earlier version keeps

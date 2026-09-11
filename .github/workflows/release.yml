@@ -84,7 +84,22 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ steps.release.outputs.tag }}
+        shell: bash
         run: |
+          # Found rather than spelled out, because where it sits is decided in
+          # the other workflow: `upload-artifact` roots an artifact at the least
+          # common ancestor of the files it matched, so the single `nsis/*.exe`
+          # path there puts the installer at the artifact's root and not under
+          # `nsis/`. A hard-coded path encodes that rule in a second file, where
+          # it goes stale silently and fails here — fifteen minutes into a
+          # release, after the whole Windows suite has passed.
+          mapfile -t found < <(find installers -name '*.exe' -type f | sort)
+          if [ "${#found[@]}" -ne 1 ]; then
+            echo "::error::expected one .exe in the artifact, found ${#found[@]}"
+            find installers -type f | sed 's/^/  /'
+            exit 1
+          fi
+
           # `--target` creates the tag when it does not exist yet, which is the
           # dispatch case, and is a no-op agreeing with reality when the tag
           # push is what started this.
@@ -98,7 +113,7 @@ jobs:
             notes_args=(--generate-notes)
           fi
           gh release create "$TAG" \
-            installers/msi/*.msi installers/nsis/*.exe \
+            "${found[0]}" \
             --target "$GITHUB_SHA" \
             --title "Sutra $TAG" \
             "${notes_args[@]}"
