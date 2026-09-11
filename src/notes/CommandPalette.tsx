@@ -199,13 +199,16 @@ export default function CommandPalette({
       });
     }
 
-    // Named for what it is rather than for Zotero, because someone who has
-    // not connected a library yet is looking for "cite", not for a product.
+    // It was called "Cite a paper", which is what people wanted and not what
+    // this does: it brings a paper into the vault, and the citing is `@` in
+    // the body. Someone who ran this and found no citation in their sentence
+    // concluded that citing was broken. Named for its actual effect now, with
+    // the hint saying where citing lives.
     out.push({
       id: "zotero",
-      label: "Cite a paper — search Zotero",
+      label: "Add paper from Zotero",
       group: "Create",
-      hint: shortcut(MOD, SHIFT, "Z"),
+      hint: `${shortcut(MOD, SHIFT, "Z")} · to cite in a sentence, type @`,
       run: onOpenZotero,
     });
 

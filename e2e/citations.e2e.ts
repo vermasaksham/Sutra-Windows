@@ -76,6 +76,52 @@ test.describe("citing", () => {
     await expect(citation).toContainText("ZZZZ0000");
   });
 
+  test("a failed import says so instead of doing nothing", async ({ page }) => {
+    await useVault(page, {
+      notes: [{ id: NOTE, title: "Growth", body: "Prior work exists." }],
+      library: LIBRARY,
+      importFails: true,
+    });
+    await page.goto("/");
+
+    await page.locator(".sutra-prose p").first().click();
+    await page.keyboard.press("End");
+    await page.keyboard.type(" @ribbons");
+    await expect(
+      page.getByRole("listbox", { name: "Cite a reference" }),
+    ).toBeVisible();
+    await page.keyboard.press("Enter");
+
+    // The menu closes on Enter and the import fails after it has gone, so
+    // without this the person sees their sentence unchanged and no reason
+    // for it — which reads as citing being broken rather than Zotero having
+    // gone away mid-pick.
+    await expect(page.getByRole("status")).toContainText(
+      "Could not add Quasi-1D Sb2Se3 ribbons from Zotero",
+    );
+    // And nothing half-written is left behind: no citation of nothing.
+    await expect(page.locator(".sutra-citation")).toHaveCount(0);
+  });
+
+  test("the rail brings papers in; it does not claim to cite them", async ({
+    page,
+  }) => {
+    await useVault(page, {
+      notes: [{ id: NOTE, title: "Growth", body: "Prior work exists." }],
+      library: LIBRARY,
+    });
+    await page.goto("/");
+
+    // It was called "Cite a paper" and does not cite: it imports, and `@` in
+    // the body is what cites. The name is the fix, so the name is the test.
+    await page
+      .getByRole("button", { name: "Add paper from Zotero", exact: true })
+      .click();
+    await expect(
+      page.getByRole("dialog", { name: "Zotero references" }),
+    ).toBeVisible();
+  });
+
   test("an email address does not open the citation menu", async ({ page }) => {
     await useVault(page, {
       notes: [{ id: NOTE, title: "Growth", body: "Write to" }],

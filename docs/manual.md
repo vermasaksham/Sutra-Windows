@@ -239,10 +239,23 @@ are kept apart on purpose, and this section is the bridge between them.
 Zotero item  →  Source note  →  Evidence  →  Interpretation  →  Question
 ```
 
-### The fastest way in
+### To cite a paper in a sentence, type `@`
 
-`Ctrl+Shift+Z`, or **Cite a paper** at the foot of the rail, or `Ctrl+K` →
-_Cite a paper — search Zotero_. Search your library by title, author, year,
+This is the whole answer, and it is the first thing to know because the button
+in the rail is not it. `@` in the body of a note opens a menu over **both** the
+sources already in your vault and your Zotero library. Pick anything in it and
+the citation lands at the cursor — a Zotero item that is not in your vault yet
+is brought in on the way, in the same action, without you being asked about it.
+See [Citing in the text](#citing-in-the-text) below for how a citation reads
+once it is in.
+
+`@` opens the menu at the start of a line or after a space, the same rule the
+`/` menu follows. Typed tight against the previous word it does nothing.
+
+### Bringing a paper in without citing it yet
+
+`Ctrl+Shift+Z`, or **Add paper from Zotero** at the foot of the rail, or
+`Ctrl+K` → _Add paper from Zotero_. Search your library by title, author, year,
 DOI or journal. Each result offers three different things:
 
 | Action              | What it does                                                     |
@@ -250,6 +263,11 @@ DOI or journal. Each result offers three different things:
 | **Literature note** | The note you write _about_ the paper, plus the source behind it. |
 | **Add as source**   | Brings the paper in so it can be cited, and stops there.         |
 | **Open in Zotero**  | Raises the item in Zotero itself.                                |
+
+None of the three writes a citation into a note you are looking at — this
+screen is for bringing papers in, and `@` is for citing them. It was called
+"Cite a paper" until v0.3.1, which was the wrong promise: running it and then
+finding no citation in your paragraph reads as citing being broken.
 
 ### Two ways to connect
 
@@ -321,6 +339,14 @@ Type `@` in the body and a menu opens covering both the sources already in your
 vault and your Zotero library. Picking a Zotero item brings it in first, so a
 citation always points at a note in your vault rather than at an item in
 another program.
+
+That import is not a step you take: choosing a Zotero result creates the source
+note and inserts the citation as one action. Sources already in your vault
+appear first and instantly, because a paper is read once and cited a dozen
+times; the Zotero search follows a moment later, and a paper already in your
+vault is offered from there rather than twice, so you cannot import a second
+copy of it by accident. With Zotero closed the menu still works — it shows
+what your vault already has, which is the point of copying papers in.
 
 ### How a citation reads in the text
 
@@ -726,7 +752,7 @@ yours. There is no network and no model involved.
 `Ctrl+K`. Type to filter; it searches both commands and your notes by title,
 so it doubles as a jump-to-note.
 
-**Create** — Capture to Inbox · New note in the current folder · Cite a paper — search Zotero
+**Create** — Capture to Inbox · New note in the current folder · Add paper from Zotero
 
 **This note** _(when one is open)_ — Set type to … (each of the ten kinds) ·
 Export as Word (.docx) · Print, or save as PDF

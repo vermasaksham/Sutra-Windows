@@ -648,12 +648,18 @@ fn decode_entity(entity: &str) -> String {
         "nbsp" | "#160" => " ".to_string(),
         other => {
             // A numeric entity we have no name for is still recoverable, and
-            // citations are full of en dashes.
-            if let Some(digits) = other.strip_prefix('#') {
-                if let Ok(code) = digits.parse::<u32>() {
-                    if let Some(c) = char::from_u32(code) {
-                        return c.to_string();
-                    }
+            // citations are full of en dashes and curly quotes. Both spellings
+            // are here because CSL styles disagree: ACS renders an en dash as
+            // `&#8211;` and IEEE renders its quotation marks as `&#x201C;`, so
+            // handling only the decimal form leaves the hex one printed
+            // literally in the middle of a reference list.
+            if let Some(number) = other.strip_prefix('#') {
+                let code = match number.strip_prefix(['x', 'X']) {
+                    Some(hex) => u32::from_str_radix(hex, 16).ok(),
+                    None => number.parse::<u32>().ok(),
+                };
+                if let Some(c) = code.and_then(char::from_u32) {
+                    return c.to_string();
                 }
             }
             // Not an entity after all — put back exactly what was consumed.
@@ -1187,6 +1193,15 @@ mod tests {
         assert_eq!(html_to_markdown("<b>2024</b>"), "**2024**");
         // Entities citations are actually full of.
         assert_eq!(html_to_markdown("221&#8211;230"), "221–230");
+        // IEEE spells its quotation marks in hex, and a reference list full of
+        // `&#x201C;` is what sent someone looking for this.
+        assert_eq!(
+            html_to_markdown("&#x201C;Recent advances,&#x201D;"),
+            "“Recent advances,”"
+        );
+        assert_eq!(html_to_markdown("&#X2014;"), "—");
+        // Still not an entity: a hex body that is not hex stays as typed.
+        assert_eq!(html_to_markdown("&#xZZ;"), "&#xZZ;");
         assert_eq!(html_to_markdown("Smith &amp; Jones"), "Smith & Jones");
         assert_eq!(html_to_markdown("a&nbsp;b"), "a b");
         // Zotero indents its nested divs; none of that whitespace means

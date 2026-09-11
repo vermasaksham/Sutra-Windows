@@ -77,6 +77,35 @@ function request(key: string) {
 }
 
 /** Called when a reference is picked, so it renders without a round trip. */
+/**
+ * Where a failure inside a ProseMirror plugin goes.
+ *
+ * The citation menu is mounted by ProseMirror rather than by the component
+ * tree, so the `onReport` every dialog in this app takes as a prop does not
+ * reach it — the same reason the source and title stores exist at module
+ * scope. Set once by the app.
+ *
+ * It matters because of *when* the failures happen. Picking a Zotero item
+ * closes the menu and then imports, so a failure arrives with nothing left on
+ * screen to put it on: the person pressed Enter on a paper and got an
+ * unchanged sentence, which reads as citing being broken rather than as Zotero
+ * having gone away.
+ */
+let reporter: ((what: string, cause: unknown) => void) | null = null;
+
+export function setCitationReporter(
+  report: (what: string, cause: unknown) => void,
+) {
+  reporter = report;
+}
+
+export function reportCitationFailure(what: string, cause: unknown) {
+  // Never silent, even before the app has wired a reporter up: a swallowed
+  // failure here is precisely the bug this exists to stop.
+  if (reporter) reporter(what, cause);
+  else console.error(what, cause);
+}
+
 export function remember(reference: Reference) {
   references.set(reference.key, reference);
   missing.delete(reference.key);
