@@ -136,6 +136,32 @@ pub fn open(url: &str) -> Result<()> {
 mod tests {
     use super::*;
 
+    /// Four files carry the version, and for two releases they disagreed:
+    /// the app said 0.2.1 in Settings while the repository had moved on. A
+    /// version the binary reports and a version the installer is named for
+    /// have to be the same number, or a bug report names a build nobody can
+    /// find. The release workflow checks this too, but only at release time;
+    /// here it fails on the commit that introduces the disagreement.
+    #[test]
+    fn the_version_shown_is_the_version_the_installer_carries() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+        let version_in = |path: std::path::PathBuf| -> String {
+            let text = std::fs::read_to_string(&path)
+                .unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+            let json: serde_json::Value =
+                serde_json::from_str(&text).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+            json["version"]
+                .as_str()
+                .unwrap_or_else(|| panic!("{}: no version", path.display()))
+                .to_string()
+        };
+
+        // `current_version` is `CARGO_PKG_VERSION`, which is Cargo.toml, which
+        // is what Settings shows and what the updater compares against.
+        assert_eq!(current_version(), version_in(root.join("tauri.conf.json")));
+        assert_eq!(current_version(), version_in(root.join("../package.json")));
+    }
+
     #[test]
     fn newer_versions_are_recognised() {
         assert!(is_newer("0.2.0", "0.1.0"));
