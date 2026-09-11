@@ -289,6 +289,17 @@ impl AppState {
 /// The filename is a hash of the vault path so two vaults do not share one
 /// database. The hash need not be stable across releases — if it changes, the
 /// worst case is that a fresh index gets built, which costs one scan.
+/// Where this app may keep derived files.
+///
+/// Falls back to the temporary directory rather than failing: everything kept
+/// here is disposable by construction, so a cache in a place that gets swept is
+/// strictly better than no cache and much better than a failed launch.
+pub fn app_data_dir(app: &AppHandle) -> PathBuf {
+    app.path()
+        .app_data_dir()
+        .unwrap_or_else(|_| std::env::temp_dir())
+}
+
 fn index_path(app: &AppHandle, root: &Path) -> PathBuf {
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     root.hash(&mut hasher);

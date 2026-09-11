@@ -1128,3 +1128,180 @@ pub fn ai_suggest(
 
     state.assistant(&app).respond(&ask)
 }
+
+// ---- reading the paper itself ------------------------------------------------
+//
+// Everything below reads a PDF. None of it writes one, moves one, or copies one
+// into the vault — see docs/decisions/0003-pdf-ownership-and-access.md, and
+// pdfread.rs, which is the only module that touches such a file at all.
+
+/// Text from a PDF, with the page each piece came from.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PdfText {
+    pub pages: Vec<crate::pdftext::Page>,
+    /// Who owns the file this came from. The frontend shows evidence captured
+    /// from an externally-owned PDF no differently — it is the researcher's
+    /// evidence either way — but the distinction is carried rather than lost.
+    pub ownership: crate::pdfread::Ownership,
+    /// False when extraction succeeded and every page was empty: a scanned
+    /// paper with no text layer. A state, not a failure, and named so it does
+    /// not read as one. OCR would address it; v0.4 does not do OCR.
+    pub has_text: bool,
+    /// Whether this came from the cache rather than from the file.
+    pub cached: bool,
+}
+
+/// Extract the text of a PDF attached to a note in this vault.
+///
+/// `relative` is the attachment's path as the vault records it, never a path
+/// the frontend composed — rule 1 at the top of this file holds here as
+/// everywhere: no filesystem path crosses this boundary inwards except one the
+/// vault itself issued.
+#[tauri::command]
+pub fn extract_vault_pdf(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    relative: String,
+) -> Result<PdfText> {
+    use crate::pdfread::PdfLocator;
+
+    // The vault builds the locator, so its root never leaves it. The locator
+    // refuses any `relative` that tries to climb out of the vault.
+    let (path, ownership) = state.with_vault(|vault| {
+        let locator = vault.pdf_locator();
+        let path = locator.locate(&relative)?.ok_or_else(|| {
+            SutraError::Pdf(format!("there is no PDF at {relative} in this vault"))
+        })?;
+        Ok((path, locator.ownership()))
+    })?;
+
+    extract_with_cache(&app, &path, ownership)
+}
+
+/// The shared half of every extraction: fingerprint, consult the cache, extract
+/// if it is stale or absent, remember the result.
+///
+/// One code path for a vault-owned PDF and for an externally-owned one, which
+/// is what the roadmap asks for: the only difference between them is who owns
+/// the file, and that difference is settled before this is called.
+fn extract_with_cache(
+    app: &AppHandle,
+    path: &std::path::Path,
+    ownership: crate::pdfread::Ownership,
+) -> Result<PdfText> {
+    let fingerprint = crate::pdfread::fingerprint(path)?;
+    let cache = crate::pdfcache::TextCache::new(state::app_data_dir(app));
+
+    if let Some(extraction) = cache.get(path, &fingerprint) {
+        return Ok(PdfText {
+            has_text: extraction.has_text(),
+            pages: extraction.pages,
+            ownership,
+            cached: true,
+        });
+    }
+
+    let extraction = crate::pdftext::extract(path)?;
+    // A cache that cannot be written is a slower app, not a failed extraction,
+    // so the result is returned either way.
+    let _ = cache.put(path, fingerprint, &extraction);
+
+    Ok(PdfText {
+        has_text: extraction.has_text(),
+        pages: extraction.pages,
+        ownership,
+        cached: false,
+    })
+}
+
+/// Extract the text of a Zotero-managed PDF.
+///
+/// **Pending real-Zotero verification**, and it fails saying so. Resolving the
+/// path needs `filename`, `linkMode` and `path` from Zotero's attachment
+/// record, which have not been seen in a response from a real library — see
+/// `pdfread::ZoteroPdf`. The command exists now so that the interface is
+/// settled and every caller already handles the unavailable case, which is the
+/// case that must work anyway whenever Zotero is closed or the file has moved.
+#[tauri::command]
+pub fn extract_zotero_pdf(app: AppHandle, attachment_key: String) -> Result<PdfText> {
+    use crate::pdfread::PdfLocator;
+
+    let locator = crate::pdfread::ZoteroPdf::new(None);
+    let path = locator
+        .locate(&attachment_key)?
+        .ok_or_else(|| SutraError::Pdf("Zotero has no file for that attachment".to_string()))?;
+    extract_with_cache(&app, &path, locator.ownership())
+}
+
+/// Throw away every cached extraction.
+///
+/// The cache is derived and disposable, and this is the proof: nothing is lost
+/// but time. Offered so that claim is something the app can do rather than
+/// something the documentation asserts.
+#[tauri::command]
+pub fn clear_pdf_text_cache(app: AppHandle) -> Result<()> {
+    crate::pdfcache::TextCache::new(state::app_data_dir(&app)).clear()
+}
+
+/// The highlights and notes already made on a paper, in Zotero.
+///
+/// Takes an attachment key: annotations belong to a file, not to a paper, and
+/// a paper with two PDFs has two independent sets. Read-only — Zotero remains
+/// the only writer of its own data.
+#[tauri::command]
+pub fn zotero_annotations(
+    app: AppHandle,
+    attachment_key: String,
+) -> Result<Vec<crate::references::Annotation>> {
+    state::provider(&app).annotations(&attachment_key)
+}
+
+/// How an import went, in terms a person can be told.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Captured {
+    pub added: usize,
+    /// Offered but already on the note, recognised by their Zotero key. Said
+    /// out loud rather than folded into `added`, because "6 added" when 20 were
+    /// offered looks like a failure unless the other 14 are accounted for.
+    pub already_here: usize,
+    /// Carrying neither highlighted text nor a comment, so there was nothing to
+    /// record.
+    pub empty: usize,
+}
+
+/// Record chosen annotations on a note as evidence.
+///
+/// The researcher chooses which; nothing is imported because it exists. Each
+/// becomes a `sources:` entry with its own `eid`, the source's words in
+/// `quote`, the researcher's in `comment`, the page as Zotero labelled it, and
+/// the colour preserved without being interpreted.
+///
+/// Idempotent: running it again adds only what is new.
+#[tauri::command]
+pub fn capture_annotations(
+    state: State<'_, AppState>,
+    id: String,
+    source_id: String,
+    annotations: Vec<crate::references::Annotation>,
+) -> Result<Captured> {
+    let empty = annotations
+        .iter()
+        .filter(|a| a.text.is_none() && a.comment.is_none())
+        .count();
+    let added = state.with_both(|vault, index| {
+        let added = vault.capture_annotations(&id, &source_id, &annotations)?;
+        // Evidence is a fact about the note, and the index answers questions
+        // about which sources a note records, so it is refreshed here rather
+        // than left to drift until the next save.
+        let doc = vault.read_note(&id)?;
+        index.upsert(&doc.summary, &doc.body)?;
+        Ok(added)
+    })?;
+    Ok(Captured {
+        added,
+        already_here: annotations.len() - added - empty,
+        empty,
+    })
+}

@@ -19,6 +19,9 @@ mod frontmatter;
 mod index;
 mod links;
 mod note;
+mod pdfcache;
+mod pdfread;
+mod pdftext;
 mod protocol;
 mod references;
 mod related;
@@ -36,6 +39,17 @@ use state::AppState;
 use tauri::Manager;
 
 fn main() {
+    // Before anything else, because this process may not be an application run
+    // at all. Extraction re-invokes this same binary with a hidden flag so that
+    // a panic in the PDF parser — and `panic = "abort"` makes any panic fatal —
+    // kills a child process instead of the window someone is writing in. See
+    // pdftext.rs. A normal launch has no such argument and falls straight
+    // through.
+    let args: Vec<String> = std::env::args().collect();
+    if args.get(1).map(String::as_str) == Some(pdftext::CHILD_FLAG) {
+        std::process::exit(pdftext::run_as_child(&args[2..]));
+    }
+
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         // Serves vault attachments without ever handing a path to the webview.
@@ -108,6 +122,11 @@ fn main() {
             commands::citing_notes,
             commands::import_zotero_source,
             commands::create_literature_note,
+            commands::extract_vault_pdf,
+            commands::extract_zotero_pdf,
+            commands::clear_pdf_text_cache,
+            commands::zotero_annotations,
+            commands::capture_annotations,
             commands::legacy_citations,
             commands::migrate_citations,
             commands::list_views,

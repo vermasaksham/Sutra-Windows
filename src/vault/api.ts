@@ -107,16 +107,73 @@ export type SourceMeta = {
  * another machine or read with none of this software installed.
  */
 export type Citation = {
+  /** This piece of evidence's own ULID — its identity, not the source's.
+   *  Minted in Rust on the way to disk. Absent on evidence written before
+   *  v0.3; never composed here. */
+  eid?: string;
   /** The source note's ULID. Not a Zotero key. */
   id: string;
   /** A string: "S12", "6-8" and "iv" are all real page references. */
   page?: string | null;
+  /** What the source says, in its own words. */
   quote?: string | null;
+  /** What the *reader* said about it. Never merged into `quote`: that
+   *  separation is what makes a note provenance rather than prose. */
+  comment?: string | null;
+  /** The Zotero annotation this was captured from, when it was not typed by
+   *  hand. An identifier in Zotero's namespace; resolves nothing here. */
+  annotation?: string | null;
+  /** The highlight colour Zotero gave, e.g. "#ffd400".
+   *
+   *  **Show it; never read meaning into it.** Colour schemes are personal and
+   *  undeclared, so deriving a kind, a filter or a ranking from one would be
+   *  inventing provenance. */
+  colour?: string | null;
   /** What kind of evidence this is — see `EVIDENCE_KINDS`. A value outside
    *  that list is kept as written rather than dropped. */
   kind?: string | null;
   /** RFC3339. */
   captured?: string | null;
+};
+
+/** A highlight or note already made in Zotero's reader. */
+export type Annotation = {
+  /** Zotero's own key for it. */
+  key: string;
+  /** "highlight", "note", "underline", … as Zotero said it, unnormalised. */
+  kind?: string | null;
+  /** The source's own words. Absent on a sticky note. */
+  text?: string | null;
+  /** The researcher's words. Absent on a bare highlight. */
+  comment?: string | null;
+  /** Preserved, never interpreted. */
+  colour?: string | null;
+  /** The page as printed in the document — "S12", "iv", "431". */
+  page?: string | null;
+  /** Zotero's ordering key. Opaque; used only for reading order. */
+  sortIndex?: string | null;
+};
+
+/** Text pulled out of a PDF, with the page each piece came from. */
+export type PdfText = {
+  pages: { number: number; text: string }[];
+  /** Who owns the file. Evidence is the researcher's either way; the
+   *  distinction is carried rather than lost. */
+  ownership: "vault" | "external";
+  /** False when extraction worked and every page was empty — a scanned paper
+   *  with no text layer. A state, not a failure. OCR would address it; v0.4
+   *  does not do OCR. */
+  hasText: boolean;
+  cached: boolean;
+};
+
+/** What an annotation import actually did. */
+export type Captured = {
+  added: number;
+  /** Already on the note, recognised by Zotero key. */
+  alreadyHere: number;
+  /** Carrying neither text nor comment, so there was nothing to record. */
+  empty: number;
 };
 
 /** A note that cites a source, and where in it. */
@@ -456,6 +513,27 @@ export const exportApi = {
     invoke<string | null>("export_docx", { document }),
 };
 
+/** Reading the paper itself.
+ *
+ *  Every call here can reject with a sentence worth showing: a PDF that is not
+ *  there, a parser that crashed, a scan with no text layer, or — for a
+ *  Zotero-managed file — that Sutra cannot yet work out where Zotero keeps it.
+ *  That last one is pending verification against a real library; see
+ *  docs/decisions/0004-reading-the-paper.md. */
+export const pdfApi = {
+  /** Extract a PDF attached inside this vault. `relative` is the path the
+   *  vault itself recorded, never one composed here. */
+  ofVaultFile: (relative: string) =>
+    invoke<PdfText>("extract_vault_pdf", { relative }),
+  /** Extract a Zotero-managed PDF. **Currently always rejects**, saying that
+   *  the attachment shape is unverified — see the module doc above. */
+  ofZoteroAttachment: (attachmentKey: string) =>
+    invoke<PdfText>("extract_zotero_pdf", { attachmentKey }),
+  /** Throw away every cached extraction. Costs one re-read and loses nothing:
+   *  the cache is derived by construction. */
+  clearCache: () => invoke<void>("clear_pdf_text_cache"),
+};
+
 export const zoteroApi = {
   /** Search the running Zotero. Rejects with a sentence worth showing if it
    *  is not running or the local API is switched off. */
@@ -467,6 +545,18 @@ export const zoteroApi = {
   detail: (key: string) => invoke<ItemDetail>("zotero_detail", { key }),
   /** Show the item in Zotero's own window. */
   open: (key: string) => invoke<void>("zotero_open", { key }),
+  /** The highlights and notes made on one attachment, in reading order.
+   *  Takes an *attachment* key: Zotero hangs annotations off the file, so a
+   *  paper with two PDFs has two independent sets. Read-only. */
+  annotations: (attachmentKey: string) =>
+    invoke<Annotation[]>("zotero_annotations", { attachmentKey }),
+  /** Record chosen annotations on a note as evidence. Additive and idempotent:
+   *  running it again adds only what is new. */
+  captureAnnotations: (
+    id: string,
+    sourceId: string,
+    annotations: Annotation[],
+  ) => invoke<Captured>("capture_annotations", { id, sourceId, annotations }),
   /** A source note for the paper, plus a literature note that cites it. */
   literatureNote: (key: string, folder: string | null) =>
     invoke<NoteSummary>("create_literature_note", { key, folder }),

@@ -230,6 +230,17 @@ impl Vault {
         &self.root
     }
 
+    /// A locator for PDFs attached inside this vault.
+    ///
+    /// Handed out instead of the root itself, so the rule above holds: the path
+    /// stays on this side and callers get something that can only resolve an
+    /// attachment the vault already records. `VaultPdf` refuses anything with a
+    /// `..` in it, so even a caller passing a path it composed cannot reach out
+    /// of the vault.
+    pub fn pdf_locator(&self) -> crate::pdfread::VaultPdf {
+        crate::pdfread::VaultPdf::new(self.root.clone())
+    }
+
     /// The name shown in the UI. The full path stays on this side of the
     /// boundary.
     pub fn display_name(&self) -> String {
@@ -1118,6 +1129,84 @@ impl Vault {
         self.edit(id, |fm| {
             fm.sources = citations;
         })
+    }
+
+    /// Record annotations from a source's PDF as evidence on a note.
+    ///
+    /// The one write in the whole annotation path. It is additive and it is
+    /// idempotent, and both matter:
+    ///
+    /// **Additive.** Evidence already on the note is untouched. Importing
+    /// annotations is not a synchronisation — Zotero does not become the
+    /// authority on what a researcher has recorded in their own note, and an
+    /// annotation deleted in Zotero does not delete the quotation somebody
+    /// built a paragraph on.
+    ///
+    /// **Idempotent**, by Zotero's annotation key. Importing the same paper
+    /// twice adds the marks made since and nothing else, so "import
+    /// annotations" is a thing a person can press again without thinking about
+    /// it. Evidence captured by hand has no annotation key and is never
+    /// matched against, so it is never treated as a duplicate of anything.
+    ///
+    /// An annotation with neither highlighted text nor a comment carries
+    /// nothing to record and is skipped: an entry with a page and no content
+    /// is not evidence of anything.
+    ///
+    /// Returns how many were added, so the caller can say "6 added, 14 already
+    /// here" rather than claiming work it did not do.
+    pub fn capture_annotations(
+        &self,
+        id: &str,
+        source_id: &str,
+        annotations: &[crate::references::Annotation],
+    ) -> Result<usize> {
+        let existing = self.read_note(id)?.summary.sources;
+        let already: std::collections::HashSet<String> = existing
+            .iter()
+            .filter_map(|c| c.annotation.clone())
+            .collect();
+
+        let mut added = Vec::new();
+        for annotation in annotations {
+            if already.contains(&annotation.key) {
+                continue;
+            }
+            if annotation.text.is_none() && annotation.comment.is_none() {
+                continue;
+            }
+            added.push(Citation {
+                // Its own identity, minted here, exactly as a hand-written
+                // piece of evidence gets one. An imported quotation is
+                // evidence like any other.
+                eid: Ulid::generate().to_string(),
+                id: source_id.to_string(),
+                page: annotation.page.clone(),
+                // The source's words go in `quote`, the researcher's in
+                // `comment`, and they are never joined. This line is the whole
+                // Source-versus-Interpretation invariant, in the one place it
+                // could be broken silently.
+                quote: annotation.text.clone(),
+                comment: annotation.comment.clone(),
+                colour: annotation.colour.clone(),
+                annotation: Some(annotation.key.clone()),
+                // Not derived from the annotation's colour or type. Zotero
+                // says nothing about what kind of evidence a highlight is, and
+                // guessing would be inventing provenance.
+                kind: None,
+                captured: Some(frontmatter::now()),
+            });
+        }
+
+        if added.is_empty() {
+            return Ok(0);
+        }
+        let count = added.len();
+        let mut sources = existing;
+        sources.extend(added);
+        self.edit(id, |fm| {
+            fm.sources = sources;
+        })?;
+        Ok(count)
     }
 
     /// Every source note in the vault.
@@ -2927,6 +3016,211 @@ mod tests {
     }
 
     // ---- metadata -----------------------------------------------------------
+
+    fn annotation(
+        key: &str,
+        text: Option<&str>,
+        comment: Option<&str>,
+    ) -> crate::references::Annotation {
+        use crate::references::Annotation;
+        Annotation {
+            key: key.to_string(),
+            kind: Some("highlight".to_string()),
+            text: text.map(str::to_string),
+            comment: comment.map(str::to_string),
+            colour: Some("#ffd400".to_string()),
+            page: Some("S12".to_string()),
+            sort_index: Some("00001|000000|00010".to_string()),
+        }
+    }
+
+    /// The single most important assertion in the annotation path. Zotero hands
+    /// over the highlighted text and the researcher's remark in one object, and
+    /// if they arrive in the note as one string the Source-versus-Interpretation
+    /// invariant is gone and no later reader can recover which words were the
+    /// author's.
+    #[test]
+    fn an_imported_annotation_keeps_the_authors_words_out_of_the_readers() {
+        let vault = TempVault::new();
+        let source = vault.create_note("Zhou 2019", None).unwrap();
+        let note = vault.create_note("Growth", None).unwrap();
+
+        let added = vault
+            .capture_annotations(
+                &note.summary.id,
+                &source.summary.id,
+                &[annotation(
+                    "AN1",
+                    Some("ribbons grow along [001]"),
+                    Some("does this hold above 300 C?"),
+                )],
+            )
+            .unwrap();
+        assert_eq!(added, 1);
+
+        let evidence = &vault.read_note(&note.summary.id).unwrap().summary.sources[0];
+        assert_eq!(evidence.quote.as_deref(), Some("ribbons grow along [001]"));
+        assert_eq!(
+            evidence.comment.as_deref(),
+            Some("does this hold above 300 C?")
+        );
+        assert_eq!(evidence.page.as_deref(), Some("S12"));
+        assert_eq!(evidence.colour.as_deref(), Some("#ffd400"));
+        assert_eq!(evidence.annotation.as_deref(), Some("AN1"));
+        assert_eq!(evidence.id, source.summary.id, "evidence names the source");
+        assert!(
+            !evidence.eid.is_empty(),
+            "every piece of evidence gets an id"
+        );
+
+        // The colour is carried and nothing is derived from it: it must not
+        // have become a kind.
+        assert!(
+            evidence.kind.is_none(),
+            "a colour is not an evidence kind; {:?} was invented",
+            evidence.kind
+        );
+    }
+
+    /// "Import annotations" must be a thing a person can press twice.
+    #[test]
+    fn importing_the_same_annotations_again_adds_nothing() {
+        let vault = TempVault::new();
+        let source = vault.create_note("Zhou 2019", None).unwrap();
+        let note = vault.create_note("Growth", None).unwrap();
+        let marks = [
+            annotation("AN1", Some("first claim"), None),
+            annotation("AN2", Some("second claim"), None),
+        ];
+
+        assert_eq!(
+            vault
+                .capture_annotations(&note.summary.id, &source.summary.id, &marks)
+                .unwrap(),
+            2
+        );
+        assert_eq!(
+            vault
+                .capture_annotations(&note.summary.id, &source.summary.id, &marks)
+                .unwrap(),
+            0,
+            "the same annotations were captured twice"
+        );
+
+        // And a new mark made since is picked up without disturbing the rest.
+        let more = [
+            marks[0].clone(),
+            marks[1].clone(),
+            annotation("AN3", Some("a third, highlighted later"), None),
+        ];
+        assert_eq!(
+            vault
+                .capture_annotations(&note.summary.id, &source.summary.id, &more)
+                .unwrap(),
+            1
+        );
+
+        let sources = vault.read_note(&note.summary.id).unwrap().summary.sources;
+        assert_eq!(sources.len(), 3);
+        let eids: std::collections::HashSet<_> = sources.iter().map(|c| c.eid.clone()).collect();
+        assert_eq!(eids.len(), 3, "every piece of evidence has its own id");
+    }
+
+    /// Zotero does not become the authority on what a researcher has recorded.
+    /// Evidence captured by hand, and evidence whose annotation was later
+    /// deleted in Zotero, both survive an import untouched.
+    #[test]
+    fn importing_never_removes_evidence_already_recorded() {
+        let vault = TempVault::new();
+        let source = vault.create_note("Zhou 2019", None).unwrap();
+        let note = vault.create_note("Growth", None).unwrap();
+
+        // Recorded by hand: no annotation key at all.
+        vault
+            .set_citations(
+                &note.summary.id,
+                vec![Citation {
+                    eid: String::new(),
+                    id: source.summary.id.clone(),
+                    page: Some("4".to_string()),
+                    quote: Some("typed out of the paper by hand".to_string()),
+                    ..Default::default()
+                }],
+            )
+            .unwrap();
+
+        vault
+            .capture_annotations(
+                &note.summary.id,
+                &source.summary.id,
+                &[annotation("AN1", Some("from Zotero"), None)],
+            )
+            .unwrap();
+
+        let sources = vault.read_note(&note.summary.id).unwrap().summary.sources;
+        assert_eq!(sources.len(), 2);
+        assert!(
+            sources
+                .iter()
+                .any(|c| c.quote.as_deref() == Some("typed out of the paper by hand")),
+            "hand-written evidence was lost: {sources:?}"
+        );
+        // The hand-written one was not matched against as a duplicate, and got
+        // its own eid when it was written.
+        assert!(sources.iter().all(|c| !c.eid.is_empty()));
+    }
+
+    /// An annotation with nothing in it is not evidence of anything. Recording
+    /// a page with no quotation and no remark would be a row that looks like
+    /// provenance and carries none.
+    #[test]
+    fn an_empty_annotation_records_nothing() {
+        let vault = TempVault::new();
+        let source = vault.create_note("Zhou 2019", None).unwrap();
+        let note = vault.create_note("Growth", None).unwrap();
+
+        let added = vault
+            .capture_annotations(
+                &note.summary.id,
+                &source.summary.id,
+                &[annotation("AN1", None, None)],
+            )
+            .unwrap();
+        assert_eq!(added, 0);
+        assert!(
+            vault
+                .read_note(&note.summary.id)
+                .unwrap()
+                .summary
+                .sources
+                .is_empty()
+        );
+    }
+
+    /// A sticky note highlights nothing, and is still worth keeping: it is the
+    /// researcher's own thought, attached to a page.
+    #[test]
+    fn a_comment_with_no_highlight_is_still_captured() {
+        let vault = TempVault::new();
+        let source = vault.create_note("Zhou 2019", None).unwrap();
+        let note = vault.create_note("Growth", None).unwrap();
+
+        let added = vault
+            .capture_annotations(
+                &note.summary.id,
+                &source.summary.id,
+                &[annotation("AN1", None, Some("compare with Ko 2024"))],
+            )
+            .unwrap();
+        assert_eq!(added, 1);
+
+        let evidence = &vault.read_note(&note.summary.id).unwrap().summary.sources[0];
+        assert!(
+            evidence.quote.is_none(),
+            "nothing was highlighted, so there is no quotation to claim"
+        );
+        assert_eq!(evidence.comment.as_deref(), Some("compare with Ko 2024"));
+    }
 
     #[test]
     fn set_meta_writes_frontmatter_and_leaves_the_body_alone() {

@@ -101,6 +101,67 @@ pub struct Attachment {
     pub is_pdf: bool,
 }
 
+/// A highlight or note the researcher already made, in the reference manager's
+/// own reader.
+///
+/// This is the shape the whole evidence half of v0.4 turns on, so what each
+/// field is *for* matters more than what it holds.
+///
+/// `text` is the **source's own words** — what the highlighter was dragged
+/// over. `comment` is the **researcher's** words about them. They arrive in one
+/// object from Zotero and are never joined here, because
+/// `docs/architecture/invariants.md` makes that separation the thing the note
+/// format exists to preserve: a quotation is evidence, a remark about it is
+/// interpretation, and a file that has lost track of which is which cannot be
+/// trusted six years later.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Annotation {
+    /// Zotero's own key for this annotation.
+    ///
+    /// Carried into the note so that re-importing recognises an annotation
+    /// already captured rather than adding it twice, and so a researcher can
+    /// find the highlight again in Zotero. An identifier in another program's
+    /// namespace, never used to resolve anything in the vault — the same rule
+    /// a Zotero item key follows.
+    pub key: String,
+    /// "highlight", "note", "underline", "image", "ink" — whatever Zotero
+    /// said, unnormalised. Kept verbatim for the same reason an evidence
+    /// `kind` is: a type introduced by a newer Zotero must survive being read
+    /// by this build rather than being dropped or guessed at.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub kind: Option<String>,
+    /// The source's own words. Absent on a sticky note, which highlights
+    /// nothing.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub text: Option<String>,
+    /// The researcher's words. Absent on a bare highlight.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub comment: Option<String>,
+    /// The colour the researcher chose, as Zotero gave it — "#ffd400".
+    ///
+    /// **Preserved and never interpreted.** Many researchers colour-code
+    /// (yellow for a claim, red for a doubt) and many do not, and the scheme is
+    /// personal, undeclared and inconsistent even within one person. Sutra
+    /// therefore records the colour so nothing is lost and the researcher can
+    /// see it, and derives nothing from it: no evidence kind, no filter, no
+    /// ranking, no meaning. Reading a private code as data would be inventing
+    /// provenance, which is the one thing this app must never do.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub colour: Option<String>,
+    /// The page as printed in the document — "S12", "iv", "431".
+    ///
+    /// Preferred over any position Sutra could compute, because it is what a
+    /// reader would write in a citation and what Zotero derived from the
+    /// document's own labels. Absent when the PDF carries no labels.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub page: Option<String>,
+    /// Zotero's ordering key, used only to present annotations in reading
+    /// order. Opaque; never parsed for meaning.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sort_index: Option<String>,
+}
+
 /// A folder in the reference manager's own hierarchy.
 ///
 /// Read, never mirrored. A Zotero collection and a Sutra folder are
@@ -200,6 +261,16 @@ pub trait ReferenceProvider: Send + Sync {
     fn collections(&self) -> Result<Vec<Collection>>;
 
     fn attachments(&self, key: &str) -> Result<Vec<Attachment>>;
+
+    /// The highlights and notes made on one attachment, in reading order.
+    ///
+    /// Takes an *attachment* key, not an item key: Zotero hangs annotations off
+    /// the file they were made on, and a paper with two PDFs has two
+    /// independent sets of them.
+    ///
+    /// An empty list is the ordinary answer for a paper nobody has annotated,
+    /// and is not a failure.
+    fn annotations(&self, attachment_key: &str) -> Result<Vec<Annotation>>;
 
     /// Show the item in the reference manager's own window.
     fn open(&self, key: &str) -> Result<()>;

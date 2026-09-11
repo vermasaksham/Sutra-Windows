@@ -58,6 +58,15 @@ pub enum SutraError {
     /// "turn the local API on".
     #[error("{0}")]
     Zotero(String),
+
+    /// Reading a PDF, or failing to. Every variant of this is a state the
+    /// feature is designed to reach rather than a bug: the file is not there,
+    /// the parser could not read it, it has no text layer, or Sutra cannot yet
+    /// work out where Zotero keeps it. Carries the sentence to show, because
+    /// "a PDF could not be read" without saying which or why is the kind of
+    /// message that makes a person think the app is broken.
+    #[error("{0}")]
+    Pdf(String),
 }
 
 /// Tauri sends a command's `Err` to the frontend as JSON, so the error has to
