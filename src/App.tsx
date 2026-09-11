@@ -4,7 +4,11 @@ import ResearchOverview from "./notes/ResearchOverview";
 import { BOTTOM_RESERVE, SIDE_RESERVE, useDock } from "./editor/toolbarDock";
 import Toast from "./components/Toast";
 import { setNavigate, setTitles } from "./editor/wikilink/titleStore";
-import { setCitationOrder, setSources } from "./editor/citation/citationStore";
+import {
+  setCitationOrder,
+  setCitationReporter,
+  setSources,
+} from "./editor/citation/citationStore";
 import ContextPanel from "./notes/ContextPanel";
 import DuplicateReview from "./notes/DuplicateReview";
 import DuplicateList from "./notes/DuplicateList";
@@ -168,6 +172,10 @@ export default function App() {
     const detail = cause instanceof Error ? cause.message : String(cause);
     setError(`${what}: ${detail}`);
   }, []);
+
+  // The citation menu lives inside a ProseMirror plugin, where props do not
+  // reach, so it is handed the same reporter every dialog here gets as a prop.
+  useEffect(() => setCitationReporter(report), [report]);
 
   const refresh = useCallback(async () => {
     try {

@@ -238,18 +238,25 @@ export default function Sidebar({
         )}
       </div>
 
-      {/* Citing was the least discoverable thing in the app: it lived behind
-          `@` in the editor and nowhere else, so a reasonable person concluded
-          there was no Zotero support at all. A named button fixes that. */}
+      {/* Reaching a Zotero library was the least discoverable thing in the
+          app: it lived behind `@` in the editor and nowhere else, so a
+          reasonable person concluded there was no Zotero support at all. A
+          named button fixes that — but the name was "Cite a paper", which
+          promised the one thing it does not do. This brings a paper *in*;
+          citing it in a sentence is still `@`, which the tooltip now says. */}
       <div className="px-2 pb-1">
         <button
           type="button"
           onClick={onOpenZotero}
-          title={`Cite a paper (${shortcut(MOD, SHIFT, "Z")})`}
+          title={`Add paper from Zotero (${shortcut(
+            MOD,
+            SHIFT,
+            "Z",
+          )}) — to cite one in a sentence, type @ in the note`}
           className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-sm text-ink-soft transition-colors hover:bg-row-hover hover:text-accent"
         >
           <QuoteMarkIcon className="size-4 shrink-0" />
-          <span>Cite a paper</span>
+          <span>Add paper from Zotero</span>
         </button>
       </div>
 

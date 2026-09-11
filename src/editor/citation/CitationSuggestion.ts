@@ -9,7 +9,11 @@ import CitationMenu, {
   type Candidate,
   type CitationMenuHandle,
 } from "./CitationMenu";
-import { remember, vaultCandidates } from "./citationStore";
+import {
+  remember,
+  reportCitationFailure,
+  vaultCandidates,
+} from "./citationStore";
 import { sourcesApi, zoteroApi, type Reference } from "../../vault/api";
 
 type MenuProps = ComponentProps<typeof CitationMenu>;
@@ -109,10 +113,17 @@ export const CitationSuggestion = Extension.create({
                   ])
                   .run();
               })
-              .catch(() => {
+              .catch((cause: unknown) => {
                 // The import failed — Zotero went away mid-pick, or the vault
                 // refused. Leaving the typed text alone is better than
-                // inserting a citation of nothing.
+                // inserting a citation of nothing, but leaving it alone
+                // *silently* is worse than either: the menu has already
+                // closed, so all the person sees is that pressing Enter on a
+                // paper did nothing at all.
+                reportCitationFailure(
+                  `Could not add ${candidate.reference.title} from Zotero`,
+                  cause,
+                );
               });
           };
 

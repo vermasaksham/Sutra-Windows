@@ -550,9 +550,13 @@ impl Index {
         if query.is_empty() {
             return Ok(Vec::new());
         }
-        let skip: HashSet<&str> = dismissed.iter().map(String::as_str).collect();
+        let mut skip: HashSet<String> = dismissed.iter().cloned().collect();
 
         let guard = self.conn.lock().unwrap_or_else(|e| e.into_inner());
+        // A source this note cites, or a note that cites this source, is
+        // related by construction and never a duplicate. See
+        // `in_provenance_with`.
+        skip.extend(in_provenance_with(&guard, id)?);
         let mut stmt = guard.prepare(
             "SELECT n.id, n.title, n.body, n.folder \
                FROM notes_fts f JOIN notes n ON n.rowid = f.rowid \
@@ -570,7 +574,7 @@ impl Index {
         let mut found = Vec::new();
         for row in rows {
             let (other, other_title, other_body, folder) = row?;
-            if other == id || skip.contains(other.as_str()) {
+            if other == id || skip.contains(&other) {
                 continue;
             }
             let alike = duplicates::compare(title, body, &other_title, &other_body);
@@ -656,7 +660,7 @@ impl Index {
     /// The tidying pass, run on request rather than in the background. Each
     /// pair is reported once, from whichever side comes first.
     pub fn duplicate_pairs(&self, limit: usize) -> Result<Vec<DuplicatePair>> {
-        let notes: Vec<(String, String, String, String)> = {
+        let (notes, provenance) = {
             let guard = self.conn.lock().unwrap_or_else(|e| e.into_inner());
             let mut stmt = guard
                 .prepare("SELECT n.id, n.title, n.body, n.folder FROM notes n ORDER BY n.title")?;
@@ -668,7 +672,28 @@ impl Index {
                     row.get::<_, String>(3)?,
                 ))
             })?;
-            rows.filter_map(std::result::Result::ok).collect()
+            let notes: Vec<(String, String, String, String)> =
+                rows.filter_map(std::result::Result::ok).collect();
+
+            // Read once for the whole pass rather than per candidate pair: the
+            // table is one row per recorded source, which is far smaller than
+            // the pairs it is consulted for. Held unordered, and looked up
+            // both ways round below.
+            let mut stmt = guard.prepare("SELECT source_id, note_id FROM note_sources")?;
+            let rows = stmt.query_map([], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })?;
+            let provenance: HashSet<(String, String)> =
+                rows.filter_map(std::result::Result::ok).collect();
+            (notes, provenance)
+        };
+
+        // See `in_provenance_with`: a note and a paper it cites share a title
+        // by design, so without this every literature note is offered as a
+        // duplicate of its own source note.
+        let cites = |a: &str, b: &str| {
+            provenance.contains(&(a.to_string(), b.to_string()))
+                || provenance.contains(&(b.to_string(), a.to_string()))
         };
 
         // Bucketed by normalised title before anything is compared. Two notes
@@ -698,6 +723,9 @@ impl Index {
             for word in note_words {
                 for &j in by_word.get(word.as_str()).into_iter().flatten() {
                     if j <= i || !seen.insert((i, j)) {
+                        continue;
+                    }
+                    if cites(&notes[i].0, &notes[j].0) {
                         continue;
                     }
                     let alike =
@@ -859,6 +887,27 @@ fn distinctive(conn: &Connection, body: &str, total: usize) -> Result<Vec<(Strin
         .into_iter()
         .map(|(_, term, idf)| (term, idf))
         .collect())
+}
+
+/// Every note that is in a citing relationship with this one, either way round.
+///
+/// A note and a paper it cites are not two attempts at the same note; they are
+/// a reading and the thing read. The duplicate finder cannot see that from the
+/// text, because creating a literature note deliberately gives it the paper's
+/// title — so the source note and the note about it match on title alone,
+/// score above the floor, and every literature note in the vault is
+/// permanently offered as a possible duplicate of its own source.
+///
+/// Both directions, because it is one pair seen from two sides and the panel
+/// is shown on both notes.
+fn in_provenance_with(conn: &Connection, id: &str) -> Result<HashSet<String>> {
+    let mut stmt = conn.prepare(
+        "SELECT source_id FROM note_sources WHERE note_id = ?1 \
+         UNION \
+         SELECT note_id FROM note_sources WHERE source_id = ?1",
+    )?;
+    let rows = stmt.query_map([id], |row| row.get::<_, String>(0))?;
+    Ok(rows.filter_map(std::result::Result::ok).collect())
 }
 
 /// How many FTS hits to compare properly when looking for a duplicate.
@@ -1153,6 +1202,7 @@ pub(crate) fn fts_query(input: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::frontmatter::NoteType;
     use crate::vault::Vault;
     use ulid::Ulid;
 
@@ -1951,6 +2001,69 @@ mod tests {
             .unwrap();
         f.index.upsert(&summary, body).unwrap();
         doc.summary.id
+    }
+
+    /// A literature note carries the paper's title on purpose, so it and its
+    /// source note match on title alone and score above the floor. Before this
+    /// was excluded, every literature note in the vault was permanently
+    /// offered as a possible duplicate of the source it was written about —
+    /// the one pair that is guaranteed not to be a duplicate.
+    #[test]
+    fn a_literature_note_is_never_a_duplicate_of_the_source_it_cites() {
+        let f = Fixture::new();
+        let title = "Recent advances in Sb2S3 thin film solar cells";
+
+        let source = f.vault.create_note(title, None).unwrap();
+        let source_id = source.summary.id.clone();
+        let source_summary = f.vault.set_type(&source_id, NoteType::Source).unwrap();
+        f.index.upsert(&source_summary, "").unwrap();
+
+        let literature = f
+            .vault
+            .create_literature_note(title, None, &source_id, None)
+            .unwrap();
+        f.index
+            .upsert(&literature.summary, &literature.body)
+            .unwrap();
+
+        // Both directions: it is one pair, and the panel is drawn on both notes.
+        let from_literature = f
+            .index
+            .duplicates(&literature.summary.id, title, &literature.body, &[], 10)
+            .unwrap();
+        assert!(
+            from_literature.is_empty(),
+            "the source it cites was offered as a duplicate: {from_literature:?}"
+        );
+
+        let from_source = f.index.duplicates(&source_id, title, "", &[], 10).unwrap();
+        assert!(
+            from_source.is_empty(),
+            "the note written about it was offered as a duplicate: {from_source:?}"
+        );
+
+        // The vault-wide pass has the same blind spot and the same fix.
+        let pairs = f.index.duplicate_pairs(10).unwrap();
+        assert!(pairs.is_empty(), "offered by the tidying pass: {pairs:?}");
+    }
+
+    /// The other half of the fix: it excludes one pair, not the feature. Two
+    /// notes that really do say the same thing twice are still found, and a
+    /// source note is not exempt from being a duplicate of a *different* note.
+    #[test]
+    fn two_notes_written_twice_are_still_offered() {
+        let f = Fixture::new();
+        let title = "Thermal conductivity of Sb2Se3";
+        let first = note(&f, "work", title, &[], "Measured 1.2 W/mK at 300 K.");
+        let second = note(&f, "work", title, &[], "Measured 1.2 W/mK at 300 K.");
+
+        let found = f
+            .index
+            .duplicates(&first, title, "Measured 1.2 W/mK at 300 K.", &[], 10)
+            .unwrap();
+        assert_eq!(found.len(), 1, "the real duplicate was lost: {found:?}");
+        assert_eq!(found[0].id, second);
+        assert_eq!(f.index.duplicate_pairs(10).unwrap().len(), 1);
     }
 
     #[test]

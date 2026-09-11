@@ -50,6 +50,10 @@ export type VaultOptions = {
   library?: Reference[];
   /** Make every Zotero call fail, the way a closed Zotero does. */
   zoteroDown?: boolean;
+  /** Let the library be searched, but fail the import a pick triggers.
+   *  Zotero going away between the search and the Enter, which is the one
+   *  window where a failure has no menu left to be shown on. */
+  importFails?: boolean;
   theme?: "light" | "dark";
   palette?: string;
   /** Which edge the editing toolbar starts on. */
@@ -351,6 +355,7 @@ export async function useVault(page: Page, options: VaultOptions) {
           // catch-all — produced a citation with no key at all.
           case "import_zotero_source": {
             zotero();
+            if (opts.importFails) throw new Error("could not reach Zotero");
             const item = library.find((r) => r.key === args.key);
             if (!item) throw new Error("no such item");
             const existing = notes.find(
