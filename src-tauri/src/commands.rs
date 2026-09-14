@@ -1135,21 +1135,53 @@ pub fn ai_suggest(
 // into the vault — see docs/decisions/0003-pdf-ownership-and-access.md, and
 // pdfread.rs, which is the only module that touches such a file at all.
 
-/// Text from a PDF, with the page each piece came from.
+/// What came of trying to read a PDF.
+///
+/// **Every way this can end is a value, not an error**, and that is the point.
+/// A paper with no PDF, a scan with no text layer, a locked file and a parser
+/// that gave up are all ordinary states of a research library — not faults — and
+/// the interface has to say which one happened, precisely, in words that send
+/// the reader to the right place. Modelling them as errors would have left the
+/// frontend matching on English prose to tell them apart, which breaks silently
+/// the first time a sentence is reworded.
+///
+/// So the frontend switches on `state` and the compiler can see every arm.
+/// Only a genuine fault — no vault open, an id that does not exist — is still an
+/// `Err`.
 #[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct PdfText {
-    pub pages: Vec<crate::pdftext::Page>,
-    /// Who owns the file this came from. The frontend shows evidence captured
-    /// from an externally-owned PDF no differently — it is the researcher's
-    /// evidence either way — but the distinction is carried rather than lost.
-    pub ownership: crate::pdfread::Ownership,
-    /// False when extraction succeeded and every page was empty: a scanned
-    /// paper with no text layer. A state, not a failure, and named so it does
-    /// not read as one. OCR would address it; v0.4 does not do OCR.
-    pub has_text: bool,
-    /// Whether this came from the cache rather than from the file.
-    pub cached: bool,
+#[serde(tag = "state", rename_all = "camelCase")]
+pub enum PdfOutcome {
+    /// Text, page by page.
+    Text {
+        pages: Vec<crate::pdftext::Page>,
+        /// Who owns the file. Evidence captured from an externally-owned PDF is
+        /// shown no differently — it is the researcher's evidence either way —
+        /// but the distinction is carried rather than lost.
+        ownership: crate::pdfread::Ownership,
+        /// Whether this came from the cache rather than from the file.
+        cached: bool,
+    },
+    /// Extraction worked and every page was empty: a scan. The state OCR would
+    /// address, and v0.4 does not do OCR, so naming it precisely is the whole
+    /// of the help that can be offered.
+    NoTextLayer,
+    /// The source records no PDF at all. The commonest state, and not a
+    /// problem — most sources have no file.
+    NotAttached,
+    /// A Zotero-managed PDF whose path Sutra cannot yet work out.
+    ///
+    /// **Pending real-Zotero verification**, and deliberately its own state
+    /// rather than folded into a failure: nothing is wrong with the library,
+    /// the file or the note, and telling someone their PDF is missing would
+    /// send them looking for a problem that does not exist.
+    Unresolved { why: String },
+    /// The file should be there and is not — moved, renamed, on a disconnected
+    /// drive.
+    Missing { detail: String },
+    /// Password-protected. The file is fine; Sutra is not being given the key.
+    Locked,
+    /// The parser could not read it, or died trying.
+    Failed { detail: String },
 }
 
 /// Extract the text of a PDF attached to a note in this vault.
@@ -1163,20 +1195,27 @@ pub fn extract_vault_pdf(
     app: AppHandle,
     state: State<'_, AppState>,
     relative: String,
-) -> Result<PdfText> {
+) -> Result<PdfOutcome> {
     use crate::pdfread::PdfLocator;
 
     // The vault builds the locator, so its root never leaves it. The locator
     // refuses any `relative` that tries to climb out of the vault.
-    let (path, ownership) = state.with_vault(|vault| {
+    let found = state.with_vault(|vault| {
         let locator = vault.pdf_locator();
-        let path = locator.locate(&relative)?.ok_or_else(|| {
-            SutraError::Pdf(format!("there is no PDF at {relative} in this vault"))
-        })?;
-        Ok((path, locator.ownership()))
+        Ok((locator.locate(&relative)?, locator.ownership()))
     })?;
 
-    extract_with_cache(&app, &path, ownership)
+    let (path, ownership) = match found {
+        (Some(path), ownership) => (path, ownership),
+        // The vault records this attachment and the file is not on disk.
+        (None, _) => {
+            return Ok(PdfOutcome::Missing {
+                detail: format!("{relative} is recorded on this note, but the file is not there"),
+            });
+        }
+    };
+
+    Ok(extract_with_cache(&app, &path, ownership))
 }
 
 /// The shared half of every extraction: fingerprint, consult the cache, extract
@@ -1189,30 +1228,69 @@ fn extract_with_cache(
     app: &AppHandle,
     path: &std::path::Path,
     ownership: crate::pdfread::Ownership,
-) -> Result<PdfText> {
-    let fingerprint = crate::pdfread::fingerprint(path)?;
+) -> PdfOutcome {
+    let fingerprint = match crate::pdfread::fingerprint(path) {
+        Ok(fingerprint) => fingerprint,
+        // The file was there a moment ago, when it was located. Between then and
+        // now it went away — an unmounted drive, a sync client mid-move.
+        Err(e) => {
+            return PdfOutcome::Missing {
+                detail: e.to_string(),
+            };
+        }
+    };
     let cache = crate::pdfcache::TextCache::new(state::app_data_dir(app));
 
-    if let Some(extraction) = cache.get(path, &fingerprint) {
-        return Ok(PdfText {
-            has_text: extraction.has_text(),
-            pages: extraction.pages,
-            ownership,
-            cached: true,
-        });
-    }
+    let extraction = match cache.get(path, &fingerprint) {
+        Some(extraction) => {
+            return outcome(extraction, ownership, true);
+        }
+        None => match crate::pdftext::extract(path) {
+            Ok(extraction) => extraction,
+            Err(e) => return failure(&e.to_string()),
+        },
+    };
 
-    let extraction = crate::pdftext::extract(path)?;
     // A cache that cannot be written is a slower app, not a failed extraction,
     // so the result is returned either way.
     let _ = cache.put(path, fingerprint, &extraction);
+    outcome(extraction, ownership, false)
+}
 
-    Ok(PdfText {
-        has_text: extraction.has_text(),
+fn outcome(
+    extraction: crate::pdftext::Extraction,
+    ownership: crate::pdfread::Ownership,
+    cached: bool,
+) -> PdfOutcome {
+    if !extraction.has_text() {
+        return PdfOutcome::NoTextLayer;
+    }
+    PdfOutcome::Text {
         pages: extraction.pages,
         ownership,
-        cached: false,
-    })
+        cached,
+    }
+}
+
+/// Sort one extraction failure into the state the reader should be told about.
+///
+/// Matched on the sentence `pdftext` produced, which is a seam inside this
+/// crate rather than across a boundary — and it is checked from the other side
+/// too, by `the_failure_states_a_reader_is_shown_are_told_apart`, so rewording
+/// a message there fails a test here rather than silently collapsing two states
+/// into one.
+fn failure(said: &str) -> PdfOutcome {
+    if said.contains("password-protected") {
+        return PdfOutcome::Locked;
+    }
+    if said.contains("not there to read") {
+        return PdfOutcome::Missing {
+            detail: said.to_string(),
+        };
+    }
+    PdfOutcome::Failed {
+        detail: said.to_string(),
+    }
 }
 
 /// Extract the text of a Zotero-managed PDF.
@@ -1224,14 +1302,19 @@ fn extract_with_cache(
 /// settled and every caller already handles the unavailable case, which is the
 /// case that must work anyway whenever Zotero is closed or the file has moved.
 #[tauri::command]
-pub fn extract_zotero_pdf(app: AppHandle, attachment_key: String) -> Result<PdfText> {
+pub fn extract_zotero_pdf(app: AppHandle, attachment_key: String) -> Result<PdfOutcome> {
     use crate::pdfread::PdfLocator;
 
     let locator = crate::pdfread::ZoteroPdf::new(None);
-    let path = locator
-        .locate(&attachment_key)?
-        .ok_or_else(|| SutraError::Pdf("Zotero has no file for that attachment".to_string()))?;
-    extract_with_cache(&app, &path, locator.ownership())
+    match locator.locate(&attachment_key) {
+        Ok(Some(path)) => Ok(extract_with_cache(&app, &path, locator.ownership())),
+        Ok(None) => Ok(PdfOutcome::NotAttached),
+        // Today this is always the pending-verification case, and it is a state
+        // rather than an error precisely so the rest of the workflow carries on
+        // around it untouched.
+        Err(SutraError::Pdf(why)) => Ok(PdfOutcome::Unresolved { why }),
+        Err(other) => Err(other),
+    }
 }
 
 /// Throw away every cached extraction.
@@ -1304,4 +1387,91 @@ pub fn capture_annotations(
         already_here: annotations.len() - added - empty,
         empty,
     })
+}
+
+#[cfg(test)]
+mod pdf_state_tests {
+    use super::*;
+
+    /// `failure` reads the sentence `pdftext` wrote, which makes the two
+    /// modules a pair: reword a message there and a state here would quietly
+    /// stop being reachable, and the reader would be told "Sutra could not read
+    /// this PDF" about a file that is merely locked.
+    ///
+    /// So the messages are asserted from this side. If this fails, the fix is
+    /// to make the two agree — not to loosen the match.
+    #[test]
+    fn the_failure_states_a_reader_is_shown_are_told_apart() {
+        // The exact sentences pdftext::extract produces. Kept verbatim.
+        let locked = "C:\\papers\\x.pdf is password-protected, so its text cannot \
+                      be read. Zotero's own reader can still open it.";
+        let gone = "/papers/x.pdf is not there to read";
+        let broken = "could not read the text of /papers/x.pdf: it stopped without \
+                      saying why, which usually means the file is malformed";
+
+        assert!(matches!(failure(locked), PdfOutcome::Locked));
+        assert!(matches!(failure(gone), PdfOutcome::Missing { .. }));
+        assert!(matches!(failure(broken), PdfOutcome::Failed { .. }));
+    }
+
+    /// A message this does not recognise must land in `Failed` with its text
+    /// intact, never be swallowed or mistaken for something specific.
+    #[test]
+    fn an_unrecognised_failure_keeps_its_words() {
+        let odd = "the disk caught fire";
+        match failure(odd) {
+            PdfOutcome::Failed { detail } => assert_eq!(detail, odd),
+            other => panic!("an unknown failure became {other:?}"),
+        }
+    }
+
+    /// A scan is not a failure, and must not arrive as one.
+    #[test]
+    fn an_empty_extraction_is_no_text_layer_rather_than_text() {
+        let blank = crate::pdftext::Extraction {
+            pages: vec![crate::pdftext::Page {
+                number: 1,
+                text: "   ".to_string(),
+            }],
+        };
+        assert!(matches!(
+            outcome(blank, crate::pdfread::Ownership::Vault, false),
+            PdfOutcome::NoTextLayer
+        ));
+    }
+
+    /// The state the whole pending-verification boundary exists to produce. It
+    /// must be `Unresolved`, carrying the reason, and never `Missing` — the
+    /// library is fine and nothing is lost.
+    #[test]
+    fn an_unresolved_zotero_pdf_is_its_own_state() {
+        use crate::pdfread::PdfLocator;
+        let locator = crate::pdfread::ZoteroPdf::new(None);
+        let outcome = match locator.locate("ABCD1234") {
+            Err(SutraError::Pdf(why)) => PdfOutcome::Unresolved { why },
+            other => panic!("expected a pending-verification failure, got {other:?}"),
+        };
+        match outcome {
+            PdfOutcome::Unresolved { why } => {
+                assert!(why.contains("not been verified"), "{why}");
+            }
+            other => panic!("{other:?}"),
+        }
+    }
+
+    /// The wire shape the frontend switches on. If this changes, every arm in
+    /// the UI changes with it, so it is pinned.
+    #[test]
+    fn the_states_are_tagged_for_the_frontend() {
+        let json = |o: &PdfOutcome| serde_json::to_string(o).unwrap();
+        assert!(json(&PdfOutcome::NoTextLayer).contains(r#""state":"noTextLayer""#));
+        assert!(json(&PdfOutcome::NotAttached).contains(r#""state":"notAttached""#));
+        assert!(json(&PdfOutcome::Locked).contains(r#""state":"locked""#));
+        assert!(
+            json(&PdfOutcome::Unresolved {
+                why: "pending".into()
+            })
+            .contains(r#""state":"unresolved""#)
+        );
+    }
 }

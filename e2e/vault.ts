@@ -27,10 +27,24 @@ export type Note = {
     authors?: string;
     year?: string;
     doi?: string | null;
+    /** The Zotero item key it was imported from. */
+    zotero?: string;
+    /** The attachment's title, as the library names it. */
+    pdf?: string;
     styled?: Record<string, { citation?: string; bib?: string }>;
   };
   /** The note's recorded citations, as frontmatter holds them. */
-  sources?: Array<{ id: string; page?: string; quote?: string }>;
+  sources?: Array<{
+    eid?: string;
+    id: string;
+    page?: string;
+    quote?: string;
+    /** The reader's own words. Never merged into `quote`. */
+    comment?: string;
+    /** Zotero's annotation key, when this came from one. */
+    annotation?: string;
+    colour?: string;
+  }>;
   /** On a note of `type: chapter`: the notes it assembles, in order. */
   sequence?: string[];
 };
@@ -71,6 +85,27 @@ export type VaultOptions = {
   versionFails?: boolean;
   /** Files claiming an id another file already claims. */
   idClashes?: Array<{ id: string; opened: string; shadowed: string }>;
+  /** What reading a PDF should produce. Every ending is a value, so a test
+   *  names the state it wants rather than arranging for a failure. Defaults to
+   *  one page of text. */
+  pdf?:
+    | { state: "text"; pages: { number: number; text: string }[] }
+    | { state: "noTextLayer" }
+    | { state: "notAttached" }
+    | { state: "unresolved"; why: string }
+    | { state: "missing"; detail: string }
+    | { state: "locked" }
+    | { state: "failed"; detail: string };
+  /** Zotero's highlights on the paper. */
+  annotations?: Array<{
+    key: string;
+    kind?: string;
+    text?: string;
+    comment?: string;
+    colour?: string;
+    page?: string;
+    sortIndex?: string;
+  }>;
 };
 
 /**
@@ -106,6 +141,9 @@ export async function useVault(page: Page, options: VaultOptions) {
     // most in this suite is what reaches disk, not what is on screen.
     const saved: string[] = [];
     (window as unknown as { __saved: string[] }).__saved = saved;
+    // The same array the handlers mutate, so a test can ask where evidence
+    // landed rather than inferring it from what is on screen.
+    (window as unknown as { __notes: unknown }).__notes = notes;
 
     // Every document handed to the exporter. Rust is what turns one of these
     // into a .docx and has its own tests for that; what this suite can see —
@@ -204,8 +242,75 @@ export async function useVault(page: Page, options: VaultOptions) {
           case "set_note_meta":
           case "set_note_type":
           case "set_source_meta":
-          case "set_citations":
             return notes[0] ? summary(notes[0]) : null;
+
+          // Real rather than a stub: capture is asserted through it, and a
+          // stub would let a test pass while recording nothing.
+          case "set_citations": {
+            const note = find(args.id as string);
+            if (note) {
+              note.sources = (
+                args.citations as NonNullable<Note["sources"]>
+              ).map((c, i) => ({ ...c, eid: c.eid || `01EVIDENCE${i}` }));
+            }
+            return note ? summary(note) : null;
+          }
+
+          case "extract_vault_pdf":
+          case "extract_zotero_pdf":
+            return (
+              opts.pdf ?? {
+                state: "text",
+                pages: [
+                  {
+                    number: 1,
+                    text: "Sb2Se3 ribbons grow along the [001] direction.",
+                  },
+                  { number: 2, text: "Carrier lifetime was 1.2 ns." },
+                ],
+                ownership: "external",
+                cached: false,
+              }
+            );
+
+          case "clear_pdf_text_cache":
+            return null;
+
+          case "zotero_annotations":
+            zotero();
+            return opts.annotations ?? [];
+
+          case "capture_annotations": {
+            const note = find(args.id as string);
+            const offered = args.annotations as NonNullable<
+              VaultOptions["annotations"]
+            >;
+            if (!note) return { added: 0, alreadyHere: 0, empty: 0 };
+            const sources = note.sources ?? (note.sources = []);
+            const already = new Set(
+              sources.map((c) => c.annotation).filter(Boolean),
+            );
+            const empty = offered.filter((a) => !a.text && !a.comment).length;
+            let added = 0;
+            for (const a of offered) {
+              if (already.has(a.key) || (!a.text && !a.comment)) continue;
+              sources.push({
+                eid: `01EVIDENCE${a.key}`,
+                id: args.sourceId as string,
+                page: a.page,
+                quote: a.text,
+                comment: a.comment,
+                colour: a.colour,
+                annotation: a.key,
+              });
+              added += 1;
+            }
+            return {
+              added,
+              alreadyHere: offered.length - added - empty,
+              empty,
+            };
+          }
 
           case "export_docx":
             exported.push(args.document);
@@ -405,6 +510,19 @@ export async function useVault(page: Page, options: VaultOptions) {
 }
 
 /** The markdown the app last wrote for the open note. */
+/**
+ * The notes as the fake backend now holds them.
+ *
+ * Reading the screen cannot answer "which note did that evidence land on",
+ * because only one note is shown at a time — and that question is the whole
+ * point of the rule that a paper never records evidence about itself.
+ */
+export async function notesNow(page: Page): Promise<Note[]> {
+  return page.evaluate(
+    () => (window as unknown as { __notes: Note[] }).__notes ?? [],
+  );
+}
+
 export async function lastSaved(page: Page): Promise<string> {
   return page.evaluate(() => {
     const saved = (window as unknown as { __saved: string[] }).__saved;
