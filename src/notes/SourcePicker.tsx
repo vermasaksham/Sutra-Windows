@@ -5,6 +5,7 @@ import {
   type NoteSummary,
   type Reference,
 } from "../vault/api";
+import { displayTitle } from "./titleText";
 
 /**
  * Choosing what a note is drawing on.
@@ -128,7 +129,7 @@ export default function SourcePicker({
                     className="w-full rounded-lg px-3 py-1.5 text-left transition-colors hover:bg-row-hover"
                   >
                     <span className="block truncate text-sm text-ink">
-                      {source.title}
+                      {displayTitle(source.title)}
                     </span>
                     <span className="block truncate text-xs text-ink-muted">
                       {describe(source.source)}
@@ -163,7 +164,7 @@ export default function SourcePicker({
                     className="w-full rounded-lg px-3 py-1.5 text-left transition-colors hover:bg-row-hover disabled:opacity-50"
                   >
                     <span className="block truncate text-sm text-ink">
-                      {reference.title}
+                      {displayTitle(reference.title)}
                     </span>
                     <span className="block truncate text-xs text-ink-muted">
                       {importing === reference.key

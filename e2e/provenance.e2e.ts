@@ -119,3 +119,102 @@ test.describe("citation consistency", () => {
     await expect(page.getByText("Nothing has been changed")).toBeVisible();
   });
 });
+
+/**
+ * What the Sources panel says when a citation does not resolve to a source
+ * note — and, more importantly, when it does resolve and the panel used to say
+ * it did not.
+ *
+ * Resolution read the *source* list, which is filtered by note type, so a
+ * citation whose note existed under any other type was reported as "Source not
+ * in this vault" while the note sat in the vault being cited.
+ */
+test.describe("a citation that does not resolve to a source note", () => {
+  test("names the note when it exists but is not a source", async ({
+    page,
+  }) => {
+    await useVault(page, {
+      notes: [
+        {
+          id: NOTE,
+          title: "Growth",
+          body: `Ribbons align, as [@${KO}] reports.`,
+          sources: [{ id: KO, page: "4" }],
+        },
+        // A real note, cited, and typed something other than `source`.
+        {
+          id: KO,
+          type: "literature",
+          title: "Reading Ko 2024",
+          body: "",
+        },
+      ],
+    });
+    await page.goto("/");
+
+    // In the panel, in the sentence, and in the bibliography.
+    await expect(page.getByText("Reading Ko 2024").first()).toBeVisible();
+    await expect(page.getByText("(Reading Ko 2024)")).toBeVisible();
+    await expect(page.getByText("Source note missing")).toHaveCount(0);
+    await expect(
+      page.getByText("A literature note, not a source."),
+    ).toBeVisible();
+  });
+
+  test("offers a way back when nothing in the vault has the id", async ({
+    page,
+  }) => {
+    await useVault(page, {
+      notes: [
+        {
+          id: NOTE,
+          title: "Growth",
+          body: `Ribbons align, as [@${ZHOU}] reports.`,
+          sources: [{ id: ZHOU, page: "S12" }],
+        },
+      ],
+    });
+    await page.goto("/");
+
+    // In the panel, and in the sentence itself.
+    await expect(
+      page.getByText("Source note missing", { exact: true }),
+    ).toBeVisible();
+    await expect(page.getByText("(source note missing)")).toBeVisible();
+    // The id is present as something to search for, not as the paper's name.
+    await expect(page.getByText(".sutra/trash")).toBeVisible();
+    await expect(page.getByText(`Reference ${ZHOU}`)).toHaveCount(0);
+  });
+
+  /**
+   * Zotero keeps a title's formatting as HTML, and a materials library is full
+   * of it. Shown raw, a citation reads `Sb<sub>2</sub>Se<sub>3</sub>`.
+   */
+  test("shows a chemistry title as chemistry, not as markup", async ({
+    page,
+  }) => {
+    await useVault(page, {
+      notes: [
+        {
+          id: NOTE,
+          title: "Growth",
+          body: `Ribbons align, as [@${ZHOU}] reports.`,
+          sources: [{ id: ZHOU, page: "S12" }],
+        },
+        {
+          id: ZHOU,
+          type: "source",
+          title: "α-Sb<sub>2</sub>O<sub>3</sub> polymorphs",
+          body: "",
+          // Authors kept plain: the title is what this test is about, and
+          // Zotero's markup lives there.
+          source: { authors: "Zhou, Y.", year: "2019" },
+        },
+      ],
+    });
+    await page.goto("/");
+
+    await expect(page.getByText("α-Sb₂O₃ polymorphs").first()).toBeVisible();
+    await expect(page.getByText("<sub>")).toHaveCount(0);
+  });
+});

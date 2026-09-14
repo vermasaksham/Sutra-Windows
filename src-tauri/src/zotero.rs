@@ -234,10 +234,13 @@ impl ReferenceProvider for Zotero {
                 Attachment {
                     is_pdf: content_type.as_deref() == Some("application/pdf"),
                     key: c.key,
-                    title: if c.data.title.trim().is_empty() {
-                        "Attachment".to_string()
-                    } else {
-                        c.data.title
+                    title: {
+                        let title = html_to_text(&c.data.title);
+                        if title.is_empty() {
+                            "Attachment".to_string()
+                        } else {
+                            title
+                        }
                     },
                     content_type,
                     link_mode: c.data.link_mode.and_then(|v| blank_to_none(&v)),
@@ -635,10 +638,17 @@ struct CollectionData {
 fn reference_from(item: ZoteroItem) -> Reference {
     Reference {
         key: item.key,
-        title: if item.data.title.is_empty() {
-            "Untitled".to_string()
-        } else {
-            item.data.title
+        // Through `html_to_text`, because Zotero stores a title's formatting
+        // as HTML and this title becomes a note's name and its file name. A
+        // chemistry paper arrives as `Sb<sub>2</sub>Se<sub>3</sub> …`, which
+        // read as-is is what a materials vault would be full of.
+        title: {
+            let title = html_to_text(&item.data.title);
+            if title.is_empty() {
+                "Untitled".to_string()
+            } else {
+                title
+            }
         },
         creators: item.meta.creator_summary.unwrap_or_default(),
         // Only the year is wanted for a citation label, and the rest of the
@@ -673,6 +683,142 @@ struct StyledItem {
     citation: Option<String>,
     #[serde(default)]
     bib: Option<String>,
+}
+
+/// A title, as readable text, with the library's markup resolved.
+///
+/// Zotero stores a title's formatting as HTML, so a chemistry paper arrives as
+/// `Sb<sub>2</sub>Se<sub>3</sub> Nanosheet Film-Based Devices`. Shown as-is it
+/// is what a materials vault fills up with — in the note list, in the note's
+/// own heading, in the reading pane and in the file name on disk, because a
+/// source note is named after its paper.
+///
+/// **`<sub>` and `<sup>` become Unicode**, so `Sb<sub>2</sub>Se<sub>3</sub>`
+/// reads `Sb₂Se₃` and the chemistry survives. Flattening them to `Sb2Se3` would
+/// also be readable, but a formula is not the same claim as a string of digits
+/// on the line, and a subscript is the one piece of a title whose meaning is
+/// carried entirely by its position.
+///
+/// A character with no subscript form — Unicode has no `₨`, and only a partial
+/// superscript alphabet — is left on the line rather than replaced with
+/// something near it. Half a formula rendered and half invented is worse than
+/// a formula written flat.
+///
+/// Not `html_to_markdown`: that keeps emphasis as `*` and `**`, which is right
+/// inside a note body and wrong here, where the string becomes a YAML value and
+/// a file name.
+pub fn html_to_text(html: &str) -> String {
+    let mut out = String::with_capacity(html.len());
+    let mut chars = html.chars().peekable();
+    // Tag names, innermost last. Only sub/sup are tracked; everything else is
+    // structure with no meaning left once this is a title.
+    let mut script: Vec<Script> = Vec::new();
+
+    while let Some(c) = chars.next() {
+        match c {
+            '<' => {
+                let mut tag = String::new();
+                for t in chars.by_ref() {
+                    if t == '>' {
+                        break;
+                    }
+                    tag.push(t);
+                }
+                let closing = tag.starts_with('/');
+                let name = tag.trim_start_matches('/').trim();
+                let name = name
+                    .split([' ', '\t', '/'])
+                    .next()
+                    .unwrap_or("")
+                    .to_lowercase();
+                match (name.as_str(), closing) {
+                    ("sub", false) => script.push(Script::Sub),
+                    ("sup", false) => script.push(Script::Sup),
+                    ("sub" | "sup", true) => {
+                        script.pop();
+                    }
+                    _ => {}
+                }
+            }
+            '&' => {
+                let mut entity = String::new();
+                while let Some(&next) = chars.peek() {
+                    chars.next();
+                    if next == ';' {
+                        break;
+                    }
+                    entity.push(next);
+                    if entity.len() > 8 {
+                        break;
+                    }
+                }
+                for decoded in decode_entity(&entity).chars() {
+                    out.push(shift(decoded, script.last().copied()));
+                }
+            }
+            _ => out.push(shift(c, script.last().copied())),
+        }
+    }
+
+    out.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Script {
+    Sub,
+    Sup,
+}
+
+/// One character, raised or lowered if Unicode has a form for it.
+///
+/// Returns the character unchanged when it does not — which is most letters in
+/// subscript, and several in superscript. A title is not worth mangling to make
+/// a tag render.
+fn shift(c: char, script: Option<Script>) -> char {
+    match script {
+        None => c,
+        Some(Script::Sub) => match c {
+            '0'..='9' => char::from_u32(0x2080 + (c as u32 - '0' as u32)).unwrap_or(c),
+            '+' => '₊',
+            '-' | '\u{2212}' => '₋',
+            '=' => '₌',
+            '(' => '₍',
+            ')' => '₎',
+            'a' => 'ₐ',
+            'e' => 'ₑ',
+            'h' => 'ₕ',
+            'i' => 'ᵢ',
+            'j' => 'ⱼ',
+            'k' => 'ₖ',
+            'l' => 'ₗ',
+            'm' => 'ₘ',
+            'n' => 'ₙ',
+            'o' => 'ₒ',
+            'p' => 'ₚ',
+            'r' => 'ᵣ',
+            's' => 'ₛ',
+            't' => 'ₜ',
+            'u' => 'ᵤ',
+            'v' => 'ᵥ',
+            'x' => 'ₓ',
+            _ => c,
+        },
+        Some(Script::Sup) => match c {
+            '0' => '⁰',
+            '1' => '¹',
+            '2' => '²',
+            '3' => '³',
+            '4'..='9' => char::from_u32(0x2074 + (c as u32 - '4' as u32)).unwrap_or(c),
+            '+' => '⁺',
+            '-' | '\u{2212}' => '⁻',
+            '=' => '⁼',
+            '(' => '⁽',
+            ')' => '⁾',
+            'n' => 'ⁿ',
+            'i' => 'ⁱ',
+            _ => c,
+        },
+    }
 }
 
 /// Flatten Zotero's rendered HTML to markdown.
@@ -1123,6 +1269,87 @@ mod tests {
         assert!(found[0].is_pdf);
         assert_eq!(found[0].title, "Ko 2024.pdf");
         assert!(!found[1].is_pdf, "a web snapshot is not a PDF");
+    }
+
+    /// Zotero keeps a title's formatting as HTML, and a materials-chemistry
+    /// library is full of it. Read as-is, every such paper arrives in the vault
+    /// as `Sb<sub>2</sub>Se<sub>3</sub> …` — in the note list, in the note's own
+    /// heading, and in the file name on disk.
+    ///
+    /// The subscripts survive as Unicode rather than being flattened: in this
+    /// field `Sb₂Se₃` is a compound and `Sb2Se3` is a string of characters
+    /// that happens to look like one.
+    #[test]
+    fn a_title_arrives_as_text_not_as_markup() {
+        assert_eq!(
+            html_to_text("Sb<sub>2</sub>Se<sub>3</sub> Nanosheet Film-Based Devices"),
+            "Sb₂Se₃ Nanosheet Film-Based Devices"
+        );
+        // A Greek prefix is already a character, not markup, and passes through
+        // untouched alongside the subscripts it qualifies.
+        assert_eq!(
+            html_to_text("α-Sb<sub>2</sub>O<sub>3</sub> polymorph"),
+            "α-Sb₂O₃ polymorph"
+        );
+        // Entities decode, both spellings, as they do everywhere else.
+        assert_eq!(
+            html_to_text("Cu&#x2013;O bonds &amp; strain"),
+            "Cu–O bonds & strain"
+        );
+        assert_eq!(html_to_text("221&#8211;230"), "221–230");
+    }
+
+    /// Superscripts are the other half of the same claim: an oxidation state or
+    /// a charge sits above the line, and reads as a different quantity on it.
+    #[test]
+    fn a_title_raises_superscripts_too() {
+        assert_eq!(html_to_text("Sb<sup>3+</sup> centres"), "Sb³⁺ centres");
+        assert_eq!(
+            html_to_text("Conductivity of 10<sup>-4</sup> S cm<sup>-1</sup>"),
+            "Conductivity of 10⁻⁴ S cm⁻¹"
+        );
+    }
+
+    /// Unicode has no subscript alphabet to speak of. Where there is no form
+    /// for a character, it stays on the line — a title half-rendered and half
+    /// invented is worse than one written flat.
+    #[test]
+    fn a_character_with_no_subscript_form_is_left_alone() {
+        assert_eq!(html_to_text("X<sub>Q</sub>Y"), "XQY");
+        // And the ones that do have a form are still lowered in the same title.
+        assert_eq!(html_to_text("X<sub>Q2</sub>Y"), "XQ₂Y");
+    }
+
+    /// Emphasis is dropped rather than kept as markdown. A title becomes a YAML
+    /// value and a file name, where `*Escherichia coli*` is noise at best.
+    #[test]
+    fn a_title_keeps_no_markdown_emphasis() {
+        assert_eq!(
+            html_to_text("Growth of <i>Escherichia coli</i> on <b>Sb</b>"),
+            "Growth of Escherichia coli on Sb"
+        );
+        // Which is precisely where it differs from the bibliography converter.
+        assert_eq!(
+            html_to_markdown("Growth of <i>Escherichia coli</i>"),
+            "Growth of *Escherichia coli*"
+        );
+    }
+
+    #[test]
+    fn a_title_that_came_through_the_api_is_already_text() {
+        let (base, handle) = stub(
+            r#"[
+              {"key":"IAKCQGNV","data":{"itemType":"journalArticle",
+               "title":"Sb<sub>2</sub>Se<sub>3</sub> Nanosheet Film-Based Devices",
+               "DOI":"10.1021/acsanm.3c01800"},
+               "meta":{"creatorSummary":"Singh et al.","parsedDate":"2023-08-01"}}
+            ]"#,
+        );
+        let found = Zotero::new(base, Flavour::Local)
+            .search("nanosheet", 10)
+            .unwrap();
+        handle.join().unwrap();
+        assert_eq!(found[0].title, "Sb₂Se₃ Nanosheet Film-Based Devices");
     }
 
     /// The real response, as observed against a live library: `imported_file`,

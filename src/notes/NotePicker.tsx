@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { notesApi, TYPE_LABELS, type NoteSummary } from "../vault/api";
+import { displayTitle } from "./titleText";
 
 /**
  * Choosing a note from the vault.
@@ -80,7 +81,7 @@ export default function NotePicker({
                     className="w-full rounded-lg px-3 py-1.5 text-left transition-colors hover:bg-row-hover"
                   >
                     <span className="block truncate text-sm text-ink">
-                      {note.title}
+                      {displayTitle(note.title)}
                     </span>
                     <span className="block truncate text-xs text-ink-muted">
                       {note.folder || "Vault root"}

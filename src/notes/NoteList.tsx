@@ -6,6 +6,7 @@ import {
   type Reference,
   type SearchHit,
 } from "../vault/api";
+import { displayTitle } from "./titleText";
 
 /**
  * The middle column: which note.
@@ -324,7 +325,7 @@ function PaperRow({
 
   return (
     <li className="mb-1 rounded-lg border border-dashed border-highlight/50 px-2.5 py-2">
-      <p className="text-sm text-ink">{paper.title}</p>
+      <p className="text-sm text-ink">{displayTitle(paper.title)}</p>
       <p className="mt-0.5 truncate text-xs text-ink-muted">
         {detail || "No author or year in Zotero"}
       </p>
@@ -424,7 +425,7 @@ function Row({
 function listRows(notes: NoteSummary[]): ListRow[] {
   return notes.map((note) => ({
     id: note.id,
-    title: note.title,
+    title: displayTitle(note.title),
     icon: note.icon,
     excerpt: note.excerpt,
     marked: false,
@@ -437,7 +438,7 @@ function hitRows(hits: SearchHit[], notes: NoteSummary[]): ListRow[] {
   const byId = new Map(notes.map((note) => [note.id, note]));
   return hits.map((hit) => ({
     id: hit.id,
-    title: hit.title,
+    title: displayTitle(hit.title),
     icon: byId.get(hit.id)?.icon ?? null,
     excerpt: hit.excerpt,
     marked: true,

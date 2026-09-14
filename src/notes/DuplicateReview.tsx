@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { duplicatesApi, notesApi, type NoteDoc } from "../vault/api";
+import { displayTitle } from "./titleText";
 
 /**
  * Two notes side by side, and three things a person can do about them.
@@ -64,8 +65,12 @@ export default function DuplicateReview({
   }
 
   const absorb = keep === left ? right : left;
-  const keptTitle = notes?.find((n) => n.id === keep)?.title ?? "";
-  const absorbedTitle = notes?.find((n) => n.id === absorb)?.title ?? "";
+  const keptTitle = displayTitle(
+    notes?.find((n) => n.id === keep)?.title ?? "",
+  );
+  const absorbedTitle = displayTitle(
+    notes?.find((n) => n.id === absorb)?.title ?? "",
+  );
 
   return (
     <div
@@ -180,7 +185,7 @@ function Side({
           className="accent-accent"
         />
         <span className="min-w-0 flex-1 truncate font-medium text-ink">
-          {note.title || "Untitled"}
+          {displayTitle(note.title) || "Untitled"}
         </span>
         <span className="shrink-0 text-xs text-ink-muted">
           {kept ? "Keep this one" : "Keep instead"}

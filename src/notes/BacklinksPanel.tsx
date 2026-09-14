@@ -1,5 +1,6 @@
 import { linksAsTitles } from "../editor/wikilink/titleStore";
 import type { Backlink } from "../vault/api";
+import { displayTitle } from "./titleText";
 
 /**
  * Notes that link here.
@@ -39,7 +40,7 @@ export default function BacklinksPanel({
                 className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-left transition-colors hover:border-accent"
               >
                 <span className="block truncate text-sm text-ink">
-                  {link.title || "Untitled"}
+                  {displayTitle(link.title) || "Untitled"}
                 </span>
                 <span className="block truncate text-xs text-ink-muted">
                   {linksAsTitles(link.excerpt)}

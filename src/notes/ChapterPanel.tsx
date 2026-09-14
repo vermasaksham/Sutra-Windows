@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import NotePicker from "./NotePicker";
 import { chaptersApi, type ChapterEntry } from "../vault/api";
+import { displayTitle } from "./titleText";
 
 /**
  * What a chapter assembles, in order.
@@ -113,7 +114,7 @@ export default function ChapterPanel({
                   onClick={() => onOpen(entry.id)}
                   className="min-w-0 flex-1 truncate text-left text-sm text-accent"
                 >
-                  {entry.note.title}
+                  {displayTitle(entry.note.title)}
                 </button>
               ) : (
                 // Deleted, or not synced to this machine yet. Named rather than
@@ -131,7 +132,7 @@ export default function ChapterPanel({
                   type="button"
                   onClick={() => move(index, index - 1)}
                   disabled={index === 0}
-                  aria-label={`Move ${entry.note?.title ?? entry.id} up`}
+                  aria-label={`Move ${entry.note ? displayTitle(entry.note.title) : entry.id} up`}
                   className="px-1 text-xs text-ink-muted transition-colors not-disabled:hover:text-accent disabled:opacity-30"
                 >
                   ↑
@@ -140,7 +141,7 @@ export default function ChapterPanel({
                   type="button"
                   onClick={() => move(index, index + 1)}
                   disabled={index === entries.length - 1}
-                  aria-label={`Move ${entry.note?.title ?? entry.id} down`}
+                  aria-label={`Move ${entry.note ? displayTitle(entry.note.title) : entry.id} down`}
                   className="px-1 text-xs text-ink-muted transition-colors not-disabled:hover:text-accent disabled:opacity-30"
                 >
                   ↓
@@ -148,7 +149,7 @@ export default function ChapterPanel({
                 <button
                   type="button"
                   onClick={() => remove(index)}
-                  aria-label={`Remove ${entry.note?.title ?? entry.id} from the chapter`}
+                  aria-label={`Remove ${entry.note ? displayTitle(entry.note.title) : entry.id} from the chapter`}
                   className="px-1 text-xs text-ink-muted transition-colors hover:text-highlight"
                 >
                   ×

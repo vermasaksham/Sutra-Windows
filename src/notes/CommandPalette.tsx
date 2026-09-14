@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { MOD, SHIFT, shortcut } from "../platform";
 import { NOTE_TYPES, type NoteSummary, type NoteType } from "../vault/api";
+import { displayTitle } from "./titleText";
 
 /**
  * Everything the app can do, behind one keystroke.
@@ -281,7 +282,7 @@ export default function CommandPalette({
           .slice(0, 8)
           .map<Command>((n) => ({
             id: `note:${n.id}`,
-            label: n.title || "Untitled",
+            label: displayTitle(n.title) || "Untitled",
             group: "Notes",
             hint: n.folder || "top level",
             run: () => onOpenNote(n.id),

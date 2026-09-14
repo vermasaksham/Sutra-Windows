@@ -13,6 +13,7 @@ import type {
   NoteSummary,
   RelatedNote,
 } from "../vault/api";
+import { displayTitle } from "./titleText";
 
 /**
  * The fourth column: what is near this note, and why.
@@ -34,7 +35,7 @@ import type {
  */
 export default function ContextPanel({
   citations,
-  sources,
+  notes,
   inlineRefs,
   showSources,
   backlinks,
@@ -58,7 +59,13 @@ export default function ContextPanel({
   onReport,
 }: {
   citations: Citation[];
-  sources: NoteSummary[];
+  /**
+   * Every note in the vault, for resolving a citation's id to the note it
+   * names. Not only the source-typed ones: a citation whose note exists but
+   * carries another type is a wrong type, not a missing note, and reading it
+   * off a filtered list is what made the panel claim the note was gone.
+   */
+  notes: NoteSummary[];
   inlineRefs: string[];
   /** False for a source note, which shows its own paper above the editor. */
   showSources: boolean;
@@ -109,7 +116,7 @@ export default function ContextPanel({
         {showSources && (
           <SourcesPanel
             citations={citations}
-            sources={sources}
+            notes={notes}
             inlineRefs={inlineRefs}
             onChange={onChangeCitations}
             onOpen={onOpen}
@@ -121,7 +128,7 @@ export default function ContextPanel({
           <Bibliography
             citations={citations}
             inlineRefs={inlineRefs}
-            sources={sources}
+            notes={notes}
             onOpen={onOpen}
           />
         )}
@@ -144,7 +151,7 @@ export default function ContextPanel({
                     className="w-full rounded-lg border border-highlight/40 bg-highlight-bg px-3 py-2 text-left transition-colors hover:border-highlight"
                   >
                     <span className="block truncate text-sm text-ink">
-                      {note.title}
+                      {displayTitle(note.title)}
                     </span>
                     <span className="block truncate text-xs text-ink-muted">
                       {note.reason} — compare them
@@ -186,7 +193,7 @@ export default function ContextPanel({
                       {note.there}
                     </span>
                     <span className="block truncate text-xs text-ink-muted">
-                      {round(note.factor)}× apart, in {note.title}
+                      {round(note.factor)}× apart, in {displayTitle(note.title)}
                     </span>
                   </button>
                 </li>
@@ -208,7 +215,7 @@ export default function ContextPanel({
                 className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-left transition-colors hover:border-accent"
               >
                 <span className="block truncate text-sm text-ink">
-                  {note.title}
+                  {displayTitle(note.title)}
                 </span>
                 {/*
                   The reason, not a score. A number would say "trust me"; this
@@ -238,7 +245,7 @@ export default function ContextPanel({
                 onClick={() => onOpen(note.id)}
                 className="w-full truncate rounded-lg px-2 py-1 text-left text-sm text-ink-soft transition-colors hover:bg-row-hover hover:text-ink"
               >
-                {note.title}
+                {displayTitle(note.title)}
               </button>
             </li>
           ))}

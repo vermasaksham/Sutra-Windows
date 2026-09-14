@@ -8,6 +8,7 @@ import {
   setCitationOrder,
   setCitationReporter,
   setSources,
+  setVaultNotes,
 } from "./editor/citation/citationStore";
 import ContextPanel from "./notes/ContextPanel";
 import DuplicateReview from "./notes/DuplicateReview";
@@ -148,7 +149,7 @@ export default function App() {
    * The paper being read, and the note evidence goes to.
    *
    * The target is remembered from when reading opened rather than followed
-   * live, because opening the Source note to press `Read text` would otherwise
+   * live, because opening the Source note to press `Read paper text` would otherwise
    * make the Source note the target — capturing a paper's evidence onto the
    * paper, which is exactly what the design rules out. Held here rather than in
    * the pane so that selecting another note while reading does not silently
@@ -162,7 +163,7 @@ export default function App() {
   /**
    * The last note opened that was not a source — the one being written.
    *
-   * Kept because pressing `Read text` means opening the Source note, which
+   * Kept because pressing `Read paper text` means opening the Source note, which
    * would otherwise be "the note you are working in". Evidence belongs to the
    * reading, not to the paper, so a source is never its own target; this
    * remembers what you were writing before you went to look at the paper.
@@ -207,6 +208,9 @@ export default function App() {
     try {
       const list = await notesApi.list();
       setNotes(list);
+      // Every note, because a citation names a note and the note it names
+      // need not be typed `source` — see citationStore.
+      setVaultNotes(list);
       // Feed the wikilink renderer, so [[id]] shows the current title. This is
       // why a rename cannot break a link: nothing stores the title but here.
       setTitles(list.map((n) => [n.id, n.title] as const));
@@ -781,6 +785,7 @@ export default function App() {
       await notesApi.remove(id);
       const remaining = await notesApi.list();
       setNotes(remaining);
+      setVaultNotes(remaining);
       setTitles(remaining.map((n) => [n.id, n.title] as const));
       if (id === selectedId) setSelectedId(remaining[0]?.id ?? null);
     } catch (cause) {
@@ -1207,7 +1212,7 @@ export default function App() {
       {note.doc && showContext && (
         <ContextPanel
           citations={note.doc.sources ?? []}
-          sources={sources}
+          notes={notes}
           inlineRefs={proseRefs}
           // A source note shows its paper above the editor instead; a list of
           // what it draws on would be asking the wrong question of it.

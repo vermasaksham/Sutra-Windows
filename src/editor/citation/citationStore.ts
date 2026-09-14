@@ -2,6 +2,7 @@ import { useSyncExternalStore } from "react";
 import { zoteroApi, type NoteSummary, type Reference } from "../../vault/api";
 import { currentStyle, styledFor } from "../../notes/citationStyle";
 import { sourceLabel } from "../../notes/sourceLabel";
+import { displayTitle } from "../../notes/titleText";
 
 /**
  * What a `[@ref]` in the text should read as.
@@ -23,7 +24,20 @@ export function isSourceNote(ref: string): boolean {
   return ref.length === 26;
 }
 
-/** Source notes by id, kept current by the app. */
+/**
+ * Every note in the vault by id — what a `[@ref]` resolves against.
+ *
+ * Deliberately *every* note, not only the source-typed ones. Resolution used to
+ * read the source list, which meant a citation whose target note existed but
+ * had been given another type read as deleted: the Sources panel said "Source
+ * not in this vault" about a file sitting right there in the vault. A citation
+ * names a note; whether that note is currently typed `source` is a separate
+ * question, and one worth answering separately rather than by pretending the
+ * note is gone.
+ */
+let notes = new Map<string, NoteSummary>();
+
+/** Source notes by id — what the `@` menu offers, which stays source-only. */
 let sources = new Map<string, NoteSummary>();
 
 /** Zotero references by item key, fetched on demand. */
@@ -40,6 +54,33 @@ function emit() {
 
 export function setSources(all: NoteSummary[]) {
   sources = new Map(all.map((source) => [source.id, source]));
+  // Also resolvable, so citations work on the first render after a vault opens
+  // — before the full note list has been read.
+  for (const source of all) notes.set(source.id, source);
+  emit();
+}
+
+/** Every note in the vault, kept current by the app. */
+export function setVaultNotes(all: NoteSummary[]) {
+  notes = new Map(all.map((note) => [note.id, note]));
+  // A source note imported a moment ago may not be in this list yet; it is
+  // still cited in the prose on screen, so it stays resolvable.
+  for (const [id, source] of sources) if (!notes.has(id)) notes.set(id, source);
+  emit();
+}
+
+/**
+ * A source note that has just been created, so the citation about to be
+ * inserted resolves without waiting for the vault to be listed again.
+ *
+ * The counterpart of [`remember`] for the vault half of the `@` menu. Picking a
+ * Zotero item imports it and inserts `[@<new note id>]` immediately; until the
+ * app re-listed the vault, nothing knew that id, and the sentence showed the
+ * raw ULID instead of the paper.
+ */
+export function rememberSource(source: NoteSummary) {
+  sources.set(source.id, source);
+  notes.set(source.id, source);
   emit();
 }
 
@@ -138,7 +179,7 @@ export function vaultCandidates(query: string): VaultCandidate[] {
   return matching.slice(0, 8).map((source) => ({
     kind: "source" as const,
     id: source.id,
-    title: source.title,
+    title: displayTitle(source.title),
     detail: fromSource(source).detail,
     zotero: source.source?.zotero ?? null,
   }));
@@ -176,6 +217,14 @@ export type Cited = {
   detail: string;
   /** True for a Zotero key, which only resolves while Zotero is running. */
   legacy: boolean;
+  /**
+   * Whether the note this resolved to is actually typed `source`.
+   *
+   * False means the citation found its note and the note is not a source — a
+   * type someone changed, or a citation pointed at the wrong note. Worth
+   * saying, and quite different from the note being gone, which is `missing`.
+   */
+  sourceNote: boolean;
 };
 
 export type CitationState =
@@ -227,7 +276,7 @@ export function useCitationPosition(ref: string): number | null {
 export function useCitation(ref: string): CitationState {
   const source = useSyncExternalStore(
     subscribe,
-    () => sources.get(ref),
+    () => notes.get(ref),
     () => undefined,
   );
   const reference = useSyncExternalStore(
@@ -264,7 +313,7 @@ export function resolved(refs: string[]): Cited[] {
   const out: Cited[] = [];
   for (const ref of refs) {
     if (isSourceNote(ref)) {
-      const source = sources.get(ref);
+      const source = notes.get(ref);
       if (source) out.push(fromSource(source));
     } else {
       const reference = references.get(ref);
@@ -284,13 +333,14 @@ function fromSource(source: NoteSummary): Cited {
   return {
     styled: rendered?.citation ?? null,
     label: sourceLabel(source),
-    title: source.title,
+    title: displayTitle(source.title),
+    sourceNote: source.type === "source",
     detail:
       rendered?.bib ??
       [
         meta?.authors,
         meta?.year && `(${meta.year})`,
-        source.title,
+        displayTitle(source.title),
         meta?.container,
         meta?.doi && `doi:${meta.doi}`,
       ]
@@ -307,11 +357,13 @@ function fromReference(reference: Reference): Cited {
     // when it becomes a source note — so there is nothing rendered to prefer.
     styled: null,
     label: reference.year ? `${who}, ${reference.year}` : who,
-    title: reference.title,
+    title: displayTitle(reference.title),
+    // A Zotero item is a library record, not a note in this vault at all.
+    sourceNote: false,
     detail: [
       reference.creators,
       reference.year && `(${reference.year})`,
-      reference.title,
+      displayTitle(reference.title),
       reference.container,
       reference.doi && `doi:${reference.doi}`,
     ]

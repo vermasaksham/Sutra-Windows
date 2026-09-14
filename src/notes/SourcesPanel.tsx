@@ -1,8 +1,18 @@
 import { useState } from "react";
 import SourcePicker, { describe } from "./SourcePicker";
-import { useCitation } from "../editor/citation/citationStore";
+import { displayTitle } from "./titleText";
+import {
+  useCitation,
+  type CitationState,
+} from "../editor/citation/citationStore";
 import { divergence, isConsistent, summarise } from "./provenance";
-import { EVIDENCE_KINDS, type Citation, type NoteSummary } from "../vault/api";
+import {
+  EVIDENCE_KINDS,
+  NOTE_TYPES,
+  type Citation,
+  type NoteSummary,
+  type NoteType,
+} from "../vault/api";
 
 /**
  * What this note draws on, and where in it.
@@ -24,15 +34,15 @@ import { EVIDENCE_KINDS, type Citation, type NoteSummary } from "../vault/api";
  */
 export default function SourcesPanel({
   citations,
-  sources,
+  notes,
   inlineRefs,
   onChange,
   onOpen,
   onReport,
 }: {
   citations: Citation[];
-  /** Every source note in the vault, for resolving ids to titles. */
-  sources: NoteSummary[];
+  /** Every note in the vault, for resolving a citation's id to its note. */
+  notes: NoteSummary[];
   /** Every `[@ref]` in the body, so the prose and this list can be compared. */
   inlineRefs: string[];
   onChange: (citations: Citation[]) => void;
@@ -40,7 +50,7 @@ export default function SourcesPanel({
   onReport: (message: string, cause: unknown) => void;
 }) {
   const [picking, setPicking] = useState(false);
-  const byId = new Map(sources.map((s) => [s.id, s]));
+  const byId = new Map(notes.map((n) => [n.id, n]));
   // Both directions of disagreement, from one tested function rather than a
   // filter here — the reverse direction (recorded, never cited) had no filter
   // at all before v0.2.1 and so was invisible.
@@ -86,14 +96,15 @@ export default function SourcesPanel({
                       onClick={() => onOpen(citation.id)}
                       className="min-w-0 flex-1 truncate text-left text-sm text-accent"
                     >
-                      {source.title}
+                      {displayTitle(source.title)}
                     </button>
                   ) : (
-                    // The source note is gone — deleted, or not synced yet. The
-                    // citation still says what it said, which is the point of
-                    // keeping the quote in this file rather than in the source.
+                    // No note in the vault carries this id. Named as a state
+                    // to get out of rather than as an internal identifier: the
+                    // id is on the line below, where it is useful for finding
+                    // the file, instead of standing in for the paper's name.
                     <span className="min-w-0 flex-1 truncate text-sm text-highlight">
-                      Source not in this vault
+                      Source note missing
                     </span>
                   )}
                   <label className="sutra-no-print shrink-0 text-xs text-ink-muted">
@@ -120,9 +131,34 @@ export default function SourcesPanel({
                   </button>
                 </div>
 
-                {source && (
-                  <p className="truncate text-xs text-ink-muted">
-                    {describe(source.source)}
+                {source ? (
+                  source.type === "source" ? (
+                    <p className="truncate text-xs text-ink-muted">
+                      {describe(source.source)}
+                    </p>
+                  ) : (
+                    // Found, and not a source note. Said plainly rather than
+                    // reported as missing: the note is right there, and what is
+                    // wrong is one field on it. Until v0.4 this read "Source
+                    // not in this vault", because resolution consulted the
+                    // source list and a filtered list cannot tell a note of
+                    // another type apart from no note at all.
+                    <p className="text-xs text-highlight">
+                      A {typeLabel(source.type)} note, not a source. Set its
+                      type to Source so it can carry the paper&rsquo;s details.
+                    </p>
+                  )
+                ) : (
+                  // The citation still says what it said — the page and the
+                  // quote are in this file, not the missing one, which is the
+                  // whole reason they are written here. So the record stays,
+                  // and this says what would restore it.
+                  <p className="text-xs text-ink-muted">
+                    Nothing in this vault has the id{" "}
+                    <span className="selectable font-mono">{citation.id}</span>.
+                    It may be in <span className="font-mono">.sutra/trash</span>
+                    , or on another machine that has not synced yet. What was
+                    recorded below is kept either way.
                   </p>
                 )}
 
@@ -279,15 +315,9 @@ function Uncited({
   onOpen: () => void;
 }) {
   const state = useCitation(reference);
-  // A source note that has since been deleted still deserves to be named by
-  // the id the file actually holds, rather than shown as nothing.
-  const name =
-    state.status === "found" ? state.cited.title : `Reference ${reference}`;
   return (
     <li className="flex items-center justify-between gap-2">
-      <span className="min-w-0 flex-1 truncate text-sm text-ink-soft">
-        {name}
-      </span>
+      <CitedName state={state} reference={reference} />
       <button
         type="button"
         onClick={onOpen}
@@ -321,14 +351,10 @@ function InlineOnly({
     state.status === "found"
       ? state.cited.legacy
       : state.status === "missing" && state.legacy;
-  const name =
-    state.status === "found" ? state.cited.title : `Reference ${reference}`;
 
   return (
     <li className="flex items-center justify-between gap-2">
-      <span className="min-w-0 flex-1 truncate text-sm text-ink-soft">
-        {name}
-      </span>
+      <CitedName state={state} reference={reference} />
       {legacy ? (
         <span className="shrink-0 text-xs text-highlight">
           a Zotero reference — migrate it first
@@ -344,4 +370,50 @@ function InlineOnly({
       )}
     </li>
   );
+}
+
+/**
+ * What to call a reference in a one-line list.
+ *
+ * Its title once it resolves. Before that it is still being looked up, and if
+ * it never resolves it is missing — which is a state, and says so. It is not
+ * called `Reference 01M2…`: a ULID is how the file records the link, not a
+ * name for a paper, and putting one where a title goes tells the reader only
+ * that something has gone wrong without saying what or what to do.
+ *
+ * The id is still reachable, as the row's tooltip, because it is what finds
+ * the file in the trash or on the other machine.
+ */
+function CitedName({
+  state,
+  reference,
+}: {
+  state: CitationState;
+  reference: string;
+}) {
+  if (state.status === "found") {
+    return (
+      <span className="min-w-0 flex-1 truncate text-sm text-ink-soft">
+        {state.cited.title}
+      </span>
+    );
+  }
+  return (
+    <span
+      className="min-w-0 flex-1 truncate text-sm text-highlight"
+      title={reference}
+    >
+      {state.status === "loading"
+        ? "Looking this up…"
+        : state.legacy
+          ? "Not in the Zotero library"
+          : "Source note missing"}
+    </span>
+  );
+}
+
+/** A note type as the type picker writes it, lower-cased to sit in a sentence. */
+function typeLabel(type: NoteType): string {
+  const known = NOTE_TYPES.find((t) => t.value === type)?.label;
+  return (known ?? type).toLowerCase();
 }

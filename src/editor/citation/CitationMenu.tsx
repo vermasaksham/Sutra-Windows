@@ -1,6 +1,7 @@
 import { useEffect, useImperativeHandle, useRef, useState } from "react";
 import type { Ref } from "react";
 import type { Reference } from "../../vault/api";
+import { displayTitle } from "../../notes/titleText";
 
 export type CitationMenuHandle = {
   onKeyDown: (event: KeyboardEvent) => boolean;
@@ -129,7 +130,7 @@ export default function CitationMenu({
               <span
                 className={`block truncate text-sm ${isSelected ? "text-accent" : "text-ink"}`}
               >
-                {item.title}
+                {displayTitle(item.title)}
               </span>
               <span className="block truncate text-xs text-ink-muted">
                 {item.detail}

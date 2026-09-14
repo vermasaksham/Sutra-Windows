@@ -4,6 +4,7 @@ import IconPicker from "./IconPicker";
 import TagEditor from "./TagEditor";
 import TypePicker from "./TypePicker";
 import type { NoteDoc, NoteType } from "../vault/api";
+import { displayTitle } from "./titleText";
 
 /**
  * Everything above the note body: cover, icon, title, type, tags.
@@ -104,7 +105,7 @@ export default function NoteHeader({
 
       <input
         ref={titleRef}
-        value={doc.title}
+        value={displayTitle(doc.title)}
         onChange={(e) => onTitle(e.target.value)}
         placeholder="Untitled"
         aria-label="Note title"
