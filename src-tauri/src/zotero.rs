@@ -25,8 +25,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::{Result, SutraError};
 use crate::references::{
-    Attachment, Availability, Collection, ItemDetail, Reference, ReferenceProvider, StyledCitation,
-    blank_to_none,
+    Annotation, Attachment, Availability, Collection, ItemDetail, Reference, ReferenceProvider,
+    StyledCitation, blank_to_none,
 };
 
 /// Where Zotero listens. The port is fixed and not configurable in Zotero.
@@ -243,6 +243,56 @@ impl ReferenceProvider for Zotero {
                 }
             })
             .collect())
+    }
+
+    /// The highlights and notes made on one attachment.
+    ///
+    /// The same `children` endpoint the attachment list uses, one level
+    /// further down: Zotero hangs annotations off the *file*, so the parent of
+    /// a highlight is the PDF, not the paper.
+    ///
+    /// Every field is treated as optional, including ones that are documented
+    /// as always present. A highlight has text and often no comment; a sticky
+    /// note has a comment and no text; a PDF without page labels yields no
+    /// page. An annotation carrying none of them still comes back, with its
+    /// key, rather than being silently dropped — a researcher who made a mark
+    /// should not find it missing because Sutra did not recognise the shape.
+    ///
+    /// Ordered by Zotero's own `annotationSortIndex`, which is reading order.
+    /// The index is never parsed, only compared, because its format is
+    /// Zotero's business and it changes.
+    fn annotations(&self, attachment_key: &str) -> Result<Vec<Annotation>> {
+        let url = format!(
+            "{}/items/{}/children?limit={}&format=json",
+            self.root(),
+            urlencode(attachment_key),
+            CHILD_LIMIT
+        );
+        let children = self.raw_items(&url)?;
+
+        let mut found: Vec<Annotation> = children
+            .into_iter()
+            .filter(|c| c.data.item_type == "annotation")
+            .map(|c| Annotation {
+                key: c.key,
+                kind: c.data.annotation_type.and_then(|v| blank_to_none(&v)),
+                text: c.data.annotation_text.and_then(|v| blank_to_none(&v)),
+                comment: c.data.annotation_comment.and_then(|v| blank_to_none(&v)),
+                colour: c.data.annotation_color.and_then(|v| blank_to_none(&v)),
+                page: c.data.annotation_page_label.and_then(|v| blank_to_none(&v)),
+                sort_index: c.data.annotation_sort_index.and_then(|v| blank_to_none(&v)),
+            })
+            .collect();
+
+        // A missing sort index sorts last rather than first: an annotation
+        // Zotero could not place should not be presented as the opening one.
+        found.sort_by(|a, b| match (&a.sort_index, &b.sort_index) {
+            (Some(x), Some(y)) => x.cmp(y),
+            (Some(_), None) => std::cmp::Ordering::Less,
+            (None, Some(_)) => std::cmp::Ordering::Greater,
+            (None, None) => std::cmp::Ordering::Equal,
+        });
+        Ok(found)
     }
 
     /// Everything about one item.
@@ -512,6 +562,34 @@ struct ItemData {
     collections: Vec<String>,
     #[serde(rename = "contentType", default)]
     content_type: Option<String>,
+
+    // ---- annotations -------------------------------------------------------
+    //
+    // Zotero 6 and later store each highlight and note as an item of its own,
+    // a child of the *attachment* rather than of the paper. Every field is
+    // optional because every one of them is genuinely absent sometimes: a
+    // sticky note has a comment and no highlighted text, a highlight has text
+    // and often no comment, and a PDF with no page labels yields no page.
+    // Absence is recorded as absence and never filled in.
+    #[serde(rename = "annotationType", default)]
+    annotation_type: Option<String>,
+    /// The source's own words, exactly as the PDF had them.
+    #[serde(rename = "annotationText", default)]
+    annotation_text: Option<String>,
+    /// The researcher's words about them. Never merged with the above: that
+    /// distinction is the one v0.3 froze the note format around.
+    #[serde(rename = "annotationComment", default)]
+    annotation_comment: Option<String>,
+    /// Kept because the researcher chose it and it means something to them.
+    /// Sutra assigns it no meaning whatever — see `Annotation::colour`.
+    #[serde(rename = "annotationColor", default)]
+    annotation_color: Option<String>,
+    /// The page as printed in the document, which is what a citation needs.
+    #[serde(rename = "annotationPageLabel", default)]
+    annotation_page_label: Option<String>,
+    /// Zotero's own ordering key. Opaque, and used only to sort.
+    #[serde(rename = "annotationSortIndex", default)]
+    annotation_sort_index: Option<String>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -1027,6 +1105,114 @@ mod tests {
         assert!(found[0].is_pdf);
         assert_eq!(found[0].title, "Ko 2024.pdf");
         assert!(!found[1].is_pdf, "a web snapshot is not a PDF");
+    }
+
+    /// The shape the whole evidence half turns on: the source's words and the
+    /// researcher's arrive in one object and must not come out as one.
+    #[test]
+    fn an_annotation_keeps_the_source_and_the_reader_apart() {
+        // `r##"..."##`, because a hex colour contains `"#`, which would end an
+        // `r#"` literal in the middle of the JSON.
+        let (base, handle) = stub(
+            r##"[
+              {"key":"AN1","data":{"itemType":"annotation","annotationType":"highlight",
+               "annotationText":"the bandgap is 1.2 eV",
+               "annotationComment":"but measured at 300 K only",
+               "annotationColor":"#ffd400","annotationPageLabel":"S12",
+               "annotationSortIndex":"00003|000000|00120"}}
+            ]"##,
+        );
+        let found = Zotero::new(base, Flavour::Local).annotations("A1").unwrap();
+        let request = handle.join().unwrap();
+
+        assert!(request.contains("/items/A1/children"), "got {request}");
+        assert_eq!(found.len(), 1);
+        let a = &found[0];
+        assert_eq!(a.key, "AN1");
+        assert_eq!(a.text.as_deref(), Some("the bandgap is 1.2 eV"));
+        assert_eq!(a.comment.as_deref(), Some("but measured at 300 K only"));
+        assert_eq!(a.page.as_deref(), Some("S12"));
+        assert_eq!(a.colour.as_deref(), Some("#ffd400"));
+        assert_eq!(a.kind.as_deref(), Some("highlight"));
+    }
+
+    /// Every field is optional because every one of them is really absent
+    /// sometimes. A highlight with no comment, a sticky note with no
+    /// highlighted text, and a PDF with no page labels are all ordinary.
+    #[test]
+    fn an_annotation_missing_fields_still_comes_back() {
+        let (base, handle) = stub(
+            r#"[
+              {"key":"H1","data":{"itemType":"annotation","annotationType":"highlight",
+               "annotationText":"quasi-1D ribbons"}},
+              {"key":"N1","data":{"itemType":"annotation","annotationType":"note",
+               "annotationComment":"check this against Zhou"}},
+              {"key":"E1","data":{"itemType":"annotation"}},
+              {"key":"X1","data":{"itemType":"note","title":"not an annotation"}}
+            ]"#,
+        );
+        let found = Zotero::new(base, Flavour::Local).annotations("A1").unwrap();
+        handle.join().unwrap();
+
+        assert_eq!(found.len(), 3, "a child note is not an annotation");
+
+        let highlight = found.iter().find(|a| a.key == "H1").unwrap();
+        assert_eq!(highlight.text.as_deref(), Some("quasi-1D ribbons"));
+        assert!(
+            highlight.comment.is_none(),
+            "no comment is not an empty one"
+        );
+        assert!(highlight.page.is_none());
+
+        let note = found.iter().find(|a| a.key == "N1").unwrap();
+        assert!(note.text.is_none(), "a sticky note highlights nothing");
+        assert_eq!(note.comment.as_deref(), Some("check this against Zhou"));
+
+        // Carrying nothing at all, it still comes back rather than being
+        // silently dropped: a mark the researcher made should not vanish
+        // because Sutra did not recognise the shape.
+        assert!(found.iter().any(|a| a.key == "E1"));
+    }
+
+    #[test]
+    fn annotations_come_back_in_reading_order() {
+        let (base, handle) = stub(
+            r#"[
+              {"key":"C","data":{"itemType":"annotation","annotationText":"third",
+               "annotationSortIndex":"00007|000000|00010"}},
+              {"key":"A","data":{"itemType":"annotation","annotationText":"first",
+               "annotationSortIndex":"00001|000000|00010"}},
+              {"key":"D","data":{"itemType":"annotation","annotationText":"unplaced"}},
+              {"key":"B","data":{"itemType":"annotation","annotationText":"second",
+               "annotationSortIndex":"00003|000000|00010"}}
+            ]"#,
+        );
+        let found = Zotero::new(base, Flavour::Local).annotations("A1").unwrap();
+        handle.join().unwrap();
+
+        let order: Vec<&str> = found.iter().map(|a| a.key.as_str()).collect();
+        // The one Zotero could not place sorts last rather than opening the
+        // list.
+        assert_eq!(order, vec!["A", "B", "C", "D"]);
+    }
+
+    /// A blank string is absence, not content. An empty comment must not
+    /// become an empty remark attached to a quotation.
+    #[test]
+    fn blank_annotation_fields_are_absent_rather_than_empty() {
+        let (base, handle) = stub(
+            r#"[
+              {"key":"H1","data":{"itemType":"annotation","annotationText":"real text",
+               "annotationComment":"   ","annotationColor":"","annotationPageLabel":" "}}
+            ]"#,
+        );
+        let found = Zotero::new(base, Flavour::Local).annotations("A1").unwrap();
+        handle.join().unwrap();
+
+        assert_eq!(found[0].text.as_deref(), Some("real text"));
+        assert!(found[0].comment.is_none());
+        assert!(found[0].colour.is_none());
+        assert!(found[0].page.is_none());
     }
 
     #[test]

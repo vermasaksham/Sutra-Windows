@@ -313,6 +313,41 @@ pub struct Citation {
         with = "time::serde::rfc3339::option"
     )]
     pub captured: Option<OffsetDateTime>,
+
+    // ---- where this evidence came from, when it was not typed by hand ------
+    //
+    // All three are additive and skipped when absent, like `eid`: a note
+    // written by v0.3 has none of them and is read and written back byte for
+    // byte unchanged.
+    /// The Zotero annotation this was captured from.
+    ///
+    /// An identifier in Zotero's namespace, never used to resolve anything in
+    /// the vault. It is here so that importing a paper's annotations twice
+    /// recognises what is already captured instead of duplicating it, and so a
+    /// researcher can find the highlight again in Zotero. Evidence captured by
+    /// hand has none, and evidence whose annotation is later deleted in Zotero
+    /// keeps its quote: what was captured is the researcher's, and it does not
+    /// evaporate because another program forgot it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub annotation: Option<String>,
+    /// The highlight colour the researcher chose, as Zotero gave it.
+    ///
+    /// **Recorded, never interpreted.** See `references::Annotation::colour`:
+    /// colour schemes are personal and undeclared, so reading meaning out of
+    /// one would be inventing provenance. It is kept because the researcher
+    /// chose it and throwing it away loses something real, and it drives
+    /// nothing.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub colour: Option<String>,
+    /// The researcher's own remark on this evidence, as written in Zotero.
+    ///
+    /// Deliberately not `quote`, and deliberately not merged into it. `quote`
+    /// is what the source says; this is what the reader thought about it. A
+    /// Zotero annotation carries both in one object and the single most
+    /// important thing this import does is keep them apart — a file that has
+    /// lost track of which words are the author's is not provenance any more.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub comment: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
