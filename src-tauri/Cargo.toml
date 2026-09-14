@@ -1,6 +1,6 @@
 [package]
 name = "sutra"
-version = "0.4.0-rc.1"
+version = "0.4.0-rc.2"
 description = "Local-first, block-based notes for materials-chemistry research"
 edition = "2024"
 rust-version = "1.85"
