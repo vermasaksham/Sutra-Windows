@@ -276,6 +276,9 @@ export async function useVault(page: Page, options: VaultOptions) {
           case "clear_pdf_text_cache":
             return null;
 
+          // Takes an item key now: the backend finds the PDF attachment and
+          // asks for *its* children. The harness answers per item, which is
+          // what the caller has.
           case "zotero_annotations":
             zotero();
             return opts.annotations ?? [];

@@ -27,7 +27,7 @@ type Mode = "text" | "annotations";
 
 export default function ReadingPane({
   source,
-  attachmentKey,
+  itemKey,
   vaultPdf,
   target,
   captured,
@@ -37,8 +37,10 @@ export default function ReadingPane({
 }: {
   /** The paper being read. */
   source: NoteSummary;
-  /** Zotero's attachment key, when the PDF is Zotero's. */
-  attachmentKey: string | null;
+  /** Zotero's *item* key — what the source note records. The backend finds
+   *  the attachment from it, because a paper is an item but its file and
+   *  its annotations both hang off an attachment. */
+  itemKey: string | null;
   /** The vault-relative path, when the PDF is the vault's own. */
   vaultPdf: string | null;
   /** The note evidence will be written to — normally the literature note being
@@ -75,8 +77,8 @@ export default function ReadingPane({
     setOutcome(null);
     const request = vaultPdf
       ? pdfApi.ofVaultFile(vaultPdf)
-      : attachmentKey
-        ? pdfApi.ofZoteroAttachment(attachmentKey)
+      : itemKey
+        ? pdfApi.ofZoteroItem(itemKey)
         : Promise.resolve<PdfOutcome>({ state: "notAttached" });
 
     request
@@ -94,14 +96,14 @@ export default function ReadingPane({
     return () => {
       live = false;
     };
-  }, [vaultPdf, attachmentKey]);
+  }, [vaultPdf, itemKey]);
 
   useEffect(() => {
-    if (!attachmentKey) return;
+    if (!itemKey) return;
     let live = true;
     setZoteroError(null);
     zoteroApi
-      .annotations(attachmentKey)
+      .annotations(itemKey)
       .then((found) => live && setAnnotations(found))
       .catch((cause: unknown) => {
         if (!live) return;
@@ -113,7 +115,7 @@ export default function ReadingPane({
     return () => {
       live = false;
     };
-  }, [attachmentKey]);
+  }, [itemKey]);
 
   /** What is selected, and which page heading it sits under. */
   const readSelection = useCallback(() => {
@@ -246,7 +248,7 @@ export default function ReadingPane({
             annotations={annotations}
             already={already}
             zoteroError={zoteroError}
-            attachmentKey={attachmentKey}
+            itemKey={itemKey}
             busy={busy}
             canCapture={Boolean(target)}
             onImport={(a) => void importOne(a)}
@@ -386,7 +388,7 @@ function AnnotationSide({
   annotations,
   already,
   zoteroError,
-  attachmentKey,
+  itemKey,
   busy,
   canCapture,
   onImport,
@@ -394,13 +396,13 @@ function AnnotationSide({
   annotations: Annotation[] | null;
   already: Set<string>;
   zoteroError: string | null;
-  attachmentKey: string | null;
+  itemKey: string | null;
   busy: string | null;
   canCapture: boolean;
   onImport: (annotation: Annotation) => void;
 }) {
-  if (!attachmentKey) {
-    return <Note>This source has no Zotero PDF to carry annotations.</Note>;
+  if (!itemKey) {
+    return <Note>This source did not come from Zotero.</Note>;
   }
   if (zoteroError) {
     return (

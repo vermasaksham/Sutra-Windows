@@ -300,6 +300,22 @@ pub fn app_data_dir(app: &AppHandle) -> PathBuf {
         .unwrap_or_else(|_| std::env::temp_dir())
 }
 
+/// Zotero's data directory on this machine.
+///
+/// Read from the profile's own preference where it is set, and the default
+/// `~/Zotero` where it is not. Resolution lives in `pdfread` because that is
+/// the module allowed to touch Zotero's files at all; this only supplies the
+/// two roots to look under, which are facts about *this* account rather than
+/// about Zotero.
+pub fn zotero_data_dir() -> PathBuf {
+    let home = std::env::var_os("USERPROFILE")
+        .or_else(|| std::env::var_os("HOME"))
+        .map(PathBuf::from)
+        .unwrap_or_else(std::env::temp_dir);
+    let app_data = std::env::var_os("APPDATA").map(PathBuf::from);
+    crate::pdfread::data_dir(&home, app_data.as_deref())
+}
+
 fn index_path(app: &AppHandle, root: &Path) -> PathBuf {
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     root.hash(&mut hasher);

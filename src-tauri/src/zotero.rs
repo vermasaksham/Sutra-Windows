@@ -240,6 +240,12 @@ impl ReferenceProvider for Zotero {
                         c.data.title
                     },
                     content_type,
+                    link_mode: c.data.link_mode.and_then(|v| blank_to_none(&v)),
+                    // `blank_to_none` trims and drops the empty case; it does
+                    // not alter a name that is present. A filename is used
+                    // exactly as the library gave it.
+                    filename: c.data.filename.and_then(|v| blank_to_none(&v)),
+                    path: c.data.path.and_then(|v| blank_to_none(&v)),
                 }
             })
             .collect())
@@ -562,6 +568,18 @@ struct ItemData {
     collections: Vec<String>,
     #[serde(rename = "contentType", default)]
     content_type: Option<String>,
+    /// How an attachment is held. Verified against a real library for
+    /// `imported_file`; see docs/decisions/0004-reading-the-paper.md.
+    #[serde(rename = "linkMode", default)]
+    link_mode: Option<String>,
+    /// An imported attachment's file name. Present for `imported_file` — that
+    /// much is verified — and taken exactly as given.
+    #[serde(default)]
+    filename: Option<String>,
+    /// A linked file's location. Absent on `imported_file`, which was also
+    /// verified: the real response carried no `path` at all.
+    #[serde(default)]
+    path: Option<String>,
 
     // ---- annotations -------------------------------------------------------
     //
@@ -1105,6 +1123,55 @@ mod tests {
         assert!(found[0].is_pdf);
         assert_eq!(found[0].title, "Ko 2024.pdf");
         assert!(!found[1].is_pdf, "a web snapshot is not a PDF");
+    }
+
+    /// The real response, as observed against a live library: `imported_file`,
+    /// a `filename`, and **no `path` at all**.
+    ///
+    /// Recorded as a test rather than only in prose, because the absence of
+    /// `path` is load-bearing — it is why the resolver does not treat a missing
+    /// path on an imported file as missing metadata.
+    #[test]
+    fn an_imported_attachment_carries_a_filename_and_no_path() {
+        let (base, handle) = stub(
+            r#"[
+              {"key":"J938YE6Z","data":{"itemType":"attachment",
+               "title":"Full Text PDF","contentType":"application/pdf",
+               "linkMode":"imported_file","filename":"Zhou et al. - 2019.pdf"}}
+            ]"#,
+        );
+        let found = Zotero::new(base, Flavour::Local)
+            .attachments("ZHOU2019")
+            .unwrap();
+        handle.join().unwrap();
+
+        assert_eq!(found.len(), 1);
+        assert!(found[0].is_pdf);
+        assert_eq!(found[0].link_mode.as_deref(), Some("imported_file"));
+        assert_eq!(found[0].filename.as_deref(), Some("Zhou et al. - 2019.pdf"));
+        assert!(
+            found[0].path.is_none(),
+            "the verified response carried no path; absence is the fact here"
+        );
+    }
+
+    /// A name is carried through untouched. Zotero owns the file, so the only
+    /// correct transformation of its name is none.
+    #[test]
+    fn a_filename_is_not_normalised_on_the_way_through() {
+        let (base, handle) = stub(
+            r#"[
+              {"key":"A1","data":{"itemType":"attachment","contentType":"application/pdf",
+               "linkMode":"imported_file",
+               "filename":"Sb₂Se₃ α-phase, β-transition (2019) [final].pdf"}}
+            ]"#,
+        );
+        let found = Zotero::new(base, Flavour::Local).attachments("X").unwrap();
+        handle.join().unwrap();
+        assert_eq!(
+            found[0].filename.as_deref(),
+            Some("Sb₂Se₃ α-phase, β-transition (2019) [final].pdf")
+        );
     }
 
     /// The shape the whole evidence half turns on: the source's words and the

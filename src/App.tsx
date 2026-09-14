@@ -957,7 +957,7 @@ export default function App() {
         {reading ? (
           <ReadingPane
             source={reading.source}
-            attachmentKey={reading.source.source?.zotero ?? null}
+            itemKey={reading.source.source?.zotero ?? null}
             vaultPdf={null}
             target={reading.target}
             captured={
