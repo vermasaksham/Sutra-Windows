@@ -354,6 +354,16 @@ pub fn research_overview(state: State<'_, AppState>) -> Result<crate::vault::Ove
     state.with_vault(|vault| vault.overview())
 }
 
+/// Every piece of evidence in the vault, with the notes that rest on it.
+///
+/// Read from the index rather than the files: the question is about the whole
+/// vault, and opening every note to answer it would make browsing evidence
+/// slower the more of it there is.
+#[tauri::command]
+pub fn all_evidence(state: State<'_, AppState>) -> Result<Vec<crate::evidence::EvidenceItem>> {
+    state.with_index(|index| Ok(crate::evidence::gather(&index.all_notes()?)))
+}
+
 /// Ask GitHub whether a newer Sutra has been released.
 ///
 /// Only ever called from a button. Sutra computes everything else from your
