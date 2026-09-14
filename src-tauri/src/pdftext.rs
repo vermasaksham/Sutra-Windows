@@ -26,6 +26,37 @@ use serde::{Deserialize, Serialize};
 use std::path::Path;
 use std::process::{Command, Stdio};
 
+/// What the child's exit code means.
+///
+/// The parent cannot see the child's error value, only its status, so the
+/// status is the vocabulary. Everything except `ENCRYPTED` collapses into one
+/// report — "could not read it, here is what it said" — because the researcher's
+/// next step is the same for all of them. A password-protected file is separated
+/// out because its next step is different and specific: the file is fine, Sutra
+/// is not being given the password, and Zotero's reader can open it.
+mod exit {
+    pub const NO_PATH: i32 = 2;
+    pub const UNREADABLE: i32 = 3;
+    pub const PARSER: i32 = 4;
+    pub const OUTPUT: i32 = 5;
+    /// Encrypted, and the empty password did not open it.
+    pub const ENCRYPTED: i32 = 6;
+}
+
+/// Whether a parser failure was "this file is locked".
+///
+/// Matched on the error's debug form rather than its type: `lopdf::Error` is not
+/// a direct dependency, and taking one on so a message can be more specific
+/// would be the tail wagging the dog. The match is narrow, and **the fallback is
+/// safe** — an encrypted file this fails to recognise is reported as an ordinary
+/// parser failure, which is exactly what it was reported as before this existed.
+/// No file is ever wrongly called locked, because nothing else in the parser
+/// produces a decryption error.
+fn is_encrypted(error: &pdf_extract::OutputError) -> bool {
+    let debug = format!("{error:?}");
+    debug.contains("Decryption") || debug.contains("IncorrectPassword")
+}
+
 /// The hidden first argument that means "you are the extraction child".
 ///
 /// Not a documented command-line interface and not intended as one: it exists
@@ -128,6 +159,17 @@ pub fn extract(path: &Path) -> Result<Extraction> {
         .wait_with_output()
         .map_err(|e| SutraError::Pdf(format!("could not read the result of extraction: {e}")))?;
 
+    if out.status.code() == Some(exit::ENCRYPTED) {
+        // Not a fault in the file and not something Sutra can fix by trying
+        // again. Saying "could not read this PDF" here would send someone
+        // looking for a corrupt download.
+        return Err(SutraError::Pdf(format!(
+            "{} is password-protected, so its text cannot be read. Zotero's own \
+             reader can still open it.",
+            path.display()
+        )));
+    }
+
     if !out.status.success() {
         // This is the case the child process exists for: the parser hit
         // something it could not handle and took its process down with it. The
@@ -167,7 +209,7 @@ pub fn extract(path: &Path) -> Result<Extraction> {
 pub fn run_as_child(args: &[String]) -> i32 {
     let Some(path) = args.first() else {
         eprintln!("no path given");
-        return 2;
+        return exit::NO_PATH;
     };
     let path = Path::new(path);
 
@@ -175,7 +217,7 @@ pub fn run_as_child(args: &[String]) -> i32 {
         Ok(bytes) => bytes,
         Err(e) => {
             eprintln!("{e}");
-            return 3;
+            return exit::UNREADABLE;
         }
     };
 
@@ -186,7 +228,11 @@ pub fn run_as_child(args: &[String]) -> i32 {
         Ok(pages) => pages,
         Err(e) => {
             eprintln!("{e}");
-            return 4;
+            return if is_encrypted(&e) {
+                exit::ENCRYPTED
+            } else {
+                exit::PARSER
+            };
         }
     };
 
@@ -208,7 +254,7 @@ pub fn run_as_child(args: &[String]) -> i32 {
         }
         Err(e) => {
             eprintln!("{e}");
-            5
+            exit::OUTPUT
         }
     }
 }

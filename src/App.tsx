@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Editor from "./editor/Editor";
 import ResearchOverview from "./notes/ResearchOverview";
 import { BOTTOM_RESERVE, SIDE_RESERVE, useDock } from "./editor/toolbarDock";
@@ -19,6 +19,7 @@ import { setCitationStyle } from "./notes/citationStyle";
 import { setTypography, typographyApi } from "./notes/typography";
 import { citedRefs } from "./notes/citedRefs";
 import { citationOrder } from "./notes/citationStyle";
+import ReadingPane from "./notes/ReadingPane";
 import SourceDetails from "./notes/SourceDetails";
 import ExportMenu from "./notes/ExportMenu";
 import FolderBar from "./notes/FolderBar";
@@ -143,6 +144,31 @@ export default function App() {
    * and re-closing it every launch would be the app forgetting something the
    * reader has already told it.
    */
+  /**
+   * The paper being read, and the note evidence goes to.
+   *
+   * The target is remembered from when reading opened rather than followed
+   * live, because opening the Source note to press `Read text` would otherwise
+   * make the Source note the target — capturing a paper's evidence onto the
+   * paper, which is exactly what the design rules out. Held here rather than in
+   * the pane so that selecting another note while reading does not silently
+   * change where evidence lands.
+   */
+  const [reading, setReading] = useState<{
+    source: NoteSummary;
+    target: NoteSummary | null;
+  } | null>(null);
+
+  /**
+   * The last note opened that was not a source — the one being written.
+   *
+   * Kept because pressing `Read text` means opening the Source note, which
+   * would otherwise be "the note you are working in". Evidence belongs to the
+   * reading, not to the paper, so a source is never its own target; this
+   * remembers what you were writing before you went to look at the paper.
+   */
+  const writingRef = useRef<NoteSummary | null>(null);
+
   const [contextOpen, setContextOpen] = useState(
     () => localStorage.getItem("sutra.context") !== "closed",
   );
@@ -190,6 +216,11 @@ export default function App() {
   }, [report]);
 
   const note = useNote(selectedId, refresh);
+
+  useEffect(() => {
+    const open = notes.find((n) => n.id === selectedId);
+    if (open && open.type !== "source") writingRef.current = open;
+  }, [selectedId, notes]);
   // Numbering for a numbering style, and the order the bibliography is built
   // in — one value, because in ACS or Nature "[3]" *is* the third entry, and
   // computing the two separately is how they stop agreeing.
@@ -914,55 +945,81 @@ export default function App() {
 
         <IdClashNotice clashes={clashes} />
 
-        <NoteList
-          onLiteratureNote={(key) => {
-            void (async () => {
-              try {
-                const summary = await zoteroApi.literatureNote(
-                  key,
-                  activeFolder,
-                );
-                await select(summary.id);
-              } catch (cause) {
-                report("Could not create the literature note", cause);
-              }
-            })();
-          }}
-          notes={listed}
-          hits={hits}
-          query={query}
-          onQuery={setQuery}
-          heading={
-            openView
-              ? openView.title
-              : activeTag
-                ? `#${activeTag}`
-                : activeFolder === null
-                  ? "All notes"
-                  : activeFolder
-          }
-          // A view's results come from wherever they come from, so every row
-          // says which folder it is really in — the point being that opening
-          // one opens the note in its own place, not inside the view.
-          showFolders={
-            activeView !== null || activeFolder === null || activeTag !== null
-          }
-          view={
-            openView && viewResult
-              ? {
-                  description: viewResult.description,
-                  truncated: viewResult.truncated,
-                  ignored: viewResult.ignored,
-                  onEdit: () => void editView(openView.id),
+        {/*
+          Reading takes the note list's place rather than adding a column.
+          The window already carries four regions — rail, list, note, context —
+          and a fifth would need about 1600px before the note column was usable,
+          so on a laptop it would simply never appear. The list gives way and the
+          context panel stays, because reading one paper is exactly when every
+          other note is least interesting and exactly when watching Sources fill
+          up matters most. See docs/design/v0.4-reading-workflow.md.
+        */}
+        {reading ? (
+          <ReadingPane
+            source={reading.source}
+            attachmentKey={reading.source.source?.zotero ?? null}
+            vaultPdf={null}
+            target={reading.target}
+            captured={
+              reading.target && note.doc?.id === reading.target.id
+                ? (note.doc.sources ?? [])
+                : (reading.target?.sources ?? [])
+            }
+            onCaptured={() => void refresh()}
+            onClose={() => setReading(null)}
+            onReport={report}
+          />
+        ) : (
+          <NoteList
+            onLiteratureNote={(key) => {
+              void (async () => {
+                try {
+                  const summary = await zoteroApi.literatureNote(
+                    key,
+                    activeFolder,
+                  );
+                  await select(summary.id);
+                } catch (cause) {
+                  report("Could not create the literature note", cause);
                 }
-              : null
-          }
-          selectedId={selectedId}
-          onSelect={(id) => void select(id)}
-          onDelete={(id) => void deleteNote(id)}
-          onCreate={() => void createNote(activeFolder)}
-          focusSearch={focusSearch}
-        />
+              })();
+            }}
+            notes={listed}
+            hits={hits}
+            query={query}
+            onQuery={setQuery}
+            heading={
+              openView
+                ? openView.title
+                : activeTag
+                  ? `#${activeTag}`
+                  : activeFolder === null
+                    ? "All notes"
+                    : activeFolder
+            }
+            // A view's results come from wherever they come from, so every row
+            // says which folder it is really in — the point being that opening
+            // one opens the note in its own place, not inside the view.
+            showFolders={
+              activeView !== null || activeFolder === null || activeTag !== null
+            }
+            view={
+              openView && viewResult
+                ? {
+                    description: viewResult.description,
+                    truncated: viewResult.truncated,
+                    ignored: viewResult.ignored,
+                    onEdit: () => void editView(openView.id),
+                  }
+                : null
+            }
+            selectedId={selectedId}
+            onSelect={(id) => void select(id)}
+            onDelete={(id) => void deleteNote(id)}
+            onCreate={() => void createNote(activeFolder)}
+            focusSearch={focusSearch}
+          />
+        )}
       </div>
 
       <main
@@ -1050,6 +1107,27 @@ export default function App() {
                 meta={note.doc.source ?? {}}
                 onChange={(meta) => void setSourceMeta(meta)}
                 onOpen={(id) => void select(id)}
+                onRead={() => {
+                  const source = notes.find((n) => n.id === note.doc?.id);
+                  if (!source) return;
+                  // The note evidence lands in is whichever was open *before*
+                  // this source — the literature note being written. A source
+                  // is never its own target: a paper does not record evidence
+                  // about itself.
+                  const writing = writingRef.current;
+                  const target =
+                    writing && writing.id !== source.id ? writing : null;
+                  setReading({ source, target });
+                  // Go back to the note being written. Reaching the paper meant
+                  // opening the Source note, but the paper now has a column of
+                  // its own — leaving the editor on it would show the reader
+                  // the paper twice and their own note not at all, and the
+                  // context panel would be describing the paper rather than
+                  // the evidence piling up. This is what makes the whole
+                  // window one workflow: paper on the left, your note in the
+                  // middle, its Sources on the right.
+                  if (target) void select(target.id);
+                }}
               />
             )}
             {note.doc.type === "view" && (

@@ -154,18 +154,41 @@ export type Annotation = {
   sortIndex?: string | null;
 };
 
-/** Text pulled out of a PDF, with the page each piece came from. */
-export type PdfText = {
-  pages: { number: number; text: string }[];
-  /** Who owns the file. Evidence is the researcher's either way; the
-   *  distinction is carried rather than lost. */
-  ownership: "vault" | "external";
-  /** False when extraction worked and every page was empty — a scanned paper
-   *  with no text layer. A state, not a failure. OCR would address it; v0.4
-   *  does not do OCR. */
-  hasText: boolean;
-  cached: boolean;
-};
+/** One page of a PDF, as extracted. */
+export type PdfPage = { number: number; text: string };
+
+/**
+ * What came of trying to read a PDF.
+ *
+ * Every ending is a value, not a rejection. A paper with no PDF, a scan, a
+ * locked file and a parser that gave up are ordinary states of a research
+ * library, and the UI switches on `state` rather than reading English prose to
+ * tell them apart. Only a genuine fault — no vault, an id that does not exist —
+ * still rejects.
+ */
+export type PdfOutcome =
+  | {
+      state: "text";
+      pages: PdfPage[];
+      /** Evidence is the researcher's either way; the distinction is carried
+       *  rather than lost. */
+      ownership: "vault" | "external";
+      cached: boolean;
+    }
+  /** Extraction worked; every page was empty. A scan. OCR would address it and
+   *  v0.4 does not do OCR, so naming it precisely is the help on offer. */
+  | { state: "noTextLayer" }
+  /** No PDF recorded. The commonest state, and not a problem. */
+  | { state: "notAttached" }
+  /** A Zotero-managed PDF whose path Sutra cannot yet work out. Pending
+   *  real-Zotero verification. Nothing is wrong with the library or the note. */
+  | { state: "unresolved"; why: string }
+  /** Should be there; is not. Moved, renamed, drive disconnected. */
+  | { state: "missing"; detail: string }
+  /** Password-protected. The file is fine. */
+  | { state: "locked" }
+  /** The parser could not read it. */
+  | { state: "failed"; detail: string };
 
 /** What an annotation import actually did. */
 export type Captured = {
@@ -515,20 +538,18 @@ export const exportApi = {
 
 /** Reading the paper itself.
  *
- *  Every call here can reject with a sentence worth showing: a PDF that is not
- *  there, a parser that crashed, a scan with no text layer, or — for a
- *  Zotero-managed file — that Sutra cannot yet work out where Zotero keeps it.
- *  That last one is pending verification against a real library; see
- *  docs/decisions/0004-reading-the-paper.md. */
+ *  These resolve rather than reject for every ordinary ending — see
+ *  `PdfOutcome`. Pending real-Zotero verification, a Zotero-managed file always
+ *  resolves to `unresolved`; see docs/decisions/0004-reading-the-paper.md. */
 export const pdfApi = {
   /** Extract a PDF attached inside this vault. `relative` is the path the
    *  vault itself recorded, never one composed here. */
   ofVaultFile: (relative: string) =>
-    invoke<PdfText>("extract_vault_pdf", { relative }),
+    invoke<PdfOutcome>("extract_vault_pdf", { relative }),
   /** Extract a Zotero-managed PDF. **Currently always rejects**, saying that
    *  the attachment shape is unverified — see the module doc above. */
   ofZoteroAttachment: (attachmentKey: string) =>
-    invoke<PdfText>("extract_zotero_pdf", { attachmentKey }),
+    invoke<PdfOutcome>("extract_zotero_pdf", { attachmentKey }),
   /** Throw away every cached extraction. Costs one re-read and loses nothing:
    *  the cache is derived by construction. */
   clearCache: () => invoke<void>("clear_pdf_text_cache"),

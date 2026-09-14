@@ -37,11 +37,15 @@ export default function SourceDetails({
   meta,
   onChange,
   onOpen,
+  onRead,
 }: {
   id: string;
   meta: SourceMeta;
   onChange: (meta: SourceMeta) => void;
   onOpen: (noteId: string) => void;
+  /** Open the reading pane on this paper. Absent where reading is not
+   *  offered, and the control is then not drawn at all. */
+  onRead?: () => void;
 }) {
   const [citing, setCiting] = useState<CitingNote[]>([]);
   const [failed, setFailed] = useState(false);
@@ -83,7 +87,12 @@ export default function SourceDetails({
       {(meta.citationKey ||
         meta.itemType ||
         (meta.collections?.length ?? 0) > 0 ||
-        meta.pdf) && (
+        meta.pdf ||
+        // A paper imported from Zotero always has a key here and often nothing
+        // else — no citation key without Better BibTeX, no collections if it
+        // is loose in the library. Without this the whole block, and with it
+        // the way in to reading, would be missing from the commonest source.
+        meta.zotero) && (
         <dl className="mt-2 grid grid-cols-[7rem_minmax(0,1fr)] gap-x-3 gap-y-1 border-t border-border pt-2 text-sm">
           <dt className="text-xs text-ink-muted">Citation key</dt>
           <dd className="min-w-0 font-mono text-xs text-ink-soft">
@@ -107,7 +116,29 @@ export default function SourceDetails({
           <dd className="min-w-0 text-xs text-ink-soft">
             {/* Named, never copied: the file stays Zotero's, and this only
                 lets the note say one exists while Zotero is closed. */}
-            {meta.pdf ? `${meta.pdf} — in Zotero` : "Not available"}
+            <span>
+              {meta.pdf ? `${meta.pdf} — in Zotero` : "Not available"}
+            </span>
+            {/*
+              Where reading starts. It sits on the row that already names the
+              paper's file rather than anywhere new, because the Source note is
+              the paper's record and a reading surface is a way *into* it — not
+              a library, a file manager or a second place PDFs live.
+
+              Offered whenever the source came from Zotero, including when the
+              file cannot be reached: what comes back then is a named state
+              explaining why, which is more use than a control that is not
+              there and no explanation of its absence.
+            */}
+            {onRead && (meta.pdf || meta.zotero) && (
+              <button
+                type="button"
+                onClick={onRead}
+                className="mt-1 block rounded border border-border px-1.5 py-0.5 text-xs text-ink-soft transition-colors hover:border-accent hover:text-accent"
+              >
+                Read text
+              </button>
+            )}
           </dd>
         </dl>
       )}
