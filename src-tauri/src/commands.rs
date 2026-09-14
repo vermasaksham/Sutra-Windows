@@ -1293,25 +1293,61 @@ fn failure(said: &str) -> PdfOutcome {
     }
 }
 
+/// The PDF attachment of a Zotero item, if it has one.
+///
+/// Takes an **item** key — what a source note records — and finds the
+/// attachment, because that is the indirection everything here needs: a paper
+/// is an item, but its file and its annotations both hang off an attachment.
+fn pdf_attachment(
+    app: &AppHandle,
+    item_key: &str,
+) -> Result<Option<crate::references::Attachment>> {
+    Ok(state::provider(app)
+        .attachments(item_key)?
+        .into_iter()
+        .find(|a| a.is_pdf))
+}
+
 /// Extract the text of a Zotero-managed PDF.
 ///
-/// **Pending real-Zotero verification**, and it fails saying so. Resolving the
-/// path needs `filename`, `linkMode` and `path` from Zotero's attachment
-/// record, which have not been seen in a response from a real library — see
-/// `pdfread::ZoteroPdf`. The command exists now so that the interface is
-/// settled and every caller already handles the unavailable case, which is the
-/// case that must work anyway whenever Zotero is closed or the file has moved.
+/// Takes the **item** key the source note holds. `imported_file` resolution is
+/// verified against a real library; see `pdfread::ZoteroPdf` and
+/// `docs/architecture/verification.md` for which parts are not.
 #[tauri::command]
-pub fn extract_zotero_pdf(app: AppHandle, attachment_key: String) -> Result<PdfOutcome> {
-    use crate::pdfread::PdfLocator;
+pub fn extract_zotero_pdf(app: AppHandle, item_key: String) -> Result<PdfOutcome> {
+    use crate::pdfread::{AttachmentRecord, PdfLocator};
 
-    let locator = crate::pdfread::ZoteroPdf::new(None);
-    match locator.locate(&attachment_key) {
+    // Zotero being closed is a state of the workflow, not a fault: the whole
+    // feature is built to degrade into a named unavailability.
+    let attachment = match pdf_attachment(&app, &item_key) {
+        Ok(Some(attachment)) => attachment,
+        Ok(None) => return Ok(PdfOutcome::NotAttached),
+        Err(SutraError::Zotero(why)) => return Ok(PdfOutcome::Unresolved { why }),
+        Err(other) => return Err(other),
+    };
+
+    let locator = crate::pdfread::ZoteroPdf::new(
+        state::zotero_data_dir(),
+        AttachmentRecord {
+            key: attachment.key.clone(),
+            link_mode: attachment.link_mode,
+            filename: attachment.filename,
+            path: attachment.path,
+        },
+    );
+
+    match locator.locate(&attachment.key) {
         Ok(Some(path)) => Ok(extract_with_cache(&app, &path, locator.ownership())),
-        Ok(None) => Ok(PdfOutcome::NotAttached),
-        // Today this is always the pending-verification case, and it is a state
-        // rather than an error precisely so the rest of the workflow carries on
-        // around it untouched.
+        // Resolution succeeded and said there is no file to read: a bookmark,
+        // or an imported file whose bytes are not on this machine.
+        Ok(None) => Ok(PdfOutcome::Missing {
+            detail: "Zotero has this attachment, but its file is not on this \
+                     computer — it may not have synced, or may have been moved."
+                .to_string(),
+        }),
+        // A mode Sutra cannot read, metadata it cannot use, or a linked file
+        // stored somewhere it cannot work out. Its own state, so the rest of
+        // the workflow carries on around it.
         Err(SutraError::Pdf(why)) => Ok(PdfOutcome::Unresolved { why }),
         Err(other) => Err(other),
     }
@@ -1329,15 +1365,27 @@ pub fn clear_pdf_text_cache(app: AppHandle) -> Result<()> {
 
 /// The highlights and notes already made on a paper, in Zotero.
 ///
-/// Takes an attachment key: annotations belong to a file, not to a paper, and
-/// a paper with two PDFs has two independent sets. Read-only — Zotero remains
-/// the only writer of its own data.
+/// Takes the **item** key the source note holds, and finds the attachment
+/// itself. Annotations belong to a file rather than to a paper — that is
+/// Zotero's model and the provider keeps it — but a note records the item, so
+/// somebody has to bridge the two and this is the place.
+///
+/// It was the caller doing that bridging, and doing it wrong: an item key was
+/// passed straight through as an attachment key, which asks Zotero for the
+/// children of something that has none. Against a stub that answers any key it
+/// looked fine; against a real library it would have returned nothing, every
+/// time, and read as "no annotations on this paper".
+///
+/// Read-only. Zotero remains the only writer of its own data.
 #[tauri::command]
 pub fn zotero_annotations(
     app: AppHandle,
-    attachment_key: String,
+    item_key: String,
 ) -> Result<Vec<crate::references::Annotation>> {
-    state::provider(&app).annotations(&attachment_key)
+    let Some(attachment) = pdf_attachment(&app, &item_key)? else {
+        return Ok(Vec::new());
+    };
+    state::provider(&app).annotations(&attachment.key)
 }
 
 /// How an import went, in terms a person can be told.
@@ -1440,20 +1488,29 @@ mod pdf_state_tests {
         ));
     }
 
-    /// The state the whole pending-verification boundary exists to produce. It
-    /// must be `Unresolved`, carrying the reason, and never `Missing` — the
-    /// library is fine and nothing is lost.
+    /// An attachment Sutra cannot resolve must be `Unresolved`, carrying the
+    /// reason, and never `Missing` — the library is fine, the file may well be
+    /// there, and only Sutra's ability to find it is in question. Telling
+    /// someone their PDF is missing would send them looking for a problem that
+    /// does not exist.
     #[test]
-    fn an_unresolved_zotero_pdf_is_its_own_state() {
-        use crate::pdfread::PdfLocator;
-        let locator = crate::pdfread::ZoteroPdf::new(None);
+    fn an_attachment_that_cannot_be_resolved_is_its_own_state() {
+        use crate::pdfread::{AttachmentRecord, PdfLocator};
+        let locator = crate::pdfread::ZoteroPdf::new(
+            std::env::temp_dir(),
+            AttachmentRecord {
+                key: "ABCD1234".to_string(),
+                link_mode: Some("imported_directory".to_string()),
+                ..Default::default()
+            },
+        );
         let outcome = match locator.locate("ABCD1234") {
             Err(SutraError::Pdf(why)) => PdfOutcome::Unresolved { why },
-            other => panic!("expected a pending-verification failure, got {other:?}"),
+            other => panic!("expected a resolution failure, got {other:?}"),
         };
         match outcome {
             PdfOutcome::Unresolved { why } => {
-                assert!(why.contains("not been verified"), "{why}");
+                assert!(why.contains("imported_directory"), "{why}");
             }
             other => panic!("{other:?}"),
         }

@@ -99,6 +99,26 @@ pub struct Attachment {
     pub content_type: Option<String>,
     /// Whether this is a PDF, which is the only kind the app treats specially.
     pub is_pdf: bool,
+    /// How the library holds the file: `imported_file`, `imported_url`,
+    /// `linked_file`, `linked_url`.
+    ///
+    /// Kept verbatim, unnormalised, for the reason every other library word is:
+    /// a mode a newer Zotero introduces must arrive intact and be reported as
+    /// unsupported, rather than be folded into whichever known mode it most
+    /// resembles.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub link_mode: Option<String>,
+    /// The file's name inside the library's storage folder.
+    ///
+    /// **Used exactly as given.** Never slugged, re-cased, re-encoded or
+    /// otherwise tidied: it is the name of a file on disk that another program
+    /// owns, and the only correct transformation of it is none.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub filename: Option<String>,
+    /// Where a `linked_file` actually is. Absent for imported files, which live
+    /// under the storage folder and are found from `key` and `filename`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
 }
 
 /// A highlight or note the researcher already made, in the reference manager's

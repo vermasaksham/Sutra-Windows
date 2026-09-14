@@ -38,6 +38,7 @@ real library:
 | Path                                                          | Fixture it is tested against         |
 | ------------------------------------------------------------- | ------------------------------------ |
 | Zotero **annotation** reading                                 | a TCP stub returning canned JSON     |
+| Finding a paper's PDF **attachment** from its item key        | the same stub                        |
 | **PDF text extraction**                                       | a PDF built byte by byte in the test |
 | Page numbering and "no text layer"                            | the same hand-built PDF              |
 | The **extracted-text cache** and its fingerprint invalidation | temporary files                      |
@@ -67,14 +68,22 @@ Two of these deserve naming individually, because the gap is larger than
 
 ## The Zotero PDF resolver
 
-Not yet implemented. When it is, `imported_file` and `linked_file` are expected
-to land on different levels and must be reported that way:
+Implemented. Its branches are at different levels and are reported separately:
 
-- `imported_file` — implemented, fixtures, and **real use** once a Zotero paper
-  opens on the researcher's machine
-- `linked_file` — implemented and covered by fixtures, and **not verified
-  against the real library** until a linked-file attachment exists there to try.
-  It stays at that level however well the fixtures pass.
+| Branch                               | Level                                             | Note                                                                                                                                                                                                                            |
+| ------------------------------------ | ------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `imported_file`                      | **Response shape: real use.** Path rule: fixtures | The live response was observed — `linkMode: imported_file`, `filename` present, **`path` absent**. The rule `<dataDir>/storage/<key>/<filename>` is built on that and covered by tests; no paper has been opened through it yet |
+| `imported_url`                       | **Fixtures**                                      | Documented as the same storage layout, resolved the same way. Not observed                                                                                                                                                      |
+| `linked_file`                        | **Fixtures**                                      | Implemented to documented semantics, automated-test covered, **not verified against the real library.** Stays here until such an attachment exists there to try, however well the tests pass                                    |
+| `linked_file` under a base directory | **Fixtures**                                      | Reported rather than resolved — the base-directory preference has not been read or verified, so no location is invented                                                                                                         |
+| `linked_url`                         | **Fixtures**                                      | A bookmark; resolves to "no file", which is not a failure                                                                                                                                                                       |
+| Unknown link mode                    | **Fixtures**                                      | Named verbatim and reported                                                                                                                                                                                                     |
+| Zotero **data directory**            | **Fixtures**                                      | `extensions.zotero.dataDir` from `prefs.js`, else `~/Zotero`. Parsed against a realistic `prefs.js`; the real one has not been read                                                                                             |
+
+The distinction inside `imported_file` is the one worth keeping: **the response
+shape is verified, the path rule built on it is not.** Knowing Zotero sends
+`filename` and no `path` does not prove that joining them to `storage/<key>/`
+finds the file. Only opening a real paper does.
 
 ## How to use this file
 

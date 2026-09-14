@@ -1,7 +1,8 @@
 # Reading the paper: extraction, cache, annotations
 
-Status: **decided and implemented for v0.4**, with one part explicitly
-**PENDING REAL-ZOTERO VERIFICATION** — see [Resolution](#resolution-pending-real-zotero-verification).
+Status: **decided and implemented for v0.4.** The resolution section below was
+pending a real Zotero response; that response has since been observed and the
+section records what it said.
 
 Follows [0003 — ownership is not access](0003-pdf-ownership-and-access.md),
 which decided that Sutra may read a Zotero-managed PDF and owns nothing by
@@ -134,33 +135,52 @@ is never treated as a duplicate of anything.
 An annotation carrying neither highlighted text nor a comment records nothing: a
 page with no content is not evidence.
 
-## Resolution: PENDING REAL-ZOTERO VERIFICATION
+## Resolution: implemented, on a verified response shape
 
-**This is the one part not implemented, and the only thing blocked.**
+**The response that settled it**, observed against a live library:
 
-Reading a Zotero-managed PDF means turning an attachment record into a path on
-disk. Doing that needs three fields from Zotero's response:
+```
+itemType:    attachment
+linkMode:    imported_file
+key:         J938YE6Z
+filename:    <present>
+path:        <absent>
+contentType: application/pdf
+```
 
-- `linkMode` — `imported_file` lives under `<dataDir>/storage/<key>/`, while
-  `linked_file` is anywhere at all, and the two need different code
-- `filename` — the name inside the storage folder
-- `path` — where a `linked_file` actually is
+The absence of `path` is the load-bearing part. It is why a missing path on an
+imported file is **not** treated as missing metadata: for that mode there is
+nothing to miss.
 
-**These have not been observed in a response from a real Zotero library.** They
-are documented, and the documentation is probably right. "Probably right" is not
-a basis for code that reads files off somebody's disk: guessing wrong does not
-fail loudly, it silently reads the wrong file or none, and tells a researcher
-their paper has no text layer.
+**`imported_file` and `imported_url`** resolve to
+`<dataDir>/storage/<key>/<filename>`. The filename is used **exactly as given** —
+never slugged, re-cased or re-encoded, because it names a file another program
+owns and the only correct transformation of it is none. A name carrying a
+separator or `..` is _refused_ rather than rewritten: rewriting would be guessing
+at what the library meant, and being wrong means reading a file outside the
+library. (`imported_url` uses the same documented layout and has not been
+observed.)
 
-So `pdfread::ZoteroPdf` implements the locator interface and returns a failure
-saying exactly that. The interface, the extraction path, the cache and every
-caller are finished and exercised; when the shape is verified, resolution goes
-into that one function and nothing else changes.
+**`linked_file`** uses the record's absolute `path`. Where Zotero writes
+`attachments:` — a path relative to the library's linked-attachments base
+directory — that is **reported rather than resolved**, because the base
+directory is a preference that has not been read or verified and resolving it
+against the data directory would be inventing a location.
 
-This is not a placeholder for a missing design. It is the design, with the one
-input it needs not yet measured — and the unavailable case it currently exercises
-is a case the feature has to handle anyway, because Zotero is often closed and
-files often move.
+**`linked_url`** is a bookmark: no file, which is the same answer as a source
+with no PDF and not a failure. **Any other mode** is named verbatim and
+reported.
+
+**The data directory** comes from `extensions.zotero.dataDir` in the profile's
+`prefs.js`, and `~/Zotero` — Zotero's own default — when it is not set. The
+preference is a JavaScript string, so its doubled backslashes are undoubled;
+every path on the shipping platform has several.
+
+One distinction survives all of this and is kept in
+`docs/architecture/verification.md`: **the response shape is verified; the path
+rule built on it is not.** Knowing Zotero sends `filename` and no `path` does
+not prove that joining them to `storage/<key>/` finds the file. Only opening a
+real paper does.
 
 ## Failure is always named
 

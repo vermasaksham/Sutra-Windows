@@ -539,17 +539,17 @@ export const exportApi = {
 /** Reading the paper itself.
  *
  *  These resolve rather than reject for every ordinary ending — see
- *  `PdfOutcome`. Pending real-Zotero verification, a Zotero-managed file always
- *  resolves to `unresolved`; see docs/decisions/0004-reading-the-paper.md. */
+ *  `PdfOutcome`. */
 export const pdfApi = {
   /** Extract a PDF attached inside this vault. `relative` is the path the
    *  vault itself recorded, never one composed here. */
   ofVaultFile: (relative: string) =>
     invoke<PdfOutcome>("extract_vault_pdf", { relative }),
-  /** Extract a Zotero-managed PDF. **Currently always rejects**, saying that
-   *  the attachment shape is unverified — see the module doc above. */
-  ofZoteroAttachment: (attachmentKey: string) =>
-    invoke<PdfOutcome>("extract_zotero_pdf", { attachmentKey }),
+  /** Extract a Zotero-managed PDF, by the *item* key a source note records.
+   *  `imported_file` resolution is verified against a real library; see
+   *  docs/architecture/verification.md for what is not. */
+  ofZoteroItem: (itemKey: string) =>
+    invoke<PdfOutcome>("extract_zotero_pdf", { itemKey }),
   /** Throw away every cached extraction. Costs one re-read and loses nothing:
    *  the cache is derived by construction. */
   clearCache: () => invoke<void>("clear_pdf_text_cache"),
@@ -566,11 +566,11 @@ export const zoteroApi = {
   detail: (key: string) => invoke<ItemDetail>("zotero_detail", { key }),
   /** Show the item in Zotero's own window. */
   open: (key: string) => invoke<void>("zotero_open", { key }),
-  /** The highlights and notes made on one attachment, in reading order.
-   *  Takes an *attachment* key: Zotero hangs annotations off the file, so a
-   *  paper with two PDFs has two independent sets. Read-only. */
-  annotations: (attachmentKey: string) =>
-    invoke<Annotation[]>("zotero_annotations", { attachmentKey }),
+  /** The highlights and notes on a paper's PDF, in reading order.
+   *  Takes the *item* key a source note records; the backend finds the
+   *  attachment, because Zotero hangs annotations off the file. Read-only. */
+  annotations: (itemKey: string) =>
+    invoke<Annotation[]>("zotero_annotations", { itemKey }),
   /** Record chosen annotations on a note as evidence. Additive and idempotent:
    *  running it again adds only what is new. */
   captureAnnotations: (
