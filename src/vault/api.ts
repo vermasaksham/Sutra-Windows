@@ -571,6 +571,52 @@ export const EVIDENCE_KINDS = [
   "observation",
 ] as const;
 
+/**
+ * One piece of evidence, with everything about it in one place.
+ *
+ * Assembled by Rust from the whole vault, because the join it does is the one
+ * no single note can do for itself: a note knows what it cites and a paper
+ * knows what has been quoted from it, but neither knows which *other* notes
+ * rest on the same sentence.
+ */
+export type EvidenceItem = {
+  eid: string;
+  /** The Source note it was taken from. */
+  source: string;
+  /** That note's title, so a list reads as papers rather than as ULIDs. */
+  source_title: string;
+  page?: string | null;
+  page_index?: number | null;
+  quote?: string | null;
+  kind?: string | null;
+  origin?: string | null;
+  annotation?: string | null;
+  colour?: string | null;
+  /** True when the record lives on the Source note, so more than one note can
+   *  rest on it. False means it is inline, in the single note using it. */
+  shared: boolean;
+  /** Which notes draw on this, and what each of them made of it. */
+  used_by: EvidenceUse[];
+};
+
+export type EvidenceUse = {
+  note: string;
+  title: string;
+  /** This reader's own remark. Never the paper's words. */
+  comment?: string | null;
+};
+
+export const evidenceApi = {
+  /** Every piece of evidence in the vault, with the notes that rest on it. */
+  all: () => invoke<EvidenceItem[]>("all_evidence"),
+  /** Move one note's inline record onto the paper it came from, so another
+   *  note can rest on the same quotation instead of copying it. */
+  share: (id: string, eid: string) =>
+    invoke<NoteSummary>("share_evidence", { id, eid }),
+  /** A note's evidence with every reference followed. */
+  forNote: (id: string) => invoke<Citation[]>("note_evidence", { id }),
+};
+
 export const exportApi = {
   /** Write the note as .docx. Opens a save dialog in Rust; resolves the chosen
    *  file's name, or null if cancelled. */

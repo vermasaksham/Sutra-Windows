@@ -36,6 +36,7 @@ export default function Sidebar({
   onManageTags,
   onOpenSettings,
   onOpenZotero,
+  onOpenEvidence,
 }: {
   vaultName: string;
   notes: NoteSummary[];
@@ -53,6 +54,8 @@ export default function Sidebar({
   onManageTags: () => void;
   onOpenSettings: () => void;
   onOpenZotero: () => void;
+  /** Show everything quoted, apart from the notes quoting it. */
+  onOpenEvidence: () => void;
 }) {
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [tagsCollapsed, setTagsCollapsed] = useState<Set<string>>(new Set());
@@ -257,6 +260,19 @@ export default function Sidebar({
         >
           <QuoteMarkIcon className="size-4 shrink-0" />
           <span>Add paper from Zotero</span>
+        </button>
+
+        {/* Beside bringing a paper in, because what you do with a paper after
+            reading it is look at what you took from it. Named for the research
+            concept rather than for where the records are stored. */}
+        <button
+          type="button"
+          onClick={onOpenEvidence}
+          title="Everything you have quoted, and what rests on it"
+          className="mt-0.5 flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-sm text-ink-soft transition-colors hover:bg-row-hover hover:text-accent"
+        >
+          <QuoteMarkIcon className="size-4 shrink-0" />
+          <span>Evidence</span>
         </button>
       </div>
 
