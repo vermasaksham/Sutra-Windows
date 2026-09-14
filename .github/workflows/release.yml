@@ -112,8 +112,19 @@ jobs:
             echo "::warning::no $notes; falling back to generated notes"
             notes_args=(--generate-notes)
           fi
+          # A semver pre-release — v0.4.0-rc.1 — is marked as one, and that
+          # is not cosmetic. `updates.rs` asks GitHub for `releases/latest`,
+          # which omits pre-releases, so an unmarked release candidate would be
+          # offered to everyone as an update to install. The tag carrying a `-`
+          # is what semver says a pre-release is, so it is what decides.
+          case "$TAG" in
+            *-*) prerelease=(--prerelease) ;;
+            *) prerelease=() ;;
+          esac
+
           gh release create "$TAG" \
             "${found[0]}" \
             --target "$GITHUB_SHA" \
             --title "Sutra $TAG" \
+            "${prerelease[@]}" \
             "${notes_args[@]}"
