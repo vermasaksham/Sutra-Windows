@@ -5,6 +5,7 @@ import {
   type Reference,
   type ReferenceStatus,
 } from "../vault/api";
+import { displayTitle } from "./titleText";
 
 /**
  * The reference picker.
@@ -280,7 +281,9 @@ function Row({
         active ? "bg-row-active" : "",
       ].join(" ")}
     >
-      <p className="text-sm font-medium text-ink">{reference.title}</p>
+      <p className="text-sm font-medium text-ink">
+        {displayTitle(reference.title)}
+      </p>
       <p className="mt-0.5 text-xs text-ink-muted">
         {detail || "No author or year in Zotero"}
       </p>

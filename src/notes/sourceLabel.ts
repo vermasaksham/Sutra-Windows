@@ -1,4 +1,5 @@
 import type { NoteSummary } from "../vault/api";
+import { displayTitle } from "./titleText";
 
 /**
  * How a source reads inline: "(Zhou et al., 2019)".
@@ -22,7 +23,8 @@ export function sourceLabel(source: NoteSummary): string {
 
   // No authors and no year leaves the title, which is better than an empty
   // pair of brackets and is what a hand-written source usually has.
-  if (parts.length === 0) return source.title || "Untitled source";
+  if (parts.length === 0)
+    return displayTitle(source.title) || "Untitled source";
   return parts.join(", ");
 }
 

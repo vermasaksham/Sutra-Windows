@@ -46,12 +46,12 @@ function vault(extra: Partial<VaultOptions> = {}): VaultOptions {
   };
 }
 
-/** Open the note being written, then the paper, then press Read text. */
+/** Open the note being written, then the paper, then press Read paper text. */
 async function startReading(page: Page) {
   await page.getByRole("button", { name: "Growth of Sb2Se3" }).first().click();
   await expect(page.locator(".sutra-prose")).toContainText("What I make of it");
   await page.getByRole("button", { name: "Zhou 2019" }).first().click();
-  await page.getByRole("button", { name: "Read text" }).click();
+  await page.getByRole("button", { name: "Read paper text" }).click();
 }
 
 test.describe("reading a paper", () => {
@@ -68,6 +68,12 @@ test.describe("reading a paper", () => {
 
     const pane = page.getByLabel("Reading Zhou 2019");
     await expect(pane).toBeVisible();
+    // Said before anything else, because the pane sits where the note list
+    // was: what is below is the paper's own words, not a note.
+    await expect(pane.getByText("Extracted PDF text")).toBeVisible();
+    await expect(
+      pane.getByText("for figures and layout, read it in Zotero"),
+    ).toBeVisible();
     // The list has given way — same slot, so it cannot be on screen too.
     await expect(page.getByPlaceholder("Search")).toHaveCount(0);
     // …and the context panel has not. Reading returns the editor to the note

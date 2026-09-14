@@ -1,5 +1,6 @@
 import { useSyncExternalStore } from "react";
 import type { NoteSummary, SourceMeta, StyledCitation } from "../vault/api";
+import { displayTitle } from "./titleText";
 
 /**
  * Which citation style is in force.
@@ -98,12 +99,17 @@ export function bibliography(
 
     const rendered = styledFor(source.source, style);
     if (rendered?.bib) {
-      out.push({ id, title: source.title, text: rendered.bib, styled: true });
+      out.push({
+        id,
+        title: displayTitle(source.title),
+        text: rendered.bib,
+        styled: true,
+      });
       continue;
     }
     out.push({
       id,
-      title: source.title,
+      title: displayTitle(source.title),
       text: describe(source),
       styled: false,
     });
@@ -122,7 +128,7 @@ function describe(source: NoteSummary): string {
   return [
     meta?.authors,
     meta?.year && `(${meta.year})`,
-    source.title,
+    displayTitle(source.title),
     meta?.container,
     meta?.doi && `doi:${meta.doi}`,
   ]

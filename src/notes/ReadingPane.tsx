@@ -8,6 +8,7 @@ import {
   type NoteSummary,
   type PdfOutcome,
 } from "../vault/api";
+import { displayTitle } from "./titleText";
 
 /**
  * Reading a paper, and taking evidence out of it.
@@ -189,12 +190,20 @@ export default function ReadingPane({
   return (
     <div
       className="sutra-no-print flex h-full w-list shrink-0 flex-col border-r border-l border-border bg-canvas"
-      aria-label={`Reading ${source.title}`}
+      aria-label={`Reading ${displayTitle(source.title)}`}
     >
       <div className="flex items-start justify-between gap-2 px-3 pt-3 pb-2">
         <div className="min-w-0">
+          {/*
+            Said before the title, because the pane looks like the note list it
+            replaced. What is below is the paper's own words as the PDF stores
+            them — not a note, and not something to edit.
+          */}
+          <p className="text-[0.6875rem] font-semibold tracking-wide text-ink-muted uppercase">
+            Extracted PDF text
+          </p>
           <p className="truncate text-sm font-semibold text-ink">
-            {source.title}
+            {displayTitle(source.title)}
           </p>
           <p className="mt-0.5 text-[0.6875rem] text-ink-muted">
             Text only — for figures and layout, read it in Zotero.
@@ -375,7 +384,8 @@ function TextSide({
           ))}
           <p className="px-3 py-3 text-[0.6875rem] text-ink-muted">
             {outcome.pages.length} page
-            {outcome.pages.length === 1 ? "" : "s"} of {source.title}
+            {outcome.pages.length === 1 ? "" : "s"} of{" "}
+            {displayTitle(source.title)}
             {outcome.cached ? " · from cache" : ""}
           </p>
         </div>

@@ -1,4 +1,5 @@
 import type { NoteDoc } from "../vault/api";
+import { displayTitle } from "./titleText";
 
 /**
  * Shown when a note changed on disk while the buffer had unsaved edits.
@@ -26,7 +27,7 @@ export default function ConflictPrompt({ note, onResolve }: Props) {
           id="sutra-conflict-title"
           className="text-lg font-semibold text-ink"
         >
-          “{note.title || "Untitled"}” changed on disk
+          “{displayTitle(note.title) || "Untitled"}” changed on disk
         </h2>
         <p className="text-sm text-ink-soft">
           Something outside Sutra edited this note while you had unsaved

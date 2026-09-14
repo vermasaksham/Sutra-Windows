@@ -14,6 +14,7 @@ import {
   type ViewResult,
   type ViewSort,
 } from "../vault/api";
+import { displayTitle } from "./titleText";
 
 /**
  * Building a saved query, as a form rather than a search box.
@@ -208,7 +209,9 @@ function Preview({ result }: { result: ViewResult | null }) {
               key={note.id}
               className="flex justify-between gap-3 border-b border-border px-3 py-1.5 text-xs last:border-0"
             >
-              <span className="min-w-0 truncate text-ink">{note.title}</span>
+              <span className="min-w-0 truncate text-ink">
+                {displayTitle(note.title)}
+              </span>
               <span className="shrink-0 text-ink-muted">
                 {note.folder || "Top level"}
               </span>
@@ -364,7 +367,11 @@ function Row({
             <datalist id={listId}>
               {kind === "cites"
                 ? sources.map((s) => (
-                    <option key={s.id} value={s.id} label={s.title} />
+                    <option
+                      key={s.id}
+                      value={s.id}
+                      label={displayTitle(s.title)}
+                    />
                   ))
                 : options.map((o) => <option key={o} value={o} />)}
             </datalist>

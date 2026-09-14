@@ -5,6 +5,7 @@ import {
   type CitingNote,
   type SourceMeta,
 } from "../vault/api";
+import { displayTitle } from "./titleText";
 
 /**
  * The paper a source note stands for, and what has been built on it.
@@ -136,7 +137,7 @@ export default function SourceDetails({
                 onClick={onRead}
                 className="mt-1 block rounded border border-border px-1.5 py-0.5 text-xs text-ink-soft transition-colors hover:border-accent hover:text-accent"
               >
-                Read text
+                Read paper text
               </button>
             )}
           </dd>
@@ -195,7 +196,7 @@ export default function SourceDetails({
                   onClick={() => onOpen(note.id)}
                   className="w-full truncate rounded px-1 py-0.5 text-left text-sm text-ink-soft transition-colors hover:bg-row-hover hover:text-accent"
                 >
-                  {note.title || "Untitled"}
+                  {displayTitle(note.title) || "Untitled"}
                   {note.page && (
                     <span className="text-ink-muted"> · p. {note.page}</span>
                   )}

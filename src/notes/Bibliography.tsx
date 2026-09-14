@@ -22,13 +22,14 @@ import { CITATION_STYLES, type Citation, type NoteSummary } from "../vault/api";
 export default function Bibliography({
   citations,
   inlineRefs,
-  sources,
+  notes,
   onOpen,
 }: {
   citations: Citation[];
   /** The refs in the prose, in order of first appearance. */
   inlineRefs: string[];
-  sources: NoteSummary[];
+  /** Every note in the vault, for resolving a citation's id. */
+  notes: NoteSummary[];
   onOpen: (id: string) => void;
 }) {
   const style = useCitationStyle();
@@ -44,10 +45,10 @@ export default function Bibliography({
           inlineRefs,
           citations.map((c) => c.id),
         ),
-        sources,
+        notes,
         style,
       ),
-    [citations, inlineRefs, sources, style],
+    [citations, inlineRefs, notes, style],
   );
 
   if (entries.length === 0) return null;

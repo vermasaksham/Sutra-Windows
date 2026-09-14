@@ -1,4 +1,5 @@
 import type { ChapterUse } from "../vault/api";
+import { displayTitle } from "./titleText";
 
 /**
  * The chapters this note is part of.
@@ -36,7 +37,7 @@ export default function ChapterUses({
               className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-left transition-colors hover:border-accent"
             >
               <span className="block truncate text-sm text-ink">
-                {use.title || "Untitled chapter"}
+                {displayTitle(use.title) || "Untitled chapter"}
               </span>
               <span className="block text-xs text-ink-muted tabular-nums">
                 {/* One-based, because "note 1 of 12" is how a person counts. */}

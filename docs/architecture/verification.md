@@ -29,22 +29,25 @@ Seen working against the real library and vault:
 - **Citation rendering and the bibliography**, including IEEE, which is how the
   hexadecimal-entity bug was found
 - Literature notes, duplicate detection, inline maths, Word export
+- **Reading a Zotero-managed PDF**: the attachment found from the item key, the
+  data directory read from `prefs.js`, the `imported_file` path rule, and the
+  paper's own text extracted and shown page by page. Seen on 2026-09-14, on one
+  paper (`ACS Appl. Nano Mater.` 2023), whose title, authors and abstract came
+  through under "P. 1"
 
 ## Fixtures only
 
 Implemented and covered by automated tests; **not** yet exercised against the
 real library:
 
-| Path                                                          | Fixture it is tested against         |
-| ------------------------------------------------------------- | ------------------------------------ |
-| Zotero **annotation** reading                                 | a TCP stub returning canned JSON     |
-| Finding a paper's PDF **attachment** from its item key        | the same stub                        |
-| **PDF text extraction**                                       | a PDF built byte by byte in the test |
-| Page numbering and "no text layer"                            | the same hand-built PDF              |
-| The **extracted-text cache** and its fingerprint invalidation | temporary files                      |
-| **Evidence capture** from an annotation                       | an in-memory vault                   |
-| The **reading pane**, every state                             | a fake Tauri backend                 |
-| **Password-protected** detection                              | none — see below                     |
+| Path                                                          | Fixture it is tested against     |
+| ------------------------------------------------------------- | -------------------------------- |
+| Zotero **annotation** reading                                 | a TCP stub returning canned JSON |
+| "No text layer" — a scanned paper                             | a hand-built PDF with no text    |
+| The **extracted-text cache** and its fingerprint invalidation | temporary files                  |
+| **Evidence capture** from an annotation                       | an in-memory vault               |
+| The **reading pane**, every state                             | a fake Tauri backend             |
+| **Password-protected** detection                              | none — see below                 |
 
 Two of these deserve naming individually, because the gap is larger than
 "untested against real data":
@@ -70,20 +73,25 @@ Two of these deserve naming individually, because the gap is larger than
 
 Implemented. Its branches are at different levels and are reported separately:
 
-| Branch                               | Level                                             | Note                                                                                                                                                                                                                            |
-| ------------------------------------ | ------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `imported_file`                      | **Response shape: real use.** Path rule: fixtures | The live response was observed — `linkMode: imported_file`, `filename` present, **`path` absent**. The rule `<dataDir>/storage/<key>/<filename>` is built on that and covered by tests; no paper has been opened through it yet |
-| `imported_url`                       | **Fixtures**                                      | Documented as the same storage layout, resolved the same way. Not observed                                                                                                                                                      |
-| `linked_file`                        | **Fixtures**                                      | Implemented to documented semantics, automated-test covered, **not verified against the real library.** Stays here until such an attachment exists there to try, however well the tests pass                                    |
-| `linked_file` under a base directory | **Fixtures**                                      | Reported rather than resolved — the base-directory preference has not been read or verified, so no location is invented                                                                                                         |
-| `linked_url`                         | **Fixtures**                                      | A bookmark; resolves to "no file", which is not a failure                                                                                                                                                                       |
-| Unknown link mode                    | **Fixtures**                                      | Named verbatim and reported                                                                                                                                                                                                     |
-| Zotero **data directory**            | **Fixtures**                                      | `extensions.zotero.dataDir` from `prefs.js`, else `~/Zotero`. Parsed against a realistic `prefs.js`; the real one has not been read                                                                                             |
+| Branch                               | Level        | Note                                                                                                                                                                                                           |
+| ------------------------------------ | ------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `imported_file`                      | **Real use** | The live response was observed — `linkMode: imported_file`, `filename` present, **`path` absent** — and a real paper has since been opened through the rule `<dataDir>/storage/<key>/<filename>`, text and all |
+| `imported_url`                       | **Fixtures** | Documented as the same storage layout, resolved the same way. Not observed                                                                                                                                     |
+| `linked_file`                        | **Fixtures** | Implemented to documented semantics, automated-test covered, **not verified against the real library.** Stays here until such an attachment exists there to try, however well the tests pass                   |
+| `linked_file` under a base directory | **Fixtures** | Reported rather than resolved — the base-directory preference has not been read or verified, so no location is invented                                                                                        |
+| `linked_url`                         | **Fixtures** | A bookmark; resolves to "no file", which is not a failure                                                                                                                                                      |
+| Unknown link mode                    | **Fixtures** | Named verbatim and reported                                                                                                                                                                                    |
+| Zotero **data directory**            | **Real use** | `extensions.zotero.dataDir` from `prefs.js`, else `~/Zotero`. Read from the real profile — a paper resolved through it                                                                                         |
 
-The distinction inside `imported_file` is the one worth keeping: **the response
-shape is verified, the path rule built on it is not.** Knowing Zotero sends
-`filename` and no `path` does not prove that joining them to `storage/<key>/`
-finds the file. Only opening a real paper does.
+`imported_file` has now been through both halves: the response shape was
+observed, and a real paper was opened through the path rule built on it. That
+second half is what the distinction existed for — knowing Zotero sends
+`filename` and no `path` never proved that joining them to `storage/<key>/`
+finds the file.
+
+`linked_file` is where `imported_file` used to be, and stays there: implemented
+to the documented semantics and covered by tests, with no such attachment in the
+real library to try it against.
 
 ## How to use this file
 

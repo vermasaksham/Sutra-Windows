@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { overviewApi, type Overview } from "../vault/api";
 import { voiceOf } from "../editor/voices/voiceRules";
+import { displayTitle } from "./titleText";
 
 /**
  * What the vault knows about where the research has got to.
@@ -119,7 +120,7 @@ export default function ResearchOverview({
               empty="Every source you have imported is cited somewhere."
               items={summary.uncited.map((s) => ({
                 id: s.id,
-                primary: s.title,
+                primary: displayTitle(s.title),
                 secondary: s.source?.authors ?? "",
               }))}
               onOpen={onOpen}

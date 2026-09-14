@@ -11,6 +11,7 @@ import CitationMenu, {
 } from "./CitationMenu";
 import {
   remember,
+  rememberSource,
   reportCitationFailure,
   vaultCandidates,
 } from "./citationStore";
@@ -102,6 +103,10 @@ export const CitationSuggestion = Extension.create({
             void sourcesApi
               .importZotero(candidate.reference.key)
               .then((source) => {
+                // Before the citation is inserted, so the sentence never shows
+                // the raw id: the app lists the vault again on its own
+                // schedule, and until it does nothing else knows this note.
+                rememberSource(source);
                 if (!editor || !range) return;
                 editor
                   .chain()

@@ -30,7 +30,7 @@ export default function CitationView({ node, selected }: NodeViewProps) {
       : state.status === "missing"
         ? state.legacy
           ? `(not in Zotero: ${ref})`
-          : "(source not in this vault)"
+          : "(source note missing)"
         : "(…)";
 
   const legacy =
@@ -47,7 +47,12 @@ export default function CitationView({ node, selected }: NodeViewProps) {
             ? legacy
               ? `${state.cited.title} — still a Zotero reference, not yet a source note`
               : state.cited.title
-            : `Reference ${ref}`
+            : state.status === "loading"
+              ? "Looking this reference up…"
+              : // The id, and what it means that nothing answers to it. Shown
+                // here, in the tooltip, rather than in the sentence: it is what
+                // finds the file, and it is not what the paper is called.
+                `No note in this vault has the id ${ref}. It may be in .sutra/trash, or on a machine that has not synced yet.`
         }
         className={[
           "sutra-citation",
