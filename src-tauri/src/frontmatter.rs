@@ -298,8 +298,19 @@ pub struct Citation {
     /// the author's claim separate from the reader's reading of it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub quote: Option<String>,
-    /// What kind of evidence this is: "experimental", "computational",
-    /// "theoretical", "review", "observation".
+    /// What kind of statement this evidence is: "claim", "measurement",
+    /// "method", "result", "limitation", "quote", "observation". Absent means
+    /// unspecified, which is a real answer and the one every record starts on.
+    ///
+    /// v0.5 changed what this vocabulary is *about*. It used to describe the
+    /// study a source reported — "experimental", "computational",
+    /// "theoretical", "review" — which is a fact about the paper and belongs
+    /// on the paper. What a researcher needs to sort evidence by is what the
+    /// quoted sentence *does*: whether it is a claim, a number, or an admitted
+    /// limitation. A value from the old list is kept and shown exactly as
+    /// written; nothing rewrites one, and nothing translates one, because
+    /// "experimental" does not mean "measurement" and guessing that it does
+    /// would be inventing the classification this release refuses to infer.
     ///
     /// A string rather than an enum, for the same reason a view's unknown term
     /// is kept verbatim: a kind written by a newer build must survive being
@@ -348,8 +359,62 @@ pub struct Citation {
     /// lost track of which words are the author's is not provenance any more.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub comment: Option<String>,
+
+    // ---- v0.5: what is known about where this came from ---------------------
+    //
+    // Additive and skipped when absent, like everything above. A v0.3 or v0.4
+    // note has none of them and is read and written back byte for byte.
+    /// The Zotero item key of the paper, as it was when this was captured.
+    ///
+    /// Duplicated from the Source note on purpose, and it is the one
+    /// duplication here that is not a second source of truth: the Source note
+    /// stays authoritative, and this is a record of what the library said at
+    /// the moment of capture. It is what lets a quote still name its paper in
+    /// an exported file, where the vault is not there to be asked.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub zotero: Option<String>,
+    /// Which page of the PDF the text was taken from, counted from 1.
+    ///
+    /// Kept beside `page` rather than instead of it, because they are not the
+    /// same fact and ADR 0004 is explicit about the difference: `page` is the
+    /// label printed on the paper, which is what a citation must carry, and
+    /// this is the index in the file, which is what takes a reader back to the
+    /// place. A scan whose front matter is unnumbered has both, and they
+    /// disagree by six.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub page_index: Option<u32>,
+    /// How this record came to exist: "selection", "annotation", "manual".
+    ///
+    /// Recorded rather than inferred. Until now it was *almost* derivable — an
+    /// `annotation` key meant Zotero, anything else meant a person — but that
+    /// could not tell text selected in the reading pane from text typed by
+    /// hand, and those differ in exactly the way that matters: one is the
+    /// paper's own bytes and the other is what somebody remembered.
+    ///
+    /// Absent on every record written before v0.5, and absent stays absent.
+    /// Nothing backfills it, because a guess written into a provenance field
+    /// is indistinguishable from a fact once it is on disk.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub origin: Option<String>,
 }
 
+/// How a piece of evidence came to exist: the values `Citation::origin` takes.
+///
+/// Three words, and no "unknown": a record written before v0.5 has no origin at
+/// all, and `None` says exactly that. A fourth value meaning "we did not record
+/// it" would be a claim about the past that nobody observed.
+///
+/// Only `annotation` is written here — the other two are written by the
+/// frontend, which is where a selection and a hand-typed record are made — so
+/// they are not constants on this side. `an_origin_means_the_same_thing_on_both_
+/// sides` pins all three against the literals TypeScript sends, because a
+/// vocabulary split across an IPC boundary drifts silently otherwise.
+///
+/// A value outside the three is kept and shown as written, like an unknown
+/// evidence kind: a newer build's word must survive an older build reading the
+/// file, and the alternative is dropping a fact about where a quotation came
+/// from.
+pub const ORIGIN_ANNOTATION: &str = "annotation";
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Frontmatter {
     /// ULID. Stable and permanent — the note's real identity.
@@ -647,6 +712,46 @@ mod tests {
         // And every one of them survives being written and read back.
         for kind in NoteType::all() {
             assert_eq!(NoteType::parse(kind.as_str()), kind);
+        }
+    }
+}
+
+#[cfg(test)]
+mod origin_tests {
+    use super::*;
+
+    /// The frontend writes two of the three origins itself, so the strings have
+    /// to agree across the IPC boundary or a record says it came from somewhere
+    /// no reader recognises. Pinned here rather than trusted, for the same
+    /// reason `the_json_sent_to_the_frontend_is_camel_case` exists.
+    #[test]
+    fn an_origin_means_the_same_thing_on_both_sides() {
+        assert_eq!(ORIGIN_ANNOTATION, "annotation");
+
+        let written = include_str!("../../src/notes/ReadingPane.tsx");
+        assert!(
+            written.contains(r#"origin: "selection""#),
+            "the reading pane no longer records a selection's origin"
+        );
+        let panel = include_str!("../../src/notes/SourcesPanel.tsx");
+        assert!(
+            panel.contains(r#"origin: "manual""#),
+            "hand-written evidence no longer records its origin"
+        );
+    }
+
+    /// The three v0.5 keys are absent, not null, on a record that has no such
+    /// fact — so a vault written by this build still opens unchanged in v0.4.
+    #[test]
+    fn the_new_keys_are_absent_rather_than_null() {
+        let yaml = serde_yaml_ng::to_string(&Citation {
+            id: "S1".into(),
+            page: Some("S12".into()),
+            ..Default::default()
+        })
+        .unwrap();
+        for key in ["zotero", "page_index", "origin"] {
+            assert!(!yaml.contains(key), "{key} was written as an empty fact");
         }
     }
 }

@@ -81,11 +81,19 @@ export type SourceMeta = {
   url?: string | null;
   /** The Zotero item key it was imported from, so re-import updates it. */
   zotero?: string | null;
-  /** The library's citation key, when it has one. Never generated. */
+  /** The library's citation key, when it has one. Never generated.
+   *
+   *  **These three names do not match what Rust sends.** `SourceMeta` has no
+   *  `rename_all`, so the wire carries `citation_key`, `abstract_text` and
+   *  `item_type`, and reading them by these names yields `undefined` — which
+   *  is why the citation key and abstract do not appear in Source details.
+   *  Left as found rather than fixed here: it is a real bug and it is not
+   *  v0.5's, and correcting it silently inside an unrelated release is how a
+   *  fix goes unnoticed. */
   citationKey?: string | null;
-  /** The abstract as published. Never a generated summary. */
+  /** The abstract as published. Never a generated summary. See above. */
   abstractText?: string | null;
-  /** "journalArticle", "book", "thesis" — the library's own word. */
+  /** "journalArticle", "book", "thesis" — the library's own word. See above. */
   itemType?: string | null;
   /** When it entered the library. */
   added?: string | null;
@@ -134,6 +142,21 @@ export type Citation = {
   kind?: string | null;
   /** RFC3339. */
   captured?: string | null;
+  /** The paper's Zotero item key as it was at capture, so a quote can still
+   *  name its source in an exported file. The Source note stays authoritative. */
+  zotero?: string | null;
+  /** Which page of the PDF, counted from 1 — not the label printed on the
+   *  paper, which is `page`. A scan with unnumbered front matter has both.
+   *
+   *  Snake case, and deliberately: `Citation` carries no `rename_all`, so this
+   *  is the key the vault file holds *and* the key that crosses the IPC
+   *  boundary. Spelling it `pageIndex` here would read better and be wrong —
+   *  see the `citationKey` note on `SourceMeta`. */
+  page_index?: number | null;
+  /** "selection", "annotation" or "manual". Absent on anything written before
+   *  v0.5, and nothing backfills it: a guess in a provenance field is
+   *  indistinguishable from a fact once it is written. */
+  origin?: string | null;
 };
 
 /** A highlight or note already made in Zotero's reader. */
@@ -521,11 +544,30 @@ export type ReferenceConfig = {
 
 /** The kinds of evidence the UI offers. A stored kind outside this list is
  *  kept as written rather than dropped, the same as an unknown view term. */
+/**
+ * What kind of statement a piece of evidence is.
+ *
+ * About the quoted sentence, not about the paper. v0.4 and earlier listed
+ * "experimental", "computational", "theoretical", "review" — facts about the
+ * study, which belong on the Source note. What sorting evidence actually needs
+ * is what the sentence *does*: a claim, a number, an admitted limitation.
+ *
+ * "Unspecified" is not in this list because it is already the empty value —
+ * one way to say a thing, not two. Every record starts there, and nothing ever
+ * moves it: a type is chosen by hand, never inferred.
+ *
+ * A value outside this list is kept and shown exactly as written. That covers
+ * the old vocabulary, which is not translated into the new one — "experimental"
+ * does not mean "measurement", and deciding that it does would be inventing the
+ * classification this release refuses to infer.
+ */
 export const EVIDENCE_KINDS = [
-  "experimental",
-  "computational",
-  "theoretical",
-  "review",
+  "claim",
+  "measurement",
+  "method",
+  "result",
+  "limitation",
+  "quote",
   "observation",
 ] as const;
 

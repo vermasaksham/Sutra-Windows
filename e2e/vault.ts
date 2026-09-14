@@ -44,6 +44,11 @@ export type Note = {
     /** Zotero's annotation key, when this came from one. */
     annotation?: string;
     colour?: string;
+    /** The nth page of the file. Not `page`, which is the number printed on
+     *  the paper — a selection knows the first and not the second. */
+    page_index?: number;
+    /** "selection", "annotation" or "manual". */
+    origin?: string;
   }>;
   /** On a note of `type: chapter`: the notes it assembles, in order. */
   sequence?: string[];

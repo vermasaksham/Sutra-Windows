@@ -129,14 +129,27 @@ test.describe("reading a paper", () => {
     const capture = page.getByRole("button", { name: /Capture as evidence/ });
     await expect(capture).toBeVisible();
     // The page is on the control itself, so what is about to be recorded is
-    // visible before it is recorded.
-    await expect(capture).toContainText("p. 2");
+    // visible before it is recorded — and it says *PDF* page, because that is
+    // the only page fact a selection has.
+    await expect(capture).toContainText("PDF p. 2");
     await capture.click();
 
     // It landed on the note being written, with the source's words verbatim.
     await expect(
       page.getByText("Carrier lifetime was 1.2 ns.", { exact: false }).first(),
     ).toBeVisible();
+
+    // And the provenance it recorded is the position in the file, left
+    // unlabelled. ADR 0004: the number printed on the paper is what a citation
+    // carries, and absent beats invented — until v0.5 this wrote the position
+    // into the label, so a paper offprinted from 431 recorded "p. 1".
+    const [recorded] = (await notesNow(page))
+      .flatMap((note) => note.sources ?? [])
+      .filter((entry) => entry.quote?.includes("Carrier lifetime"));
+    expect(recorded).toBeDefined();
+    expect(recorded!.page_index).toBe(2);
+    expect(recorded!.page ?? null).toBeNull();
+    expect(recorded!.origin).toBe("selection");
   });
 
   test("evidence goes to the note being written, never the source", async ({

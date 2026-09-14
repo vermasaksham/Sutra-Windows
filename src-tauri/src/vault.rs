@@ -9,7 +9,7 @@
 use crate::attachments;
 use crate::citations;
 use crate::error::{Result, SutraError};
-use crate::frontmatter::{self, Citation, Frontmatter, NoteType, SourceMeta};
+use crate::frontmatter::{self, Citation, Frontmatter, NoteType, ORIGIN_ANNOTATION, SourceMeta};
 use crate::note;
 use crate::tags;
 use crate::views;
@@ -1116,16 +1116,55 @@ impl Vault {
     /// is a fact about a record that exists, and a record only exists once it
     /// has been written. Entries that already carry one keep it, so editing a
     /// page number does not re-identify the evidence.
+    ///
+    /// **An entry that arrives without an id it used to have adopts it back.**
+    /// Minting into an empty slot is right for a new record and wrong for an
+    /// old one that lost its id in transit, and the two are indistinguishable
+    /// by the time they arrive here — both are an entry with no `eid`. So
+    /// before minting, this looks for an id that is on disk, is *not* in the
+    /// incoming list, and belongs to a record with the same source and the
+    /// same words. One such record means the id was dropped rather than the
+    /// evidence replaced, and it is restored.
+    ///
+    /// The match must be unique. Two orphans quoting the same source at the
+    /// same words are not something to guess between, so both are left to be
+    /// minted fresh: a duplicated record is visible and repairable, and a
+    /// wrongly re-used id is neither.
+    ///
+    /// Today nothing in the app drops an `eid` — every path spreads the entry
+    /// it was given. This exists because v0.5 makes the id load-bearing: once
+    /// an interpretation says it rests on `E7`, a silently re-minted id is a
+    /// broken argument rather than a cosmetic change.
     pub fn set_citations(&self, id: &str, citations: Vec<Citation>) -> Result<NoteSummary> {
+        let held = self.read_note(id)?.summary.sources;
+        let arriving: HashSet<&str> = citations
+            .iter()
+            .map(|c| c.eid.trim())
+            .filter(|eid| !eid.is_empty())
+            .collect();
+        // On disk, and no longer claimed by anything arriving.
+        let orphans: Vec<&Citation> = held
+            .iter()
+            .filter(|c| !c.eid.trim().is_empty() && !arriving.contains(c.eid.trim()))
+            .collect();
+
         let citations = citations
             .into_iter()
             .map(|mut citation| {
-                if citation.eid.trim().is_empty() {
-                    citation.eid = Ulid::generate().to_string();
+                if !citation.eid.trim().is_empty() {
+                    return citation;
+                }
+                let mut matches = orphans
+                    .iter()
+                    .filter(|held| held.id == citation.id && held.quote == citation.quote);
+                match (matches.next(), matches.next()) {
+                    (Some(only), None) => citation.eid = only.eid.clone(),
+                    _ => citation.eid = Ulid::generate().to_string(),
                 }
                 citation
             })
             .collect();
+
         self.edit(id, |fm| {
             fm.sources = citations;
         })
@@ -1194,6 +1233,15 @@ impl Vault {
                 // guessing would be inventing provenance.
                 kind: None,
                 captured: Some(frontmatter::now()),
+                // Zotero's, and said so. The one origin that is not a person
+                // sitting in front of the paper.
+                origin: Some(ORIGIN_ANNOTATION.into()),
+                // Neither is known here. An annotation carries the page label
+                // Zotero printed, not an index into the file, and the item key
+                // belongs to the caller that resolved the attachment — it is
+                // filled in by `commands`, which has it.
+                page_index: None,
+                zotero: None,
             });
         }
 
@@ -5168,6 +5216,202 @@ mod tests {
         let after = vault.read_note(&note.summary.id).unwrap().summary.sources;
         assert_eq!(after[0].eid, original, "the evidence was re-identified");
         assert_eq!(after[0].page.as_deref(), Some("S13"));
+    }
+
+    // ---- v0.5: the id becomes load-bearing ---------------------------------
+
+    #[test]
+    fn an_evidence_id_dropped_in_transit_is_restored_rather_than_reminted() {
+        // The failure this guards: a caller sends the list back having lost
+        // one `eid`, a fresh one is minted into the empty slot, and every
+        // interpretation resting on the old id now rests on nothing. Silent,
+        // and indistinguishable afterwards from evidence that never existed.
+        let vault = TempVault::new();
+        let source = vault
+            .import_source("Zhou 2019", paper("10.1000/x"))
+            .unwrap();
+        let note = vault.create_note("Reading", None).unwrap();
+        vault
+            .set_citations(
+                &note.summary.id,
+                vec![Citation {
+                    id: source.id.clone(),
+                    page: Some("S12".into()),
+                    quote: Some("ribbons align along c".into()),
+                    ..Default::default()
+                }],
+            )
+            .unwrap();
+        let minted = vault.read_note(&note.summary.id).unwrap().summary.sources[0]
+            .eid
+            .clone();
+
+        // The same record, same source and same words, arriving with no id.
+        vault
+            .set_citations(
+                &note.summary.id,
+                vec![Citation {
+                    id: source.id.clone(),
+                    page: Some("S13".into()),
+                    quote: Some("ribbons align along c".into()),
+                    ..Default::default()
+                }],
+            )
+            .unwrap();
+
+        let after = vault.read_note(&note.summary.id).unwrap().summary.sources;
+        assert_eq!(after.len(), 1);
+        assert_eq!(after[0].eid, minted, "the evidence was re-identified");
+        // And the edit it arrived with still landed.
+        assert_eq!(after[0].page.as_deref(), Some("S13"));
+    }
+
+    #[test]
+    fn two_indistinguishable_orphans_are_not_guessed_between() {
+        // Restoring an id requires exactly one candidate. Two records quoting
+        // one source at the same words are not something to pick between, and
+        // a wrongly re-used id is worse than a duplicate: a duplicate is
+        // visible and repairable, a wrong one is neither.
+        let vault = TempVault::new();
+        let source = vault
+            .import_source("Zhou 2019", paper("10.1000/x"))
+            .unwrap();
+        let note = vault.create_note("Reading", None).unwrap();
+        let same = || Citation {
+            id: source.id.clone(),
+            quote: Some("ribbons align along c".into()),
+            ..Default::default()
+        };
+        vault
+            .set_citations(&note.summary.id, vec![same(), same()])
+            .unwrap();
+        let held: Vec<String> = vault
+            .read_note(&note.summary.id)
+            .unwrap()
+            .summary
+            .sources
+            .iter()
+            .map(|c| c.eid.clone())
+            .collect();
+
+        // Both arrive back with their ids gone.
+        vault
+            .set_citations(&note.summary.id, vec![same(), same()])
+            .unwrap();
+
+        let after = vault.read_note(&note.summary.id).unwrap().summary.sources;
+        assert_eq!(after.len(), 2);
+        assert_ne!(after[0].eid, after[1].eid, "two records, two ids");
+        for eid in &held {
+            assert!(
+                !after.iter().any(|c| &c.eid == eid),
+                "an id was re-used on a record that could not be identified"
+            );
+        }
+    }
+
+    #[test]
+    fn an_id_is_not_restored_onto_evidence_quoting_something_else() {
+        // Same source, different words, so it is different evidence. Reviving
+        // the old id here would attach an interpretation to a sentence its
+        // author never read.
+        let vault = TempVault::new();
+        let source = vault
+            .import_source("Zhou 2019", paper("10.1000/x"))
+            .unwrap();
+        let note = vault.create_note("Reading", None).unwrap();
+        vault
+            .set_citations(
+                &note.summary.id,
+                vec![Citation {
+                    id: source.id.clone(),
+                    quote: Some("ribbons align along c".into()),
+                    ..Default::default()
+                }],
+            )
+            .unwrap();
+        let first = vault.read_note(&note.summary.id).unwrap().summary.sources[0]
+            .eid
+            .clone();
+
+        vault
+            .set_citations(
+                &note.summary.id,
+                vec![Citation {
+                    id: source.id.clone(),
+                    quote: Some("conductivity falls above 400 K".into()),
+                    ..Default::default()
+                }],
+            )
+            .unwrap();
+
+        let after = vault.read_note(&note.summary.id).unwrap().summary.sources;
+        assert_ne!(after[0].eid, first, "a different quotation took over an id");
+    }
+
+    #[test]
+    fn an_imported_annotation_records_where_it_came_from() {
+        // `origin` is written, not derived. The distinction it exists for is
+        // between text the app took out of a PDF and text a person typed, and
+        // nothing on the record could tell those apart before.
+        let vault = TempVault::new();
+        let source = vault
+            .import_source("Zhou 2019", paper("10.1000/x"))
+            .unwrap();
+        let note = vault.create_note("Reading", None).unwrap();
+        let added = vault
+            .capture_annotations(
+                &note.summary.id,
+                &source.id,
+                &[crate::references::Annotation {
+                    key: "ZAB12CD3".into(),
+                    kind: Some("highlight".into()),
+                    text: Some("ribbons align along c".into()),
+                    comment: Some("only two samples".into()),
+                    colour: Some("#ffd400".into()),
+                    page: Some("S12".into()),
+                    sort_index: None,
+                }],
+            )
+            .unwrap();
+        assert_eq!(added, 1);
+
+        let recorded = &vault.read_note(&note.summary.id).unwrap().summary.sources[0];
+        assert_eq!(recorded.origin.as_deref(), Some("annotation"));
+        // And the invariant the whole import exists for, still held.
+        assert_eq!(recorded.quote.as_deref(), Some("ribbons align along c"));
+        assert_eq!(recorded.comment.as_deref(), Some("only two samples"));
+    }
+
+    #[test]
+    fn a_v0_4_record_gains_no_v0_5_keys_by_being_read_and_written() {
+        // The additive rule, tested at the byte level rather than trusted:
+        // `zotero`, `page_index` and `origin` must be absent on a record that
+        // never had them, not written out as nulls.
+        let vault = TempVault::new();
+        let source = vault
+            .import_source("Zhou 2019", paper("10.1000/x"))
+            .unwrap();
+        let note = vault.create_note("Reading", None).unwrap();
+        vault
+            .set_citations(
+                &note.summary.id,
+                vec![Citation {
+                    id: source.id.clone(),
+                    page: Some("S12".into()),
+                    quote: Some("ribbons align along c".into()),
+                    ..Default::default()
+                }],
+            )
+            .unwrap();
+
+        let raw = fs::read_to_string(vault.path_for(&note.summary.id).unwrap()).unwrap();
+        for key in ["zotero:", "page_index:", "origin:"] {
+            assert!(
+                !raw.contains(key),
+                "{key} was written onto a record that has no such fact"
+            );
+        }
     }
 
     #[test]

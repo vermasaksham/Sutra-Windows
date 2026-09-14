@@ -116,7 +116,15 @@ export default function SourcesPanel({
                       }
                       aria-label="Page"
                       size={5}
-                      className="rounded bg-row-hover px-1 py-0.5 text-xs text-ink outline-none"
+                      // The number printed on the paper, which is what a
+                      // citation carries. Empty with a PDF position known
+                      // below is the ordinary state after capturing from the
+                      // reading pane: the file knows where it was, and only
+                      // the paper knows what it is called.
+                      placeholder={
+                        citation.page_index ? `PDF ${citation.page_index}` : ""
+                      }
+                      className="rounded bg-row-hover px-1 py-0.5 text-xs text-ink outline-none placeholder:text-ink-muted/70"
                     />
                   </label>
                   <button
@@ -264,6 +272,7 @@ export default function SourcesPanel({
                       id: ref,
                       page: null,
                       quote: null,
+                      origin: "manual",
                       captured: new Date().toISOString(),
                     },
                   ])
@@ -288,6 +297,7 @@ export default function SourcesPanel({
                 id: source.id,
                 page: null,
                 quote: null,
+                origin: "manual",
                 captured: new Date().toISOString(),
               },
             ]);
