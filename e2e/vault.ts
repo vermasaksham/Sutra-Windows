@@ -49,6 +49,8 @@ export type Note = {
     page_index?: number;
     /** "selection", "annotation" or "manual". */
     origin?: string;
+    /** `"source"` when the record lives on the paper and this is a reference. */
+    at?: string;
   }>;
   /** On a note of `type: source`: evidence taken from this paper, shared so
    *  more than one note can rest on it. */
@@ -203,6 +205,34 @@ export async function useVault(page: Page, options: VaultOptions) {
           // The same join Rust does, over the same array: shared records
           // first, then who uses them, so one quotation is one item however
           // many notes rest on it.
+          // Moves the record onto the paper and reduces the note's entry to
+          // a reference — the same two writes, in the same order, as Rust.
+          case "share_evidence": {
+            const note = find(args.id as string);
+            const record = note?.sources?.find((c) => c.eid === args.eid);
+            if (!note || !record || record.at)
+              return note ? summary(note) : null;
+            const paper = notes.find((n) => n.id === record.id);
+            if (!paper) return summary(note);
+            paper.evidence = paper.evidence ?? [];
+            if (!paper.evidence.some((e) => e.eid === record.eid)) {
+              paper.evidence.push({
+                eid: record.eid!,
+                page: record.page,
+                page_index: record.page_index,
+                quote: record.quote,
+                kind: record.kind,
+                origin: record.origin,
+              });
+            }
+            record.at = "source";
+            delete record.page;
+            delete record.page_index;
+            delete record.quote;
+            delete record.kind;
+            delete record.origin;
+            return summary(note);
+          }
           case "all_evidence": {
             const items = new Map<string, Record<string, unknown>>();
             for (const note of notes) {

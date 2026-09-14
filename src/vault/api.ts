@@ -157,6 +157,10 @@ export type Citation = {
    *  v0.5, and nothing backfills it: a guess in a provenance field is
    *  indistinguishable from a fact once it is written. */
   origin?: string | null;
+  /** Where the record this names actually lives. Absent — every entry written
+   *  before v0.5, and every one still written inline — means this entry *is*
+   *  the record. `"source"` means it is on the Source note given by `id`. */
+  at?: string | null;
 };
 
 /** A highlight or note already made in Zotero's reader. */

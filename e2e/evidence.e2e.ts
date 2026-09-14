@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { useVault } from "./vault";
+import { notesNow, useVault } from "./vault";
 
 const NOTE = "01HQ3M8K2P00000000000000A1";
 const OTHER = "01HQ3M8K2P00000000000000B2";
@@ -196,5 +196,80 @@ test.describe("the evidence browser", () => {
     await openEvidence(page);
 
     await expect(page.getByText(/Nothing recorded yet/)).toBeVisible();
+  });
+});
+
+/**
+ * Moving a record onto the paper, which is what makes one quotation usable by
+ * two notes instead of copied into both.
+ */
+test.describe("sharing evidence with the paper", () => {
+  test("moves the words to the paper and leaves a reference", async ({
+    page,
+  }) => {
+    await useVault(page, {
+      notes: [
+        {
+          id: NOTE,
+          title: "Growth of ribbons",
+          body: `Ribbons align, as [@${PAPER}] shows.`,
+          sources: [
+            {
+              eid: E2,
+              id: PAPER,
+              page: "431",
+              quote: "ribbons align along c",
+              kind: "measurement",
+            },
+          ],
+        },
+        { id: PAPER, type: "source", title: "Zhou 2019", body: "" },
+      ],
+    });
+    await page.goto("/");
+
+    const share = page.getByRole("button", {
+      name: /Keep this on the paper/,
+    });
+    await expect(share).toBeVisible();
+    await share.click();
+
+    // The note no longer holds the words, and says where they went rather
+    // than offering an empty box to type them into again.
+    await expect(
+      page.getByText(/Kept on the paper, so other notes can rest/),
+    ).toBeVisible();
+    await expect(share).toHaveCount(0);
+
+    // And the paper now owns them.
+    const written = await notesNow(page);
+    const paper = written.find((n) => n.id === PAPER);
+    expect(paper?.evidence?.[0]?.quote).toBe("ribbons align along c");
+    expect(paper?.evidence?.[0]?.page).toBe("431");
+
+    const note = written.find((n) => n.id === NOTE);
+    expect(note?.sources?.[0]?.at).toBe("source");
+    expect(note?.sources?.[0]?.quote ?? null).toBeNull();
+  });
+
+  test("a record with no words offers nothing to share", async ({ page }) => {
+    // Sharing an empty record would move nothing to the paper and take the
+    // page away from the note that has it.
+    await useVault(page, {
+      notes: [
+        {
+          id: NOTE,
+          title: "Growth of ribbons",
+          body: "",
+          sources: [{ eid: E2, id: PAPER, page: "431" }],
+        },
+        { id: PAPER, type: "source", title: "Zhou 2019", body: "" },
+      ],
+    });
+    await page.goto("/");
+
+    await expect(
+      page.getByRole("button", { name: /Keep this on the paper/ }),
+    ).toHaveCount(0);
   });
 });

@@ -1236,8 +1236,16 @@ export default function App() {
 
       {note.doc && showContext && (
         <ContextPanel
+          noteId={note.doc.id}
           citations={note.doc.sources ?? []}
           notes={notes}
+          onShared={() => {
+            // Sharing rewrites this note *and* the paper, so neither the
+            // editor's copy nor the note list is current any more. Re-read
+            // both rather than patching what we think changed.
+            void note.reload?.();
+            void refresh();
+          }}
           inlineRefs={proseRefs}
           // A source note shows its paper above the editor instead; a list of
           // what it draws on would be asking the wrong question of it.
