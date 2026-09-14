@@ -257,7 +257,7 @@ impl Query {
         Compiled {
             sql: format!(
                 "SELECT n.id, n.note_type, n.title, n.folder, n.position, n.tags, n.icon, \
-                        n.cover, n.excerpt, n.source, n.sources, n.updated \
+                        n.cover, n.excerpt, n.source, n.sources, n.evidence, n.updated \
                  FROM notes n WHERE {where_clause} ORDER BY {} LIMIT ?",
                 self.sort.order_by()
             ),

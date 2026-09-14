@@ -538,6 +538,58 @@ pub fn set_citations(
     })
 }
 
+/// Move one of this note's evidence records onto the paper it came from, so
+/// another note can rest on the same quotation instead of copying it.
+///
+/// Deliberate, and never automatic. Sharing changes which file owns a
+/// quotation, and doing that to somebody's vault because two notes happened to
+/// quote the same sentence would be the app deciding what their evidence is.
+///
+/// Both notes are re-indexed, because both changed: the paper gained a record
+/// and the note lost one.
+#[tauri::command]
+pub fn share_evidence(state: State<'_, AppState>, id: String, eid: String) -> Result<NoteSummary> {
+    state.with_both(|vault, index| {
+        let source_id = vault
+            .read_note(&id)?
+            .summary
+            .sources
+            .iter()
+            .find(|c| c.eid == eid)
+            .map(|c| c.id.clone());
+
+        vault.share_evidence(&id, &eid)?;
+
+        if let Some(source_id) = source_id {
+            let source = vault.read_note(&source_id)?;
+            index.upsert(&source.summary, &source.body)?;
+        }
+        let doc = vault.read_note(&id)?;
+        index.upsert(&doc.summary, &doc.body)?;
+        Ok(doc.summary)
+    })
+}
+
+/// A note's evidence with every reference followed, so the caller sees what
+/// each record actually says without knowing where it is stored.
+///
+/// An entry whose record cannot be found is returned as it is on disk, with
+/// `at` still set and no quotation — which is exactly the state the
+/// completeness checks report. Nothing is invented and nothing is dropped: a
+/// reference to a missing record is the last evidence that something was
+/// recorded there.
+#[tauri::command]
+pub fn note_evidence(state: State<'_, AppState>, id: String) -> Result<Vec<Citation>> {
+    state.with_vault(|vault| {
+        let held = vault.read_note(&id)?.summary.sources;
+        let mut out = Vec::with_capacity(held.len());
+        for citation in held {
+            out.push(vault.resolve_evidence(&citation)?.unwrap_or(citation));
+        }
+        Ok(out)
+    })
+}
+
 /// Every source note in the vault.
 #[tauri::command]
 pub fn list_sources(state: State<'_, AppState>) -> Result<Vec<NoteSummary>> {

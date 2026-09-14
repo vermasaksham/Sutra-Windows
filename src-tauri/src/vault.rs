@@ -80,6 +80,13 @@ pub struct NoteSummary {
     /// Present on a note of `type: source`. What the paper is.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub source: Option<SourceMeta>,
+    /// Evidence taken from this paper, on a note of `type: source`.
+    ///
+    /// Empty on every other kind of note. Carried on the summary for the same
+    /// reason `sources` is: resolving a reference must not need a second read
+    /// of a note the caller has already loaded.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub evidence: Vec<crate::frontmatter::SharedEvidence>,
     /// The sources this note draws on.
     ///
     /// Carried on the summary rather than only the full note because the index
@@ -1170,6 +1177,124 @@ impl Vault {
         })
     }
 
+    /// Move one note's inline evidence record onto the paper it came from, so
+    /// other notes can rest on the same quotation.
+    ///
+    /// Two writes, and the order is the whole safety argument: the record is
+    /// written to the Source note **first**, and only once that has succeeded
+    /// is the note's own entry reduced to a reference. A crash between them
+    /// leaves the quotation in two places, which a completeness check reports
+    /// and a person can resolve. The opposite order loses it.
+    ///
+    /// Nothing is merged. If the Source note already holds this `eid` the
+    /// record there is left exactly as it is — it is the same evidence, and
+    /// overwriting it with this note's copy would silently prefer one of two
+    /// possibly-edited versions.
+    ///
+    /// The reader's `comment` does not travel. It stays on the reference,
+    /// because it is the reader's and the record is the paper's.
+    pub fn share_evidence(&self, note_id: &str, eid: &str) -> Result<()> {
+        let held = self.read_note(note_id)?.summary.sources;
+        let Some(record) = held.iter().find(|c| c.eid == eid) else {
+            return Err(SutraError::NoteNotFound(format!(
+                "{note_id} has no evidence {eid}"
+            )));
+        };
+        if record.at.is_some() {
+            // Already a reference. Sharing it again would be a no-op at best
+            // and a second copy at worst.
+            return Ok(());
+        }
+        let source_id = record.id.clone();
+        let shared = frontmatter::SharedEvidence {
+            eid: record.eid.clone(),
+            page: record.page.clone(),
+            page_index: record.page_index,
+            quote: record.quote.clone(),
+            kind: record.kind.clone(),
+            origin: record.origin.clone(),
+            annotation: record.annotation.clone(),
+            colour: record.colour.clone(),
+            captured: record.captured,
+        };
+
+        self.edit(&source_id, |fm| {
+            if !fm.evidence.iter().any(|e| e.eid == shared.eid) {
+                fm.evidence.push(shared);
+            }
+        })?;
+
+        self.edit(note_id, |fm| {
+            for citation in &mut fm.sources {
+                if citation.eid == eid {
+                    // Everything the record owns is dropped here, because it
+                    // now lives on the source. What stays is the reference and
+                    // what belongs to this reader.
+                    citation.at = Some(frontmatter::AT_SOURCE.into());
+                    citation.page = None;
+                    citation.page_index = None;
+                    citation.quote = None;
+                    citation.kind = None;
+                    citation.origin = None;
+                    citation.annotation = None;
+                    citation.colour = None;
+                }
+            }
+        })?;
+        Ok(())
+    }
+
+    /// What a citation actually says, following a reference to its record.
+    ///
+    /// Returns the entry unchanged when it *is* the record, which is every
+    /// entry written before v0.5. For a reference, the record is read from the
+    /// Source note and the reader's own `comment` is kept on top of it.
+    ///
+    /// `None` means the reference names a record that is not there — reported
+    /// by the caller, never repaired. Inventing the quotation back and deleting
+    /// the reference are both ways of destroying the last evidence that
+    /// something was recorded.
+    pub fn resolve_evidence(&self, citation: &Citation) -> Result<Option<Citation>> {
+        if citation.at.is_none() {
+            return Ok(Some(citation.clone()));
+        }
+        if citation.at.as_deref() != Some(frontmatter::AT_SOURCE) {
+            // A word this build does not know. Not an error and not a guess:
+            // the note is from a newer build, and saying so is the honest
+            // answer.
+            return Ok(None);
+        }
+        let source = match self.read_note(&citation.id) {
+            Ok(note) => note,
+            Err(_) => return Ok(None),
+        };
+        let Some(record) = source
+            .summary
+            .evidence
+            .iter()
+            .find(|e| e.eid == citation.eid)
+        else {
+            return Ok(None);
+        };
+        Ok(Some(Citation {
+            eid: record.eid.clone(),
+            id: citation.id.clone(),
+            page: record.page.clone(),
+            page_index: record.page_index,
+            quote: record.quote.clone(),
+            kind: record.kind.clone(),
+            origin: record.origin.clone(),
+            annotation: record.annotation.clone(),
+            colour: record.colour.clone(),
+            captured: record.captured,
+            zotero: citation.zotero.clone(),
+            // The reader's, from the reference. Never from the record, which
+            // has none by construction.
+            comment: citation.comment.clone(),
+            at: citation.at.clone(),
+        }))
+    }
+
     /// Record annotations from a source's PDF as evidence on a note.
     ///
     /// The one write in the whole annotation path. It is additive and it is
@@ -1242,6 +1367,10 @@ impl Vault {
                 // filled in by `commands`, which has it.
                 page_index: None,
                 zotero: None,
+                // Inline: `capture_annotations` writes the record onto the
+                // note that asked for it. Sharing is a separate, deliberate
+                // act — see `share_evidence`.
+                at: None,
             });
         }
 
@@ -2343,6 +2472,7 @@ fn summary_of(fm: &Frontmatter, body: &str, folder: String) -> NoteSummary {
         cover: fm.cover.clone(),
         source: fm.source.clone(),
         sources: fm.sources.clone(),
+        evidence: fm.evidence.clone(),
         excerpt: excerpt_of(body),
         updated: fm.updated,
     }
@@ -5412,6 +5542,184 @@ mod tests {
                 "{key} was written onto a record that has no such fact"
             );
         }
+    }
+
+    // ---- v0.5: one quotation, one home -------------------------------------
+
+    /// Set up a note holding one inline record, and return (source, note, eid).
+    fn one_piece_of_evidence(vault: &TempVault) -> (String, String, String) {
+        let source = vault
+            .import_source("Zhou 2019", paper("10.1000/x"))
+            .unwrap();
+        let note = vault.create_note("Reading", None).unwrap();
+        vault
+            .set_citations(
+                &note.summary.id,
+                vec![Citation {
+                    id: source.id.clone(),
+                    page: Some("431".into()),
+                    page_index: Some(1),
+                    quote: Some("ribbons align along c".into()),
+                    kind: Some("measurement".into()),
+                    origin: Some("selection".into()),
+                    comment: Some("only two samples".into()),
+                    ..Default::default()
+                }],
+            )
+            .unwrap();
+        let eid = vault.read_note(&note.summary.id).unwrap().summary.sources[0]
+            .eid
+            .clone();
+        (source.id, note.summary.id, eid)
+    }
+
+    #[test]
+    fn sharing_evidence_moves_the_record_and_leaves_a_reference() {
+        let vault = TempVault::new();
+        let (source_id, note_id, eid) = one_piece_of_evidence(&vault);
+
+        vault.share_evidence(&note_id, &eid).unwrap();
+
+        // The paper now owns what the paper says.
+        let record = &vault.read_note(&source_id).unwrap().summary.evidence[0];
+        assert_eq!(record.eid, eid);
+        assert_eq!(record.quote.as_deref(), Some("ribbons align along c"));
+        assert_eq!(record.page.as_deref(), Some("431"));
+        assert_eq!(record.kind.as_deref(), Some("measurement"));
+
+        // The note keeps a reference, and nothing that belongs to the paper.
+        let reference = &vault.read_note(&note_id).unwrap().summary.sources[0];
+        assert_eq!(reference.eid, eid);
+        assert_eq!(reference.at.as_deref(), Some("source"));
+        assert_eq!(reference.quote, None, "the quotation exists twice");
+        assert_eq!(reference.page, None);
+        assert_eq!(reference.kind, None);
+    }
+
+    #[test]
+    fn a_readers_comment_does_not_travel_to_the_paper() {
+        // The invariant the shared form could most easily break: a record that
+        // belongs to the paper cannot carry one reader's opinion of it. The
+        // `SharedEvidence` struct has no `comment` field at all, so this
+        // checks the remark survived *on the reader's side* rather than being
+        // dropped along with everything that moved.
+        let vault = TempVault::new();
+        let (source_id, note_id, eid) = one_piece_of_evidence(&vault);
+
+        vault.share_evidence(&note_id, &eid).unwrap();
+
+        let reference = &vault.read_note(&note_id).unwrap().summary.sources[0];
+        assert_eq!(reference.comment.as_deref(), Some("only two samples"));
+
+        let raw = fs::read_to_string(vault.path_for(&source_id).unwrap()).unwrap();
+        assert!(
+            !raw.contains("only two samples"),
+            "a reader's remark was written onto the paper's record"
+        );
+    }
+
+    #[test]
+    fn resolving_a_reference_reads_the_paper_and_keeps_the_readers_words() {
+        let vault = TempVault::new();
+        let (_source, note_id, eid) = one_piece_of_evidence(&vault);
+        vault.share_evidence(&note_id, &eid).unwrap();
+
+        let reference = vault.read_note(&note_id).unwrap().summary.sources[0].clone();
+        let whole = vault.resolve_evidence(&reference).unwrap().unwrap();
+
+        // The paper's, from the record.
+        assert_eq!(whole.quote.as_deref(), Some("ribbons align along c"));
+        assert_eq!(whole.page.as_deref(), Some("431"));
+        assert_eq!(whole.page_index, Some(1));
+        // The reader's, from the reference.
+        assert_eq!(whole.comment.as_deref(), Some("only two samples"));
+    }
+
+    #[test]
+    fn an_inline_record_resolves_to_itself() {
+        // Every note written before v0.5 is this case, and it must not need
+        // the source note to be readable at all.
+        let vault = TempVault::new();
+        let (_source, note_id, _eid) = one_piece_of_evidence(&vault);
+        let inline = vault.read_note(&note_id).unwrap().summary.sources[0].clone();
+        assert_eq!(inline.at, None);
+        assert_eq!(vault.resolve_evidence(&inline).unwrap(), Some(inline));
+    }
+
+    #[test]
+    fn a_reference_to_a_record_that_is_gone_is_reported_not_invented() {
+        let vault = TempVault::new();
+        let (source_id, note_id, eid) = one_piece_of_evidence(&vault);
+        vault.share_evidence(&note_id, &eid).unwrap();
+
+        // Someone deletes the record from the paper, by hand or by sync.
+        vault.edit(&source_id, |fm| fm.evidence.clear()).unwrap();
+
+        let reference = vault.read_note(&note_id).unwrap().summary.sources[0].clone();
+        assert_eq!(vault.resolve_evidence(&reference).unwrap(), None);
+        // And the reference itself is still on disk, naming what was lost.
+        assert_eq!(reference.eid, eid);
+        assert_eq!(reference.comment.as_deref(), Some("only two samples"));
+    }
+
+    #[test]
+    fn sharing_twice_does_not_make_a_second_record() {
+        let vault = TempVault::new();
+        let (source_id, note_id, eid) = one_piece_of_evidence(&vault);
+
+        vault.share_evidence(&note_id, &eid).unwrap();
+        vault.share_evidence(&note_id, &eid).unwrap();
+
+        assert_eq!(
+            vault.read_note(&source_id).unwrap().summary.evidence.len(),
+            1
+        );
+    }
+
+    #[test]
+    fn a_second_note_rests_on_the_same_quotation_without_copying_it() {
+        // The reason the whole shape exists.
+        let vault = TempVault::new();
+        let (source_id, first, eid) = one_piece_of_evidence(&vault);
+        vault.share_evidence(&first, &eid).unwrap();
+
+        let second = vault.create_note("Chapter 3", None).unwrap();
+        vault
+            .set_citations(
+                &second.summary.id,
+                vec![Citation {
+                    eid: eid.clone(),
+                    id: source_id.clone(),
+                    at: Some("source".into()),
+                    comment: Some("supports the growth argument".into()),
+                    ..Default::default()
+                }],
+            )
+            .unwrap();
+
+        let reference = vault.read_note(&second.summary.id).unwrap().summary.sources[0].clone();
+        let whole = vault.resolve_evidence(&reference).unwrap().unwrap();
+        assert_eq!(whole.quote.as_deref(), Some("ribbons align along c"));
+        // Two notes, two readings, one quotation on disk.
+        assert_eq!(
+            whole.comment.as_deref(),
+            Some("supports the growth argument")
+        );
+        assert_eq!(
+            vault.read_note(&source_id).unwrap().summary.evidence.len(),
+            1
+        );
+    }
+
+    #[test]
+    fn a_note_with_no_shared_evidence_gains_no_evidence_key() {
+        // Additive, at the byte level: the new list must not appear as `[]` on
+        // a note that has none, or every file in a vault changes on first save.
+        let vault = TempVault::new();
+        let (_source, note_id, _eid) = one_piece_of_evidence(&vault);
+        let raw = fs::read_to_string(vault.path_for(&note_id).unwrap()).unwrap();
+        assert!(!raw.contains("evidence:"));
+        assert!(!raw.contains("at:"));
     }
 
     #[test]

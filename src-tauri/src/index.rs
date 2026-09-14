@@ -20,7 +20,7 @@ use std::sync::Mutex;
 /// Bumped whenever the schema changes. On mismatch the index is dropped and
 /// rebuilt rather than migrated — migrations are for data you cannot recreate,
 /// and this is not that.
-const SCHEMA_VERSION: i32 = 9;
+const SCHEMA_VERSION: i32 = 10;
 
 const SCHEMA: &str = r#"
 CREATE TABLE notes (
@@ -53,6 +53,10 @@ CREATE TABLE notes (
     -- `sources` is what this note cites.
     source    TEXT,
     sources   TEXT NOT NULL DEFAULT '[]',
+    -- Evidence this paper's own note owns, on a note of type `source`; '[]'
+    -- everywhere else. Derived like the rest: the record on disk is the note,
+    -- and this exists so resolving a reference does not read a second file.
+    evidence  TEXT NOT NULL DEFAULT '[]',
     updated   TEXT NOT NULL
 );
 CREATE INDEX notes_by_folder ON notes(folder, position);
@@ -291,7 +295,7 @@ impl Index {
     pub fn all_notes(&self) -> Result<Vec<NoteSummary>> {
         let guard = self.conn.lock().unwrap_or_else(|e| e.into_inner());
         let mut stmt = guard.prepare(
-            "SELECT id, note_type, title, folder, position, tags, icon, cover, excerpt, source, sources, updated
+            "SELECT id, note_type, title, folder, position, tags, icon, cover, excerpt, source, sources, evidence, updated
              FROM notes
              ORDER BY folder, position, title COLLATE NOCASE",
         )?;
@@ -761,7 +765,7 @@ impl Index {
         let guard = self.conn.lock().unwrap_or_else(|e| e.into_inner());
         let mut stmt = guard.prepare(
             "SELECT n.id, n.note_type, n.title, n.folder, n.position, n.tags, n.icon, n.cover, \
-                    n.excerpt, n.source, n.sources, n.updated \
+                    n.excerpt, n.source, n.sources, n.evidence, n.updated \
                FROM notes n \
               WHERE n.folder = (SELECT folder FROM notes WHERE id = ?1) AND n.id <> ?1 \
               ORDER BY n.updated DESC LIMIT ?2",
@@ -1087,8 +1091,8 @@ fn table_names(conn: &Connection) -> Result<Vec<String>> {
 fn insert_note(tx: &rusqlite::Transaction<'_>, note: &NoteSummary, body: &str) -> Result<()> {
     let tags = serde_json::to_string(&note.tags).unwrap_or_else(|_| "[]".into());
     tx.execute(
-        "INSERT INTO notes (id, note_type, title, folder, position, tags, icon, cover, excerpt, body, source, sources, updated)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
+        "INSERT INTO notes (id, note_type, title, folder, position, tags, icon, cover, excerpt, body, source, sources, evidence, updated)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
         params![
             note.id,
             note.note_type.as_str(),
@@ -1104,6 +1108,7 @@ fn insert_note(tx: &rusqlite::Transaction<'_>, note: &NoteSummary, body: &str) -
                 .as_ref()
                 .map(|s| serde_json::to_string(s).unwrap_or_else(|_| "null".into())),
             serde_json::to_string(&note.sources).unwrap_or_else(|_| "[]".into()),
+            serde_json::to_string(&note.evidence).unwrap_or_else(|_| "[]".into()),
             note.updated
                 .format(&time::format_description::well_known::Rfc3339)
                 .unwrap_or_default(),
@@ -1159,7 +1164,8 @@ fn row_to_summary(row: &rusqlite::Row<'_>) -> rusqlite::Result<NoteSummary> {
     let tags: String = row.get(5)?;
     let source: Option<String> = row.get(9)?;
     let sources: String = row.get(10)?;
-    let updated: String = row.get(11)?;
+    let evidence: String = row.get(11)?;
+    let updated: String = row.get(12)?;
     Ok(NoteSummary {
         id: row.get(0)?,
         note_type: crate::frontmatter::NoteType::parse(&note_type),
@@ -1172,6 +1178,7 @@ fn row_to_summary(row: &rusqlite::Row<'_>) -> rusqlite::Result<NoteSummary> {
         excerpt: row.get(8)?,
         source: source.and_then(|s| serde_json::from_str(&s).ok()),
         sources: serde_json::from_str(&sources).unwrap_or_default(),
+        evidence: serde_json::from_str(&evidence).unwrap_or_default(),
         updated: time::OffsetDateTime::parse(
             &updated,
             &time::format_description::well_known::Rfc3339,
@@ -2289,6 +2296,7 @@ mod tests {
             let tx = guard.unchecked_transaction().unwrap();
             for i in 0..5_000 {
                 let summary = NoteSummary {
+                    evidence: Vec::new(),
                     id: Ulid::generate().to_string(),
                     note_type: if i % 7 == 0 {
                         crate::frontmatter::NoteType::Literature

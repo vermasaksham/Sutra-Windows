@@ -396,6 +396,73 @@ pub struct Citation {
     /// is indistinguishable from a fact once it is on disk.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub origin: Option<String>,
+    /// Where the record this names actually lives.
+    ///
+    /// Absent — which is every entry written before v0.5, and every one still
+    /// written inline — means *here*: this entry is the record. `"source"`
+    /// means the record is in the `evidence:` list of the Source note named by
+    /// `id`, and this entry is a reference to it.
+    ///
+    /// A string rather than an enum, for the same reason `kind` is one: a word
+    /// written by a newer build must survive an older build reading the file
+    /// and writing it back. An unrecognised value is treated as a reference
+    /// whose target cannot be found — reported, never resolved by guessing.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub at: Option<String>,
+}
+
+/// Where a reference's record lives. The values `Citation::at` takes.
+pub const AT_SOURCE: &str = "source";
+
+/// One piece of evidence, owned by the paper it was taken from.
+///
+/// The shared form of [`Citation`], written in a Source note's `evidence:`
+/// list. Two notes quoting one sentence reference one of these instead of
+/// holding a copy each — which is the whole point, because two editable copies
+/// of one quotation is two answers to what the paper says.
+///
+/// **Two fields are deliberately absent, and their absence is the design.**
+///
+/// There is no `id`: the source is the note this is written on. A record that
+/// named its own source could be moved to the wrong paper and still parse.
+///
+/// There is no `comment`. A comment is the reader's, and a record that belongs
+/// to the paper cannot hold one reader's opinion — two people using one
+/// quotation do not share a view of it. The reader's remark stays on the
+/// reader's note, in the `Citation` that references this. That is the "paper
+/// says" versus "I think" rule, enforced here by the type rather than by
+/// everyone remembering it.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct SharedEvidence {
+    /// The identity every reference names. Never empty on a written record.
+    pub eid: String,
+    /// The number printed on the paper. See `Citation::page`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub page: Option<String>,
+    /// The nth page of the file. See `Citation::page_index`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub page_index: Option<u32>,
+    /// What the paper says, in its own words.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub quote: Option<String>,
+    /// What kind of statement it is. See `Citation::kind`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kind: Option<String>,
+    /// How it came to exist. See `Citation::origin`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub origin: Option<String>,
+    /// The Zotero annotation it was captured from, if any.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub annotation: Option<String>,
+    /// The highlight colour, recorded and never interpreted.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub colour: Option<String>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        with = "time::serde::rfc3339::option"
+    )]
+    pub captured: Option<OffsetDateTime>,
 }
 
 /// How a piece of evidence came to exist: the values `Citation::origin` takes.
@@ -451,6 +518,13 @@ pub struct Frontmatter {
     /// The sources this note draws on, with where in them.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub sources: Vec<Citation>,
+    /// Evidence taken from *this* paper, on a note of `type: source`.
+    ///
+    /// Empty and meaningless on any other kind of note, exactly as `source:`
+    /// is. A record here is the one writable copy of what the paper says at
+    /// that place; notes reference it by `eid` with `at: source`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub evidence: Vec<SharedEvidence>,
     /// Notes a person has said are *not* duplicates of this one.
     ///
     /// In the file rather than the index, because the index is disposable and
@@ -511,6 +585,7 @@ impl Frontmatter {
             cover: None,
             source: None,
             sources: Vec::new(),
+            evidence: Vec::new(),
             not_duplicates: Vec::new(),
             view: None,
             sequence: Vec::new(),
@@ -596,6 +671,7 @@ mod tests {
             cover: None,
             source: None,
             sources: Vec::new(),
+            evidence: Vec::new(),
             not_duplicates: Vec::new(),
             view: None,
             sequence: Vec::new(),
