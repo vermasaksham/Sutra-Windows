@@ -162,6 +162,10 @@ export default function ReadingPane({
         // is unaltered.
         quote: selection.text,
         origin: "selection",
+        // Capture-time provenance. The Source note remains authoritative, but
+        // keeping the library key here means an exported quotation can still
+        // name its origin if that note is not present.
+        zotero: itemKey,
         // Left empty on purpose. Interpretation is a second, deliberate act —
         // the capture control does not collect an opinion.
       };

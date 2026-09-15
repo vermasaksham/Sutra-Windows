@@ -7,6 +7,13 @@ true on 2026-09-15 from what has changed since.
 
 Taken at `main` = `a7501c8`, PR #19 head = `04b33b7`.
 
+> **Post-handoff update, 2026-09-15:** PR #19 was merged as `fd36c2b` at the
+> owner's direction. A focused stabilization follow-up now enforces Source-note
+> ownership, reports divergent duplicate evidence, retains Zotero capture
+> provenance, and serializes concurrent evidence appends. Review and merge that
+> follow-up before §7. The sections below remain the original dated snapshot;
+> `AGENTS.md` carries the current state.
+
 ## Current release
 
 |                           |                                                             |
@@ -57,7 +64,7 @@ is referenced by section number throughout the commits and docs.
 | §7 Interpretation → Evidence traceability                                        | **Not started**                        |
 | §8 Research Questions                                                            | **Not started**                        |
 | §9 Provenance completeness checks                                                | **Not started**                        |
-| §10 Citation ↔ Evidence groundwork                                               | **Not started**                        |
+| §10 Citation ↔ Evidence groundwork                                              | **Not started**                        |
 | §11 Export provenance                                                            | **Not started**                        |
 
 Out of scope for v0.5 and not to be started: OCR, embeddings, vector databases,
@@ -88,8 +95,9 @@ Three decisions in it want a human's eye:
 2. **A shared record carries no `comment`.** This was not designed in; it fell
    out of asking who owns each field. A record belonging to the paper cannot
    hold one reader's opinion. It constrains everything §7 builds.
-3. **Captures no longer write a page label the app does not know.** Already
-   visible in rc.2: the button says "PDF p. 2" and leaves the citation page
+3. **Captures no longer write a page label the app does not know.** This was
+   described here as visible in rc.2, but that was incorrect: the behaviour
+   landed with PR #19. The button says "PDF p. 2" and leaves the citation page
    blank.
 
 ### Nothing else is in flight

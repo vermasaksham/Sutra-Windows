@@ -150,6 +150,7 @@ test.describe("reading a paper", () => {
     expect(recorded!.page_index).toBe(2);
     expect(recorded!.page ?? null).toBeNull();
     expect(recorded!.origin).toBe("selection");
+    expect(recorded!.zotero).toBe("ZHOU2019");
   });
 
   test("evidence goes to the note being written, never the source", async ({
@@ -233,6 +234,12 @@ test.describe("Zotero annotations", () => {
     await expect(pane.getByText("✓ already captured")).toHaveCount(1);
     // The one taken no longer offers to be taken again; the other still does.
     await expect(pane.getByRole("button", { name: "Capture" })).toHaveCount(1);
+
+    const imported = (await notesNow(page))
+      .find((note) => note.id === WRITING)
+      ?.sources?.find((citation) => citation.annotation === "AN1");
+    expect(imported?.origin).toBe("annotation");
+    expect(imported?.zotero).toBe("ZHOU2019");
   });
 
   test("an annotation already captured is marked before anything is pressed", async ({
