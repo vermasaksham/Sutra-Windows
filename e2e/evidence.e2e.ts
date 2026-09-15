@@ -272,4 +272,26 @@ test.describe("sharing evidence with the paper", () => {
       page.getByRole("button", { name: /Keep this on the paper/ }),
     ).toHaveCount(0);
   });
+
+  test("a non-Source note is never offered as an evidence home", async ({
+    page,
+  }) => {
+    await useVault(page, {
+      notes: [
+        {
+          id: NOTE,
+          title: "Growth of ribbons",
+          body: "",
+          sources: [{ eid: E2, id: PAPER, quote: "ribbons align along c" }],
+        },
+        { id: PAPER, type: "literature", title: "Zhou 2019", body: "" },
+      ],
+    });
+    await page.goto("/");
+
+    await expect(
+      page.getByRole("button", { name: /Keep this on the paper/ }),
+    ).toHaveCount(0);
+    await expect(page.getByText(/not a source/i)).toBeVisible();
+  });
 });

@@ -41,6 +41,13 @@ pub enum SutraError {
     #[error("export failed: {0}")]
     Export(String),
 
+    /// A requested evidence move would violate the on-disk ownership rules or
+    /// discard one of two disagreeing records. Carries an actionable sentence
+    /// because the safe outcome is to leave both files untouched and let the
+    /// researcher reconcile them.
+    #[error("{0}")]
+    Evidence(String),
+
     /// The platform credential store would not answer. Never fatal: the caller
     /// always has somewhere less private to fall back to, and the point of
     /// carrying the reason is that the user gets told which happened.

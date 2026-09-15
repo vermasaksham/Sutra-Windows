@@ -91,11 +91,11 @@ npm ci                          # install; the lockfile is authoritative
 npx tsc --noEmit                # frontend types
 npx prettier --check src        # frontend format (use --write to fix)
 npm test                        # Vitest — 121 tests, 16 files
-npm run e2e                     # Playwright — 88 tests, 14 files
+npm run e2e                     # Playwright — 89 tests, 14 files
 
 cargo fmt --check --manifest-path src-tauri/Cargo.toml
 cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
-cargo test --manifest-path src-tauri/Cargo.toml   # 479 tests, 6 ignored
+cargo test --manifest-path src-tauri/Cargo.toml   # 482 tests, 6 ignored
 
 npm run tauri:dev               # run the app
 npm run tauri:build -- --bundles nsis   # the installer CI publishes
@@ -142,7 +142,7 @@ comment thread, unpushed.
 | Version in the five files | `0.4.0-rc.2`                                                                                                                  |
 | Latest release            | [`v0.4.0-rc.2`](https://github.com/vermasaksham/Sutra-Windows/releases/tag/v0.4.0-rc.2), published 2026-09-14, **prerelease** |
 | Latest stable             | `v0.3.1`                                                                                                                      |
-| `main` at handoff         | `a7501c8` — "Sutra 0.4.0-rc.2 (#18)"                                                                                          |
+| `main` after PR #19       | `fd36c2b` — "Merge pull request #19 from vermasaksham/claude/sutra-project-setup-hy61uo"                                      |
 
 The installer is unsigned; SmartScreen warns on first run. Code signing needs a
 certificate the owner must buy — see `docs/releasing.md`.
@@ -161,7 +161,7 @@ disposable out-of-vault text cache, Zotero annotation import, selection →
 evidence capture, and a named failure for all seven states a PDF can be in.
 `docs/roadmap/v0.4.md` has the capability table.
 
-**v0.5 — foundation built, unmerged.** See _Unfinished work_.
+**v0.5 — foundation merged, stabilization in review.** See _Unfinished work_.
 
 ## Verification levels — read this before claiming anything works
 
@@ -178,11 +178,14 @@ rendering and the bibliography, literature notes, duplicate detection, inline
 maths, Word export, and reading a Zotero-managed `imported_file` PDF end to end.
 
 **Fixtures only** includes: Zotero annotation _reading_, the "no text layer"
-path, the extracted-text cache, evidence capture from an annotation, the whole
-reading pane, `linked_file` resolution, and password-protected detection —
-which has **never met an encrypted PDF** and may simply never fire.
+path, the extracted-text cache, evidence capture from an annotation, the
+reading pane's browser behaviour and named states, and `linked_file`
+resolution. The successful imported-PDF reading path has also been exercised
+once in real use.
 
-**All of v0.5 is fixtures.** Nothing on that branch has touched a real vault.
+**All of v0.5 is fixtures.** Nothing from PR #19 or its stabilization follow-up
+has touched a real vault. Password-protected detection is at **Neither**: no
+test constructs an encrypted PDF, and no real encrypted PDF has exercised it.
 
 ## Active roadmap
 
@@ -204,12 +207,12 @@ collaboration, mobile, and bulk annotation ingestion by default.
 
 ## Unfinished work — exact locations
 
-### PR #19 — v0.5 foundation (open, green, **not merged**)
+### PR #19 — v0.5 foundation (**merged**)
 
 - **Branch:** `claude/sutra-project-setup-hy61uo`
 - **Head:** `04b33b7`
-- **Base:** `main` at `a7501c8`
-- **CI:** both jobs green; `mergeable_state: clean`; no reviews
+- **Merged as:** `fd36c2b` on 2026-09-15
+- **CI at merge:** both jobs green; `mergeable_state: clean`
 - **URL:** https://github.com/vermasaksham/Sutra-Windows/pull/19
 
 Eight commits, each standing alone and readable in order:
@@ -225,24 +228,38 @@ Eight commits, each standing alone and readable in order:
 | `6d38061` | Slice 3b — the Evidence browser                                          |
 | `04b33b7` | Slice 3c — the share control                                             |
 
-**It is deliberately unmerged.** It changes how notes are written and the owner
-has not reviewed it. Do not merge it to tidy the repository. Three things in it
-were judgement calls that deserve a human's eye:
+The owner directed that it be merged after reviewing the handoff. Three
+judgement calls remain constraints on subsequent work:
 
 1. Evidence lives on the **Source note** (the owner chose this over a note per
    quote). Cost: Source notes grow, and two notes capturing from one paper write
    to the same file.
 2. **A shared record carries no `comment`.** This fell out of asking who owns
    each field and is a constraint on everything §7 builds.
-3. Captures **no longer write a page label** the app does not know. This is a
-   visible behaviour change already shipped in rc.2.
+3. Captures **no longer write a page label** the app does not know. This visible
+   behaviour landed in PR #19; it was not part of rc.2.
+
+### v0.5 evidence stabilization follow-up
+
+The focused follow-up after PR #19 covers four issues found by checking the ADR
+against the merged code:
+
+- only a `type: source` note may own shared `evidence:`;
+- a duplicate `eid` with different content is reported and neither copy is
+  changed;
+- selection and annotation captures retain the Source note's Zotero item key;
+- concurrent shares to one Source note append every record rather than allowing
+  the last write to erase the others.
+
+These changes remain **fixtures only** until exercised against the real vault.
+Review and merge this stabilization before starting §7.
 
 ### Not started
 
 §7 interpretation blocks, §8 Research Questions, §9 completeness checks, §10
 citation↔evidence links, §11 export provenance. §7 introduces new markdown body
-syntax and was held back on purpose until PR #19 is reviewed — starting it would
-make the whole thing reviewable only as one lump.
+syntax and remains held back until the stabilization follow-up is reviewed and
+merged.
 
 ### Stale branches (safe to delete, nothing unique in them)
 

@@ -49,6 +49,8 @@ export type Note = {
     page_index?: number;
     /** "selection", "annotation" or "manual". */
     origin?: string;
+    /** Zotero item key at capture time. */
+    zotero?: string;
     /** `"source"` when the record lives on the paper and this is a reference. */
     at?: string;
   }>;
@@ -61,6 +63,9 @@ export type Note = {
     quote?: string;
     kind?: string;
     origin?: string;
+    annotation?: string;
+    colour?: string;
+    captured?: string;
   }>;
   /** On a note of `type: chapter`: the notes it assembles, in order. */
   sequence?: string[];
@@ -213,17 +218,45 @@ export async function useVault(page: Page, options: VaultOptions) {
             if (!note || !record || record.at)
               return note ? summary(note) : null;
             const paper = notes.find((n) => n.id === record.id);
-            if (!paper) return summary(note);
+            if (!paper || paper.type !== "source") {
+              throw new Error(
+                `cannot keep evidence ${record.eid} on ${record.id}: it is not a Source note`,
+              );
+            }
             paper.evidence = paper.evidence ?? [];
-            if (!paper.evidence.some((e) => e.eid === record.eid)) {
-              paper.evidence.push({
-                eid: record.eid!,
-                page: record.page,
-                page_index: record.page_index,
-                quote: record.quote,
-                kind: record.kind,
-                origin: record.origin,
-              });
+            const shared = {
+              eid: record.eid!,
+              page: record.page,
+              page_index: record.page_index,
+              quote: record.quote,
+              kind: record.kind,
+              origin: record.origin,
+              annotation: record.annotation,
+              colour: record.colour,
+              captured: record.captured,
+            };
+            const existing = paper.evidence.find((e) => e.eid === record.eid);
+            const fields = [
+              "eid",
+              "page",
+              "page_index",
+              "quote",
+              "kind",
+              "origin",
+              "annotation",
+              "colour",
+              "captured",
+            ] as const;
+            if (
+              existing &&
+              fields.some((field) => existing[field] !== shared[field])
+            ) {
+              throw new Error(
+                `evidence ${record.eid} already exists on the Source note with different content; both copies were left unchanged`,
+              );
+            }
+            if (!existing) {
+              paper.evidence.push(shared);
             }
             record.at = "source";
             delete record.page;
@@ -378,6 +411,9 @@ export async function useVault(page: Page, options: VaultOptions) {
             >;
             if (!note) return { added: 0, alreadyHere: 0, empty: 0 };
             const sources = note.sources ?? (note.sources = []);
+            const source = find(args.sourceId as string);
+            const zoteroKey =
+              source?.type === "source" ? source.source?.zotero : undefined;
             const already = new Set(
               sources.map((c) => c.annotation).filter(Boolean),
             );
@@ -393,6 +429,8 @@ export async function useVault(page: Page, options: VaultOptions) {
                 comment: a.comment,
                 colour: a.colour,
                 annotation: a.key,
+                origin: "annotation",
+                zotero: zoteroKey,
               });
               added += 1;
             }

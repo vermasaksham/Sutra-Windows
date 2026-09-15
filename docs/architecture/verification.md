@@ -46,11 +46,17 @@ real library:
 | "No text layer" — a scanned paper                             | a hand-built PDF with no text    |
 | The **extracted-text cache** and its fingerprint invalidation | temporary files                  |
 | **Evidence capture** from an annotation                       | an in-memory vault               |
-| The **reading pane**, every state                             | a fake Tauri backend             |
-| **Password-protected** detection                              | none — see below                 |
+| The **reading pane's browser behaviour and named states**     | a fake Tauri backend             |
+| **All v0.5 evidence-object and sharing work**                 | temporary and in-memory vaults   |
 
-Two of these deserve naming individually, because the gap is larger than
-"untested against real data":
+Extraction deserves one qualification even though its end-to-end success path
+has moved to real use:
+
+- **Extraction has met one publisher PDF**, through the `imported_file` path
+  recorded above. The hand-built fixture remains the only automated coverage,
+  so malformed-PDF breadth has not been exercised.
+
+## Neither
 
 - **Password-protected detection has never met an encrypted PDF.** `is_encrypted`
   matches the debug form of an error from a crate that is not a direct
@@ -58,16 +64,10 @@ Two of these deserve naming individually, because the gap is larger than
   unexercised: it may simply never fire. The fallback is safe — such a file
   reports as an ordinary parser failure, which is what it did before the check
   existed — but the specific message is a claim without evidence.
-- **Extraction has never met a publisher's PDF.** The hand-built fixture is a
-  well-formed document. The reason extraction runs in a child process at all is
-  that real PDFs are frequently _not_ well-formed, and none of that has been
-  exercised.
 
-## Neither
-
-- **`PlatformStore`** — the real Windows Credential Manager — is exercised by no
-  test. Only the trait contract is, through `MemoryStore`. Carried from the v0.3
-  freeze audit, where it was already recorded.
+`PlatformStore` itself has been exercised in real use through Windows
+Credential Manager, as recorded above. Its automated coverage stops at the
+`SecretStore` trait contract through `MemoryStore`.
 
 ## The Zotero PDF resolver
 

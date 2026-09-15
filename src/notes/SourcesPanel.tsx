@@ -246,18 +246,21 @@ export default function SourcesPanel({
                     there are words to share. Sharing an empty record would
                     move nothing to the paper and take the page away from
                     here. */}
-                {!citation.at && citation.quote && citation.eid && (
-                  <button
-                    type="button"
-                    onClick={() => void share(citation.eid!)}
-                    disabled={sharing === citation.eid}
-                    className="sutra-no-print mt-1 text-xs text-ink-muted transition-colors hover:text-accent disabled:opacity-60"
-                  >
-                    {sharing === citation.eid
-                      ? "Moving it to the paper…"
-                      : "Keep this on the paper, so other notes can use it"}
-                  </button>
-                )}
+                {!citation.at &&
+                  citation.quote &&
+                  citation.eid &&
+                  source?.type === "source" && (
+                    <button
+                      type="button"
+                      onClick={() => void share(citation.eid!)}
+                      disabled={sharing === citation.eid}
+                      className="sutra-no-print mt-1 text-xs text-ink-muted transition-colors hover:text-accent disabled:opacity-60"
+                    >
+                      {sharing === citation.eid
+                        ? "Moving it to the paper…"
+                        : "Keep this on the paper, so other notes can use it"}
+                    </button>
+                  )}
 
                 <label className="sutra-no-print mt-1.5 flex items-center gap-1.5 text-xs text-ink-muted">
                   Evidence
