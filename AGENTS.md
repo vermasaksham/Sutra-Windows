@@ -244,11 +244,21 @@ citation↔evidence links, §11 export provenance. §7 introduces new markdown b
 syntax and was held back on purpose until PR #19 is reviewed — starting it would
 make the whole thing reviewable only as one lump.
 
-### Stale local branches (safe to delete)
+### Stale branches (safe to delete, nothing unique in them)
 
-`claude/sutra-cleanup-v03`, `claude/sutra-v04-spec` are fully merged into
-`main`. `v05-local` holds pre-cherry-pick duplicates of five commits now on PR
-#19 — content-identical, nothing unique. None exist on the remote.
+| Branch                     | Where                | State                                                                        |
+| -------------------------- | -------------------- | ---------------------------------------------------------------------------- |
+| `claude/sutra-cleanup-v03` | local **and** remote | Fully merged into `main`                                                     |
+| `claude/sutra-v04-spec`    | local **and** remote | Fully merged into `main`                                                     |
+| `v05-local`                | local only           | Pre-cherry-pick duplicates of five commits now on PR #19 — content-identical |
+
+Verified with `git log --oneline origin/main..<branch>` (empty for the first
+two) and `git ls-remote --heads origin`. Deleting any of them loses nothing.
+
+**One gotcha if you audit this yourself:** local remote-tracking refs in this
+working copy can lag behind a force-push, so `git log origin/<b>..<b>` can
+invent commits that are in fact already pushed. `git ls-remote --heads origin`
+is the authoritative check.
 
 ## Known bugs and limitations
 
