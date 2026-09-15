@@ -161,7 +161,8 @@ disposable out-of-vault text cache, Zotero annotation import, selection →
 evidence capture, and a named failure for all seven states a PDF can be in.
 `docs/roadmap/v0.4.md` has the capability table.
 
-**v0.5 — foundation built, unmerged.** See _Unfinished work_.
+**v0.5 — foundation merged; the traceability half not started.** See
+_Unfinished work_.
 
 ## Verification levels — read this before claiming anything works
 
@@ -204,15 +205,14 @@ collaboration, mobile, and bulk annotation ingestion by default.
 
 ## Unfinished work — exact locations
 
-### PR #19 — v0.5 foundation (open, green, **not merged**)
+### PR #19 — v0.5 foundation. **Merged 2026-09-15.**
 
-- **Branch:** `claude/sutra-project-setup-hy61uo`
-- **Head:** `04b33b7`
-- **Base:** `main` at `a7501c8`
-- **CI:** both jobs green; `mergeable_state: clean`; no reviews
+- **Merged by** the owner, as a true merge commit — `fd36c2b` on `main`
+- **Branch:** `claude/sutra-project-setup-hy61uo` (still on the remote at `04b33b7`; deletable)
 - **URL:** https://github.com/vermasaksham/Sutra-Windows/pull/19
 
-Eight commits, each standing alone and readable in order:
+Not a squash, so all eight commits keep their own SHAs and are reachable on
+`main`. Each stands alone and they read in order:
 
 | Commit    | What                                                                     |
 | --------- | ------------------------------------------------------------------------ |
@@ -225,32 +225,48 @@ Eight commits, each standing alone and readable in order:
 | `6d38061` | Slice 3b — the Evidence browser                                          |
 | `04b33b7` | Slice 3c — the share control                                             |
 
-**It is deliberately unmerged.** It changes how notes are written and the owner
-has not reviewed it. Do not merge it to tidy the repository. Three things in it
-were judgement calls that deserve a human's eye:
+**Three judgement calls inside it are now load-bearing on `main`.** They were
+flagged for review and merged without comment, so treat them as decisions in
+force rather than as settled debate — and know what they cost before building on
+them:
 
 1. Evidence lives on the **Source note** (the owner chose this over a note per
    quote). Cost: Source notes grow, and two notes capturing from one paper write
-   to the same file.
-2. **A shared record carries no `comment`.** This fell out of asking who owns
-   each field and is a constraint on everything §7 builds.
-3. Captures **no longer write a page label** the app does not know. This is a
-   visible behaviour change already shipped in rc.2.
+   to the same file. The atomic-write and sync-rewrite tests cover that path;
+   **extend them to concurrent evidence appends** rather than assuming they do.
+2. **A shared record carries no `comment`.** A record belonging to the paper
+   cannot hold one reader's opinion. This is the storage-level form of "paper
+   says" vs "I think", and it constrains everything §7 builds.
+3. Captures **no longer write a page label** the app does not know. A visible
+   behaviour change, already shipped in rc.2.
+
+**Not yet in a release.** `main` carries v0.5 foundation code at version
+`0.4.0-rc.2`; the latest published installer predates it. Anyone cutting the
+next release should decide whether it is `0.4.0` or `0.5.0-rc.1` — the version
+in the five files has not been touched since rc.2.
 
 ### Not started
 
 §7 interpretation blocks, §8 Research Questions, §9 completeness checks, §10
-citation↔evidence links, §11 export provenance. §7 introduces new markdown body
-syntax and was held back on purpose until PR #19 is reviewed — starting it would
-make the whole thing reviewable only as one lump.
+citation↔evidence links, §11 export provenance.
+
+**§7 is the next thing to build.** It was held back while PR #19 was unreviewed;
+that PR is now merged, so the block is gone. It introduces **new markdown body
+syntax**, which has to parse predictably and round-trip byte for byte — the same
+bar the citation and wikilink syntaxes already meet (ADR 0001). ADR 0005 decided
+the shape: an Interpretation is a body block with an id, so the id stays with
+the prose it names and survives the heading being rewritten.
+
+§9 needs no model change and can run alongside it.
 
 ### Stale branches (safe to delete, nothing unique in them)
 
-| Branch                     | Where                | State                                                                        |
-| -------------------------- | -------------------- | ---------------------------------------------------------------------------- |
-| `claude/sutra-cleanup-v03` | local **and** remote | Fully merged into `main`                                                     |
-| `claude/sutra-v04-spec`    | local **and** remote | Fully merged into `main`                                                     |
-| `v05-local`                | local only           | Pre-cherry-pick duplicates of five commits now on PR #19 — content-identical |
+| Branch                              | Where                | State                                                                        |
+| ----------------------------------- | -------------------- | ---------------------------------------------------------------------------- |
+| `claude/sutra-cleanup-v03`          | local **and** remote | Fully merged into `main`                                                     |
+| `claude/sutra-v04-spec`             | local **and** remote | Fully merged into `main`                                                     |
+| `v05-local`                         | local only           | Pre-cherry-pick duplicates of five commits now on `main` — content-identical |
+| `claude/sutra-project-setup-hy61uo` | local **and** remote | PR #19's branch. Merged into `main` at `fd36c2b`                             |
 
 Verified with `git log --oneline origin/main..<branch>` (empty for the first
 two) and `git ls-remote --heads origin`. Deleting any of them loses nothing.
