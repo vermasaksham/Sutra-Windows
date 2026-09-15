@@ -44,6 +44,23 @@ export type Note = {
     /** Zotero's annotation key, when this came from one. */
     annotation?: string;
     colour?: string;
+    /** The nth page of the file. Not `page`, which is the number printed on
+     *  the paper — a selection knows the first and not the second. */
+    page_index?: number;
+    /** "selection", "annotation" or "manual". */
+    origin?: string;
+    /** `"source"` when the record lives on the paper and this is a reference. */
+    at?: string;
+  }>;
+  /** On a note of `type: source`: evidence taken from this paper, shared so
+   *  more than one note can rest on it. */
+  evidence?: Array<{
+    eid: string;
+    page?: string;
+    page_index?: number;
+    quote?: string;
+    kind?: string;
+    origin?: string;
   }>;
   /** On a note of `type: chapter`: the notes it assembles, in order. */
   sequence?: string[];
@@ -128,6 +145,9 @@ export async function useVault(page: Page, options: VaultOptions) {
       body: n.body,
       source: n.source as undefined | Record<string, unknown>,
       sources: n.sources ?? [],
+      // On a source note: evidence the paper owns, which more than one note
+      // can rest on. Empty everywhere else, exactly as Rust has it.
+      evidence: n.evidence ?? [],
       // Mutable: reordering a chapter writes it back through `save_sequence`,
       // the way the real one writes frontmatter.
       sequence: n.sequence ?? [],
@@ -182,6 +202,74 @@ export async function useVault(page: Page, options: VaultOptions) {
           // The vault-wide scan behind the research overview. Headings are
           // returned unclassified — voice is decided in TypeScript, in one
           // place — exactly as Rust does it.
+          // The same join Rust does, over the same array: shared records
+          // first, then who uses them, so one quotation is one item however
+          // many notes rest on it.
+          // Moves the record onto the paper and reduces the note's entry to
+          // a reference — the same two writes, in the same order, as Rust.
+          case "share_evidence": {
+            const note = find(args.id as string);
+            const record = note?.sources?.find((c) => c.eid === args.eid);
+            if (!note || !record || record.at)
+              return note ? summary(note) : null;
+            const paper = notes.find((n) => n.id === record.id);
+            if (!paper) return summary(note);
+            paper.evidence = paper.evidence ?? [];
+            if (!paper.evidence.some((e) => e.eid === record.eid)) {
+              paper.evidence.push({
+                eid: record.eid!,
+                page: record.page,
+                page_index: record.page_index,
+                quote: record.quote,
+                kind: record.kind,
+                origin: record.origin,
+              });
+            }
+            record.at = "source";
+            delete record.page;
+            delete record.page_index;
+            delete record.quote;
+            delete record.kind;
+            delete record.origin;
+            return summary(note);
+          }
+          case "all_evidence": {
+            const items = new Map<string, Record<string, unknown>>();
+            for (const note of notes) {
+              for (const record of note.evidence ?? []) {
+                items.set(record.eid, {
+                  ...record,
+                  source: note.id,
+                  source_title: note.title,
+                  shared: true,
+                  used_by: [],
+                });
+              }
+            }
+            for (const note of notes) {
+              for (const citation of note.sources ?? []) {
+                const use = {
+                  note: note.id,
+                  title: note.title,
+                  comment: citation.comment ?? null,
+                };
+                const held = items.get(citation.eid ?? "");
+                if (held) {
+                  (held.used_by as unknown[]).push(use);
+                  continue;
+                }
+                const paper = notes.find((n) => n.id === citation.id);
+                items.set(citation.eid ?? `${note.id}:${citation.id}`, {
+                  ...citation,
+                  source: citation.id,
+                  source_title: paper?.title ?? "Source note missing",
+                  shared: false,
+                  used_by: [use],
+                });
+              }
+            }
+            return [...items.values()];
+          }
           case "research_overview": {
             const headings = notes.flatMap((n) => {
               const found: Array<{

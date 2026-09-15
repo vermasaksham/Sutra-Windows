@@ -93,7 +93,103 @@ sources:
 `eid` is new in v0.3 and is what makes a piece of evidence a thing that can be
 referred to rather than an anonymous row. A v0.2 note has none; that is valid
 and reading one does not add one. Ids are minted when a citation is written
-through the app.
+through the app, and an id that arrives missing from a record still on disk is
+restored rather than re-minted — see `set_citations`.
+
+v0.5 adds three optional keys, absent on anything written before it:
+
+```yaml
+sources:
+  - eid: 01HQ3M8K2P00000000000000EV
+    id: 01HQ3M8K2P00000000000000SRC
+    page: "431" # the number printed on the paper
+    page_index: 1 # the nth page of the file
+    quote: thermal conductivity decreases
+    kind: measurement
+    origin: selection # or: annotation, manual
+    zotero: J938YE6Z # the item key as it was at capture
+    captured: 2026-09-09T09:00:00Z
+```
+
+`page` and `page_index` are different facts and neither substitutes for the
+other. A paper offprinted from page 431 has `page_index: 1` and `page: "431"`.
+**The label is what a citation carries**, and where there is none the record
+holds no label rather than an invented one — so text selected in the reading
+pane records only `page_index`, because that is the only page fact a selection
+has.
+
+`origin` is written, never derived. `annotation` implies Zotero, but nothing
+else distinguished text the app took out of a PDF from text a person typed, and
+those differ in the way that matters most here. Absent on a record from before
+v0.5, and nothing backfills it: a guess written into a provenance field is
+indistinguishable from a fact once it is on disk.
+
+`kind` changed meaning in v0.5. It used to name the kind of study a source
+reported — "experimental", "computational", "theoretical", "review" — which is
+a fact about the paper. It now names what the quoted sentence _is_: `claim`,
+`measurement`, `method`, `result`, `limitation`, `quote`, `observation`. Absent
+means unspecified. **An old value is kept and shown exactly as written and is
+never translated:** "experimental" does not mean "measurement".
+
+### Shared evidence (`evidence:` on a Source note)
+
+New in v0.5, and **entirely optional**: every vault written before it, and
+every record still written inline, stays valid with no migration.
+
+One quotation used by two notes must not exist twice — two editable copies of
+one `eid` is two answers to "what does the paper say". So a record that is to
+be reused moves to the paper it came from, and the notes reference it:
+
+```yaml
+# On the Source note.
+id: 01HQ3M8K2P00000000000000SRC
+type: source
+evidence:
+  - eid: 01HQ3M8K2P00000000000000EV
+    page: "431"
+    page_index: 1
+    quote: thermal conductivity decreases
+    kind: measurement
+    origin: selection
+    annotation: ZAB12CD3
+    colour: "#ffd400"
+    captured: 2026-09-09T09:00:00Z
+```
+
+No `id:` on these entries: the source is the note the record is written on.
+
+**A shared record carries no `comment`.** The quote is the paper's and the
+comment is the reader's, and a record that belongs to the paper cannot hold one
+reader's opinion — two people using one quotation do not share a view of it.
+A Zotero annotation's comment therefore stays with the note that imported it,
+never on the shared record. This is the "paper says" versus "I think" rule
+applied to the one place the new storage could quietly break it.
+
+A note referencing such a record names it in `sources:` and says where it
+lives:
+
+```yaml
+# On the note doing the citing.
+sources:
+  - eid: 01HQ3M8K2P00000000000000EV
+    id: 01HQ3M8K2P00000000000000SRC
+    at: source # the record is on the Source note; this is a reference
+    comment: only two samples # this reader's remark, and theirs alone
+```
+
+`at:` absent means the entry _is_ the record, which is every entry written
+before v0.5 and every one still written inline. `at: source` means the content
+lives on the Source note named by `id`.
+
+**An `eid` has exactly one home.** Inline in one note, or in one Source note's
+`evidence:` — never both, and never two of either. That invariant is what keeps
+the fix for duplication from reintroducing it, and a completeness check reports
+any breach rather than choosing a winner: there is no way to know which copy
+the researcher meant.
+
+A reference whose `eid` is on no Source note is reported, not repaired. The
+quotation is not invented back, and the reference is not deleted — either would
+destroy the only remaining evidence that something was there.
 
 ## Unknown fields
 

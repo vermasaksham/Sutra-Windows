@@ -62,7 +62,9 @@ export default function ReadingPane({
   const [busy, setBusy] = useState<string | null>(null);
   const [selection, setSelection] = useState<{
     text: string;
-    page: string;
+    /** The nth page of the file, as a string because it came from a
+     *  `data-` attribute. Not the number printed on the paper. */
+    pageIndex: string;
   } | null>(null);
   const pagesRef = useRef<HTMLDivElement>(null);
 
@@ -130,14 +132,15 @@ export default function ReadingPane({
     while (node && !(node instanceof HTMLElement && node.dataset.page)) {
       node = node.parentNode;
     }
-    const page = node instanceof HTMLElement ? (node.dataset.page ?? "") : "";
+    const pageIndex =
+      node instanceof HTMLElement ? (node.dataset.page ?? "") : "";
     // Page provenance is structural: text only ever renders inside a page, so a
     // selection that found no page means the selection is not in the document.
-    if (!page) {
+    if (!pageIndex) {
       setSelection(null);
       return;
     }
-    setSelection({ text, page });
+    setSelection({ text, pageIndex });
   }, []);
 
   const capture = async () => {
@@ -146,11 +149,19 @@ export default function ReadingPane({
     try {
       const entry: Citation = {
         id: source.id,
-        page: selection.page,
+        // The *position* in the file, which is the only page fact a selection
+        // has. Not `page`, which is the number printed on the paper: ADR 0004
+        // is explicit that the label is what goes in a citation and that
+        // absent beats invented, and until v0.5 this wrote the position into
+        // the label field — so a paper offprinted from 431 recorded "p. 1".
+        // The label stays empty for the researcher to fill, and the
+        // completeness check says when one is missing.
+        page_index: Number(selection.pageIndex),
         // Exactly what was selected. Not trimmed further, not normalised, not
         // re-wrapped: it is the source's words and the whole point is that it
         // is unaltered.
         quote: selection.text,
+        origin: "selection",
         // Left empty on purpose. Interpretation is a second, deliberate act —
         // the capture control does not collect an opinion.
       };
@@ -278,7 +289,7 @@ export default function ReadingPane({
           >
             {busy === "selection"
               ? "Recording…"
-              : `Capture as evidence · p. ${selection.page}`}
+              : `Capture as evidence · PDF p. ${selection.pageIndex}`}
           </button>
         </div>
       )}

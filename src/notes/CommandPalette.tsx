@@ -52,6 +52,8 @@ type Props = {
   onAiSettings: () => void;
   onOpenSettings: () => void;
   onOpenZotero: () => void;
+  /** Show everything quoted, apart from the notes quoting it. */
+  onOpenEvidence: () => void;
   /** What the list's search field holds, so it can be saved as a view. */
   currentSearch: string;
   onSaveSearchAsView: () => void;
@@ -82,6 +84,7 @@ export default function CommandPalette({
   onAiSettings,
   onOpenSettings,
   onOpenZotero,
+  onOpenEvidence,
   currentSearch,
   onSaveSearchAsView,
   legacyCitations,
@@ -214,6 +217,14 @@ export default function CommandPalette({
     });
 
     out.push({
+      id: "evidence",
+      label: "Evidence",
+      group: "Go to",
+      hint: "everything you have quoted, and what rests on it",
+      run: onOpenEvidence,
+    });
+
+    out.push({
       id: "settings",
       label: "Settings — appearance and themes",
       group: "Vault",
@@ -248,6 +259,7 @@ export default function CommandPalette({
     onExportPdf,
     onOpenSettings,
     onOpenZotero,
+    onOpenEvidence,
     onManageTags,
     onResearchOverview,
     onNewView,

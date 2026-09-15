@@ -14,6 +14,7 @@ mod claims;
 mod commands;
 mod duplicates;
 mod error;
+mod evidence;
 mod export;
 mod frontmatter;
 mod index;
@@ -118,6 +119,9 @@ fn main() {
             commands::create_source,
             commands::set_source_meta,
             commands::set_citations,
+            commands::share_evidence,
+            commands::note_evidence,
+            commands::all_evidence,
             commands::list_sources,
             commands::citing_notes,
             commands::import_zotero_source,

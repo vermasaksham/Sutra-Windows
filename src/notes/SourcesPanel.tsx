@@ -1,5 +1,6 @@
 import { useState } from "react";
 import SourcePicker, { describe } from "./SourcePicker";
+import { evidenceApi } from "../vault/api";
 import { displayTitle } from "./titleText";
 import {
   useCitation,
@@ -33,23 +34,51 @@ import {
  * exactly the thing worth showing.
  */
 export default function SourcesPanel({
+  noteId,
   citations,
   notes,
   inlineRefs,
   onChange,
+  onShared,
   onOpen,
   onReport,
 }: {
+  /** The note these citations belong to. Sharing a record needs to say which
+   *  note is giving it up. */
+  noteId: string;
   citations: Citation[];
   /** Every note in the vault, for resolving a citation's id to its note. */
   notes: NoteSummary[];
   /** Every `[@ref]` in the body, so the prose and this list can be compared. */
   inlineRefs: string[];
   onChange: (citations: Citation[]) => void;
+  /** The vault changed outside `onChange` — two notes were rewritten. */
+  onShared: () => void;
   onOpen: (id: string) => void;
   onReport: (message: string, cause: unknown) => void;
 }) {
   const [picking, setPicking] = useState(false);
+  const [sharing, setSharing] = useState<string | null>(null);
+
+  /**
+   * Move a record onto the paper it came from, so another note can rest on the
+   * same quotation instead of copying it.
+   *
+   * Deliberate and one at a time. Doing it to every record at once because two
+   * notes happened to quote one paper would be the app deciding what somebody's
+   * evidence is.
+   */
+  const share = async (eid: string) => {
+    setSharing(eid);
+    try {
+      await evidenceApi.share(noteId, eid);
+      onShared();
+    } catch (cause) {
+      onReport("Could not share that evidence with the paper", cause);
+    } finally {
+      setSharing(null);
+    }
+  };
   const byId = new Map(notes.map((n) => [n.id, n]));
   // Both directions of disagreement, from one tested function rather than a
   // filter here — the reverse direction (recorded, never cited) had no filter
@@ -116,7 +145,15 @@ export default function SourcesPanel({
                       }
                       aria-label="Page"
                       size={5}
-                      className="rounded bg-row-hover px-1 py-0.5 text-xs text-ink outline-none"
+                      // The number printed on the paper, which is what a
+                      // citation carries. Empty with a PDF position known
+                      // below is the ordinary state after capturing from the
+                      // reading pane: the file knows where it was, and only
+                      // the paper knows what it is called.
+                      placeholder={
+                        citation.page_index ? `PDF ${citation.page_index}` : ""
+                      }
+                      className="rounded bg-row-hover px-1 py-0.5 text-xs text-ink outline-none placeholder:text-ink-muted/70"
                     />
                   </label>
                   <button
@@ -175,16 +212,52 @@ export default function SourcesPanel({
                 <p className="mt-2 text-[0.65rem] font-semibold tracking-wide text-highlight uppercase">
                   Source evidence — their words
                 </p>
-                <textarea
-                  value={citation.quote ?? ""}
-                  onChange={(event) =>
-                    update(index, { quote: event.target.value || null })
-                  }
-                  placeholder="What it actually says, in its own words"
-                  aria-label="Quote"
-                  rows={citation.quote ? 2 : 1}
-                  className="sutra-quote mt-0.5 w-full resize-y rounded border-l-2 border-highlight bg-highlight-bg/40 px-2 py-1 text-sm text-ink-soft italic outline-none placeholder:text-ink-muted placeholder:not-italic"
-                />
+                {citation.at ? (
+                  // The record lives on the paper, so this note does not hold
+                  // the words and must not pretend to. Offering an empty box
+                  // here would invite somebody to type a quotation into a
+                  // field that is not where the quotation is kept.
+                  <p className="mt-0.5 rounded border-l-2 border-highlight bg-highlight-bg/40 px-2 py-1 text-xs text-ink-muted">
+                    Kept on the paper, so other notes can rest on the same
+                    words.{" "}
+                    <button
+                      type="button"
+                      onClick={() => onOpen(citation.id)}
+                      className="text-accent transition-opacity hover:opacity-80"
+                    >
+                      Open it there
+                    </button>
+                    .
+                  </p>
+                ) : (
+                  <textarea
+                    value={citation.quote ?? ""}
+                    onChange={(event) =>
+                      update(index, { quote: event.target.value || null })
+                    }
+                    placeholder="What it actually says, in its own words"
+                    aria-label="Quote"
+                    rows={citation.quote ? 2 : 1}
+                    className="sutra-quote mt-0.5 w-full resize-y rounded border-l-2 border-highlight bg-highlight-bg/40 px-2 py-1 text-sm text-ink-soft italic outline-none placeholder:text-ink-muted placeholder:not-italic"
+                  />
+                )}
+
+                {/* Only for a record this note actually holds, and only when
+                    there are words to share. Sharing an empty record would
+                    move nothing to the paper and take the page away from
+                    here. */}
+                {!citation.at && citation.quote && citation.eid && (
+                  <button
+                    type="button"
+                    onClick={() => void share(citation.eid!)}
+                    disabled={sharing === citation.eid}
+                    className="sutra-no-print mt-1 text-xs text-ink-muted transition-colors hover:text-accent disabled:opacity-60"
+                  >
+                    {sharing === citation.eid
+                      ? "Moving it to the paper…"
+                      : "Keep this on the paper, so other notes can use it"}
+                  </button>
+                )}
 
                 <label className="sutra-no-print mt-1.5 flex items-center gap-1.5 text-xs text-ink-muted">
                   Evidence
@@ -264,6 +337,7 @@ export default function SourcesPanel({
                       id: ref,
                       page: null,
                       quote: null,
+                      origin: "manual",
                       captured: new Date().toISOString(),
                     },
                   ])
@@ -288,6 +362,7 @@ export default function SourcesPanel({
                 id: source.id,
                 page: null,
                 quote: null,
+                origin: "manual",
                 captured: new Date().toISOString(),
               },
             ]);

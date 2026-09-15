@@ -21,6 +21,7 @@ import { setTypography, typographyApi } from "./notes/typography";
 import { citedRefs } from "./notes/citedRefs";
 import { citationOrder } from "./notes/citationStyle";
 import ReadingPane from "./notes/ReadingPane";
+import EvidenceBrowser from "./notes/EvidenceBrowser";
 import SourceDetails from "./notes/SourceDetails";
 import ExportMenu from "./notes/ExportMenu";
 import FolderBar from "./notes/FolderBar";
@@ -155,6 +156,13 @@ export default function App() {
    * the pane so that selecting another note while reading does not silently
    * change where evidence lands.
    */
+  /**
+   * Whether the Evidence browser has the list's place.
+   *
+   * Mutually exclusive with reading, and reading wins: they occupy one slot,
+   * and opening a paper while browsing evidence means you want the paper.
+   */
+  const [browsing, setBrowsing] = useState(false);
   const [reading, setReading] = useState<{
     source: NoteSummary;
     target: NoteSummary | null;
@@ -935,6 +943,12 @@ export default function App() {
           onManageTags={() => setTagsOpen(true)}
           onOpenSettings={() => setSettingsOpen(true)}
           onOpenZotero={() => setZoteroOpen(true)}
+          onOpenEvidence={() => {
+            // Reading owns the slot while it is open, so close it first
+            // rather than showing neither.
+            setReading(null);
+            setBrowsing(true);
+          }}
           onNewFolder={(parent) => {
             const name = window.prompt(
               parent
@@ -972,6 +986,17 @@ export default function App() {
             }
             onCaptured={() => void refresh()}
             onClose={() => setReading(null)}
+            onReport={report}
+          />
+        ) : browsing ? (
+          <EvidenceBrowser
+            onOpen={(id) => {
+              void select(id);
+              // Left open on purpose. Following a quotation to the note using
+              // it is usually one of several — the whole point of the list is
+              // comparing what rests on the same sentence.
+            }}
+            onClose={() => setBrowsing(false)}
             onReport={report}
           />
         ) : (
@@ -1211,8 +1236,16 @@ export default function App() {
 
       {note.doc && showContext && (
         <ContextPanel
+          noteId={note.doc.id}
           citations={note.doc.sources ?? []}
           notes={notes}
+          onShared={() => {
+            // Sharing rewrites this note *and* the paper, so neither the
+            // editor's copy nor the note list is current any more. Re-read
+            // both rather than patching what we think changed.
+            void note.reload?.();
+            void refresh();
+          }}
           inlineRefs={proseRefs}
           // A source note shows its paper above the editor instead; a list of
           // what it draws on would be asking the wrong question of it.
@@ -1340,6 +1373,12 @@ export default function App() {
           onAiSettings={() => setAiSettingsOpen(true)}
           onOpenSettings={() => setSettingsOpen(true)}
           onOpenZotero={() => setZoteroOpen(true)}
+          onOpenEvidence={() => {
+            // Reading owns the slot while it is open, so close it first
+            // rather than showing neither.
+            setReading(null);
+            setBrowsing(true);
+          }}
           currentSearch={query}
           onSaveSearchAsView={() =>
             setEditingView({

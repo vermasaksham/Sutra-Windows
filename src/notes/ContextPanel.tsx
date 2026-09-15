@@ -49,7 +49,9 @@ export default function ContextPanel({
   body,
   aiReady,
   aiWanted,
+  noteId,
   onChangeCitations,
+  onShared,
   onOpen,
   onCompare,
   onAcceptText,
@@ -83,7 +85,12 @@ export default function ContextPanel({
   aiReady: boolean;
   /** The setting, so the panel can tell "off" from "on but not set up". */
   aiWanted: boolean;
+  /** The note this panel is about. */
+  noteId: string;
   onChangeCitations: (citations: Citation[]) => void;
+  /** The vault changed outside `onChangeCitations` — sharing a record rewrites
+   *  two notes, so the caller must re-read rather than trust its own copy. */
+  onShared: () => void;
   onOpen: (id: string) => void;
   /** Open the side-by-side comparison for a candidate duplicate. */
   onCompare: (id: string, reason: string) => void;
@@ -115,10 +122,12 @@ export default function ContextPanel({
       <div className="flex flex-col gap-5 px-3.5 pt-2 pb-6">
         {showSources && (
           <SourcesPanel
+            noteId={noteId}
             citations={citations}
             notes={notes}
             inlineRefs={inlineRefs}
             onChange={onChangeCitations}
+            onShared={onShared}
             onOpen={onOpen}
             onReport={onReport}
           />
