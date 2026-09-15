@@ -7,6 +7,12 @@ true on 2026-09-15 from what has changed since.
 
 Taken at `main` = `a7501c8`, PR #19 head = `04b33b7`.
 
+> **Updated 2026-09-15, later the same day.** PR #19 was merged by the owner
+> after this was first written. `main` is now `fd36c2b` and carries the v0.5
+> foundation. The sections below are corrected; the original framing of #19 as
+> "unfinished" is kept only where it explains _why_ something was built the way
+> it was.
+
 ## Current release
 
 |                           |                                                             |
@@ -67,20 +73,21 @@ collaboration, mobile, bulk annotation ingestion by default.
 
 ## Unfinished work
 
-### PR #19 — v0.5 foundation. Open, green, deliberately unmerged.
+### PR #19 — v0.5 foundation. **Merged 2026-09-15 by the owner.**
 
-- Branch `claude/sutra-project-setup-hy61uo`, head `04b33b7`, base `main`
-- Both CI jobs green; `mergeable_state: clean`; no reviews
+- Merged as a true merge commit, `fd36c2b` on `main` — not a squash, so all
+  eight commits keep their own SHAs and stay reachable
+- Branch `claude/sutra-project-setup-hy61uo` still on the remote at `04b33b7`
 - https://github.com/vermasaksham/Sutra-Windows/pull/19
 
 Eight commits: `8310fed` audit → `98303cb` ADR 0005 → `e4de4b3` slice 1 →
 `8cdd015` vault format → `f80457c` slice 2 → `9edad85` slice 3a → `6d38061`
 slice 3b → `04b33b7` slice 3c.
 
-**It is unmerged on purpose.** It changes how notes are written and the owner
-has not reviewed it. It should not be merged to make the repository look tidy.
-
-Three decisions in it want a human's eye:
+It had been held open on purpose because it changes how notes are written. It
+was merged without review comments, so **three decisions inside it are now in
+force on `main`** rather than still open for debate. Know what they cost before
+building on them:
 
 1. **Evidence lives on the Source note** — the owner chose this over a note per
    quote. The cost, stated rather than glossed: Source notes grow, and two notes
@@ -92,11 +99,21 @@ Three decisions in it want a human's eye:
    visible in rc.2: the button says "PDF p. 2" and leaves the citation page
    blank.
 
+The first of those carries an unpaid debt: ADR 0005 says the atomic-write and
+sync-rewrite tests "must be extended to concurrent evidence appends rather than
+assumed to cover it". That extension has **not** been written.
+
+**None of it is in a release.** `main` carries v0.5 foundation code at version
+`0.4.0-rc.2`, and the latest published installer predates the merge. Whoever
+cuts the next release decides whether it is `0.4.0` or `0.5.0-rc.1`.
+
 ### Nothing else is in flight
 
-Working tree clean. No stashes. No unpushed commits. Local branches
-`claude/sutra-cleanup-v03` and `claude/sutra-v04-spec` are fully merged;
-`v05-local` holds pre-cherry-pick duplicates of commits now on PR #19.
+Working tree clean. No stashes. No unpushed commits. Branches
+`claude/sutra-cleanup-v03`, `claude/sutra-v04-spec` and
+`claude/sutra-project-setup-hy61uo` are all fully merged into `main` and
+deletable; `v05-local` (local only) holds pre-cherry-pick duplicates of commits
+now on `main`.
 
 ## Recent important PRs
 
@@ -148,26 +165,33 @@ sit here rather than above.
 
 ## The exact next task
 
-**Review PR #19 and decide whether it merges.** Nothing else should start on top
-of it.
+**§7 — interpretation blocks.** PR #19 is merged, so the thing that was blocking
+this is gone.
 
-It is green and mergeable; what it needs is a judgement on the three decisions
-listed under _Unfinished work_ above, because they constrain everything after.
-The most consequential is the second — a shared record carrying no `comment` is
-the storage-level form of "paper says" vs "I think", and §7's interpretation
-blocks are built on top of it.
+ADR 0005 decided the shape: an Interpretation is a **body block with an id**, so
+the id stays with the prose it names and survives the heading being rewritten —
+which is exactly what a writer does to a heading while thinking. The alternatives
+(a frontmatter list, a note per interpretation) were rejected in that ADR with
+reasons; read it before reopening either.
 
-**After that, in order:**
+This introduces **new markdown body syntax**. That is the hard part, and the bar
+is set by what already exists: it has to parse predictably and round-trip byte
+for byte, the same standard the citation and wikilink syntaxes meet (ADR 0001).
 
-1. **§7 — interpretation blocks.** ADR 0005 decided an Interpretation is a body
-   block with an id, so the id stays with the prose it names and survives the
-   heading being rewritten. This introduces **new markdown body syntax**, which
-   has to parse predictably and round-trip byte for byte — the same bar the
-   citation and wikilink syntaxes already meet (ADR 0001). It was held back
-   deliberately so it would not land on an unreviewed base.
-2. §9 completeness checks — deterministic, read-only, report-never-repair. No
-   model change needed, so it can run in parallel with §7 if useful.
-3. §8 Research Questions, §10 citation↔evidence, §11 export provenance.
+The constraint it inherits: **a shared evidence record carries no `comment`**. An
+interpretation is where the reader's thinking lives, and the storage underneath
+it is already built on that separation.
+
+**After that:**
+
+1. §9 completeness checks — deterministic, read-only, report-never-repair. No
+   model change needed, so it can run alongside §7.
+2. §8 Research Questions, §10 citation↔evidence, §11 export provenance.
+
+**One debt to clear, from ADR 0005 itself:** evidence now lives on Source notes,
+so two notes capturing from one paper write to the same file. The ADR says the
+atomic-write and sync-rewrite tests "must be extended to concurrent evidence
+appends rather than assumed to cover it". That has not been done.
 
 **Before §7, one cheap fix is worth taking:** `set_citations` restoring a dropped
 `eid` is in place, but §7 is what makes the id genuinely load-bearing — an
