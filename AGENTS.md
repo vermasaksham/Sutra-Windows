@@ -101,7 +101,8 @@ npm run tauri:dev               # run the app
 npm run tauri:build -- --bundles nsis   # the installer CI publishes
 ```
 
-Counts above were true at `04b33b7`; treat them as a floor, not a target.
+Counts above include the three Rust tests and one Playwright test added by the
+v0.5 stabilization follow-up; treat them as a floor, not a target.
 
 **In a sandbox without network**, add `--offline` to cargo commands. Playwright
 needs a browser: this repo's CI installs one; a preinstalled Chromium can be
@@ -240,6 +241,10 @@ judgement calls remain constraints on subsequent work:
    behaviour landed in PR #19; it was not part of rc.2.
 
 ### v0.5 evidence stabilization follow-up
+
+- **PR:** [#22](https://github.com/vermasaksham/Sutra-Windows/pull/22)
+- **Branch:** `codex/v05-evidence-stabilization`
+- **CI:** Checks and Installer green; `mergeable_state: clean`
 
 The focused follow-up after PR #19 covers four issues found by checking the ADR
 against the merged code:

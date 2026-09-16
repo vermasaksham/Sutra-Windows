@@ -8,11 +8,12 @@ true on 2026-09-15 from what has changed since.
 Taken at `main` = `a7501c8`, PR #19 head = `04b33b7`.
 
 > **Post-handoff update, 2026-09-15:** PR #19 was merged as `fd36c2b` at the
-> owner's direction. A focused stabilization follow-up now enforces Source-note
-> ownership, reports divergent duplicate evidence, retains Zotero capture
-> provenance, and serializes concurrent evidence appends. Review and merge that
-> follow-up before §7. The sections below remain the original dated snapshot;
-> `AGENTS.md` carries the current state.
+> owner's direction. [PR #22](https://github.com/vermasaksham/Sutra-Windows/pull/22)
+> is the focused stabilization follow-up: it enforces Source-note ownership,
+> reports divergent duplicate evidence, retains Zotero capture provenance, and
+> serializes concurrent evidence appends. Both CI jobs are green and it is
+> cleanly mergeable. Review and merge it before §7. The sections below remain
+> the original dated snapshot; `AGENTS.md` carries the current state.
 
 ## Current release
 
