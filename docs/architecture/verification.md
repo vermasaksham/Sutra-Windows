@@ -40,14 +40,15 @@ Seen working against the real library and vault:
 Implemented and covered by automated tests; **not** yet exercised against the
 real library:
 
-| Path                                                          | Fixture it is tested against     |
-| ------------------------------------------------------------- | -------------------------------- |
-| Zotero **annotation** reading                                 | a TCP stub returning canned JSON |
-| "No text layer" — a scanned paper                             | a hand-built PDF with no text    |
-| The **extracted-text cache** and its fingerprint invalidation | temporary files                  |
-| **Evidence capture** from an annotation                       | an in-memory vault               |
-| The **reading pane's browser behaviour and named states**     | a fake Tauri backend             |
-| **All v0.5 evidence-object and sharing work**                 | temporary and in-memory vaults   |
+| Path                                                          | Fixture it is tested against                                |
+| ------------------------------------------------------------- | ----------------------------------------------------------- |
+| Zotero **annotation** reading                                 | a TCP stub returning canned JSON                            |
+| "No text layer" — a scanned paper                             | a hand-built PDF with no text                               |
+| The **extracted-text cache** and its fingerprint invalidation | temporary files                                             |
+| **Evidence capture** from an annotation                       | an in-memory vault                                          |
+| The **reading pane's browser behaviour and named states**     | a fake Tauri backend                                        |
+| **All v0.5 evidence-object and sharing work**                 | temporary and in-memory vaults                              |
+| **§7 interpretation format codec**                            | strings in unit tests; no editor or real-vault verification |
 
 Extraction deserves one qualification even though its end-to-end success path
 has moved to real use:

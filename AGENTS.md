@@ -90,7 +90,7 @@ npm ci                          # install; the lockfile is authoritative
 
 npx tsc --noEmit                # frontend types
 npx prettier --check src        # frontend format (use --write to fix)
-npm test                        # Vitest — 121 tests, 16 files
+npm test                        # Vitest — 140 tests, 17 files
 npm run e2e                     # Playwright — 89 tests, 14 files
 
 cargo fmt --check --manifest-path src-tauri/Cargo.toml
@@ -102,7 +102,8 @@ npm run tauri:build -- --bundles nsis   # the installer CI publishes
 ```
 
 Counts above include the three Rust tests and one Playwright test added by the
-v0.5 stabilization follow-up; treat them as a floor, not a target.
+v0.5 stabilization follow-up and 19 interpretation-codec unit tests; treat them
+as a floor, not a target.
 
 **In a sandbox without network**, add `--offline` to cargo commands. Playwright
 needs a browser: this repo's CI installs one; a preinstalled Chromium can be
@@ -143,7 +144,7 @@ comment thread, unpushed.
 | Version in the five files | `0.4.0-rc.2`                                                                                                                  |
 | Latest release            | [`v0.4.0-rc.2`](https://github.com/vermasaksham/Sutra-Windows/releases/tag/v0.4.0-rc.2), published 2026-09-14, **prerelease** |
 | Latest stable             | `v0.3.1`                                                                                                                      |
-| `main` after PR #19       | `fd36c2b` — "Merge pull request #19 from vermasaksham/claude/sutra-project-setup-hy61uo"                                      |
+| `main` after PR #22       | `37c7b08` — stabilization merged; §7 format work branches from here                                                           |
 
 The installer is unsigned; SmartScreen warns on first run. Code signing needs a
 certificate the owner must buy — see `docs/releasing.md`.
@@ -162,7 +163,8 @@ disposable out-of-vault text cache, Zotero annotation import, selection →
 evidence capture, and a named failure for all seven states a PDF can be in.
 `docs/roadmap/v0.4.md` has the capability table.
 
-**v0.5 — foundation merged, stabilization in review.** See _Unfinished work_.
+**v0.5 — foundation and stabilization merged; §7 format foundation in progress.**
+See _Unfinished work_.
 
 ## Verification levels — read this before claiming anything works
 
@@ -197,9 +199,9 @@ referenced throughout as §1–§16.
 
 v0.5 makes research evidence a first-class, traceable object. Done: §1 (evidence
 fields), §2 (evidence types), §3 (quote/comment split), §5 (Evidence browser),
-§6 (reuse across notes). Not started: §7 interpretation blocks, §8 Research
-Questions, §9 provenance completeness checks, §10 citation↔evidence links,
-§11 export provenance.
+§6 (reuse across notes). §7 has a proposed format and tested codec; editor
+integration remains pending. Not started: §8 Research Questions, §9 provenance
+completeness checks, §10 citation↔evidence links, §11 export provenance.
 
 **Out of scope for v0.5, explicitly:** OCR, embeddings, vector databases, RAG,
 "Ask Sutra", AI paper summarisation, automatic claim extraction, automatic
@@ -240,11 +242,12 @@ judgement calls remain constraints on subsequent work:
 3. Captures **no longer write a page label** the app does not know. This visible
    behaviour landed in PR #19; it was not part of rc.2.
 
-### v0.5 evidence stabilization follow-up
+### v0.5 evidence stabilization follow-up (merged)
 
 - **PR:** [#22](https://github.com/vermasaksham/Sutra-Windows/pull/22)
 - **Branch:** `codex/v05-evidence-stabilization`
-- **CI:** Checks and Installer green; `mergeable_state: clean`
+- **Merged as:** `37c7b08` at the owner's direction
+- **CI at merge:** Checks and Installer green
 
 The focused follow-up after PR #19 covers four issues found by checking the ADR
 against the merged code:
@@ -257,14 +260,25 @@ against the merged code:
   the last write to erase the others.
 
 These changes remain **fixtures only** until exercised against the real vault.
-Review and merge this stabilization before starting §7.
+The stabilization gate for §7 is complete.
+
+### §7 — interpretation format foundation
+
+Branch `codex/v05-interpretation-blocks` defines a versioned fenced body block
+with an `iid` and explicit evidence IDs. Its codec preserves unedited bytes and
+does not infer or repair provenance. See
+`docs/design/v0.5-interpretation-format.md` and
+`src/editor/interpretation/format.ts`.
+
+This is a format foundation, not a completed user feature. No app path creates
+or renders interpretation blocks yet. Next: integrate a TipTap container and
+explicit evidence-selection controls, with editor and export round-trip tests
+before enabling creation. Do not automatically convert existing headings.
 
 ### Not started
 
-§7 interpretation blocks, §8 Research Questions, §9 completeness checks, §10
-citation↔evidence links, §11 export provenance. §7 introduces new markdown body
-syntax and remains held back until the stabilization follow-up is reviewed and
-merged.
+§8 Research Questions, §9 completeness checks, §10 citation↔evidence links,
+§11 export provenance. §7 editor integration is the next implementation slice.
 
 ### Stale branches (safe to delete, nothing unique in them)
 
