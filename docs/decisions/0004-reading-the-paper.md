@@ -176,11 +176,11 @@ reported.
 preference is a JavaScript string, so its doubled backslashes are undoubled;
 every path on the shipping platform has several.
 
-One distinction survives all of this and is kept in
-`docs/architecture/verification.md`: **the response shape is verified; the path
-rule built on it is not.** Knowing Zotero sends `filename` and no `path` does
-not prove that joining them to `storage/<key>/` finds the file. Only opening a
-real paper does.
+The distinction is kept in `docs/architecture/verification.md`: observing the
+response shape did not by itself verify the path rule. A real `imported_file`
+paper has since been opened through `storage/<key>/<filename>`, so that branch
+is now verified in real use. `linked_file` remains fixture-only because no such
+attachment has been available in the real library.
 
 ## Failure is always named
 

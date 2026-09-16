@@ -17,7 +17,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Component, Path, PathBuf};
-use std::sync::RwLock;
+use std::sync::{Mutex, RwLock};
 use time::OffsetDateTime;
 use ulid::Ulid;
 
@@ -136,6 +136,14 @@ pub struct Vault {
     /// state about the *filesystem*, not about the notes, so it lives here
     /// rather than in the index.
     clashes: RwLock<Vec<IdClash>>,
+    /// Serialises the two-file move performed by `share_evidence`.
+    ///
+    /// Tauri's `AppState` already serialises commands, but `Vault` is also a
+    /// public Rust boundary used by tests and background work. Atomic rename
+    /// prevents torn files; this lock additionally prevents two valid appends
+    /// to one Source note from both reading the same old list and letting the
+    /// last rename erase the first.
+    evidence_writes: Mutex<()>,
 }
 
 /// The outcome of bringing a note's own attachments with it.
@@ -222,6 +230,7 @@ impl Vault {
             root,
             paths: RwLock::new(HashMap::new()),
             clashes: RwLock::new(Vec::new()),
+            evidence_writes: Mutex::new(()),
         };
         // Populate the map once up front, so the first note the user opens does
         // not pay for a full scan.
@@ -1186,14 +1195,18 @@ impl Vault {
     /// leaves the quotation in two places, which a completeness check reports
     /// and a person can resolve. The opposite order loses it.
     ///
-    /// Nothing is merged. If the Source note already holds this `eid` the
-    /// record there is left exactly as it is — it is the same evidence, and
-    /// overwriting it with this note's copy would silently prefer one of two
-    /// possibly-edited versions.
+    /// Nothing is merged. If the Source note already holds an identical record
+    /// this is a safe retry. If it holds the same `eid` with different content,
+    /// both files are left untouched and the disagreement is reported: either
+    /// version could be the researcher's intended one.
     ///
     /// The reader's `comment` does not travel. It stays on the reference,
     /// because it is the reader's and the record is the paper's.
     pub fn share_evidence(&self, note_id: &str, eid: &str) -> Result<()> {
+        let _guard = self
+            .evidence_writes
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         let held = self.read_note(note_id)?.summary.sources;
         let Some(record) = held.iter().find(|c| c.eid == eid) else {
             return Err(SutraError::NoteNotFound(format!(
@@ -1218,11 +1231,27 @@ impl Vault {
             captured: record.captured,
         };
 
-        self.edit(&source_id, |fm| {
-            if !fm.evidence.iter().any(|e| e.eid == shared.eid) {
-                fm.evidence.push(shared);
+        let source = self.read_note(&source_id)?;
+        if source.summary.note_type != NoteType::Source {
+            return Err(SutraError::Evidence(format!(
+                "cannot keep evidence {eid} on {source_id}: it is not a Source note"
+            )));
+        }
+
+        if let Some(existing) = source
+            .summary
+            .evidence
+            .iter()
+            .find(|candidate| candidate.eid == shared.eid)
+        {
+            if existing != &shared {
+                return Err(SutraError::Evidence(format!(
+                    "evidence {eid} already exists on the Source note with different content; both copies were left unchanged"
+                )));
             }
-        })?;
+        } else {
+            self.edit(&source_id, |fm| fm.evidence.push(shared))?;
+        }
 
         self.edit(note_id, |fm| {
             for citation in &mut fm.sources {
@@ -1324,6 +1353,11 @@ impl Vault {
         source_id: &str,
         annotations: &[crate::references::Annotation],
     ) -> Result<usize> {
+        let zotero = self
+            .read_note(source_id)?
+            .summary
+            .source
+            .and_then(|meta| meta.zotero);
         let existing = self.read_note(id)?.summary.sources;
         let already: std::collections::HashSet<String> = existing
             .iter()
@@ -1361,12 +1395,11 @@ impl Vault {
                 // Zotero's, and said so. The one origin that is not a person
                 // sitting in front of the paper.
                 origin: Some(ORIGIN_ANNOTATION.into()),
-                // Neither is known here. An annotation carries the page label
-                // Zotero printed, not an index into the file, and the item key
-                // belongs to the caller that resolved the attachment — it is
-                // filled in by `commands`, which has it.
+                // An annotation carries the page label Zotero printed, not an
+                // index into the file. The item key comes from the Source note,
+                // which remains authoritative over bibliographic metadata.
                 page_index: None,
-                zotero: None,
+                zotero: zotero.clone(),
                 // Inline: `capture_annotations` writes the record onto the
                 // note that asked for it. Sharing is a separate, deliberate
                 // act — see `share_evidence`.
@@ -5508,6 +5541,7 @@ mod tests {
 
         let recorded = &vault.read_note(&note.summary.id).unwrap().summary.sources[0];
         assert_eq!(recorded.origin.as_deref(), Some("annotation"));
+        assert_eq!(recorded.zotero.as_deref(), Some("ABCD1234"));
         // And the invariant the whole import exists for, still held.
         assert_eq!(recorded.quote.as_deref(), Some("ribbons align along c"));
         assert_eq!(recorded.comment.as_deref(), Some("only two samples"));
@@ -5674,6 +5708,126 @@ mod tests {
             vault.read_note(&source_id).unwrap().summary.evidence.len(),
             1
         );
+    }
+
+    #[test]
+    fn evidence_can_only_be_shared_to_a_source_note() {
+        let vault = TempVault::new();
+        let not_a_source = vault.create_note("A reading, not a paper", None).unwrap();
+        let note = vault.create_note("Draft", None).unwrap();
+        vault
+            .set_citations(
+                &note.summary.id,
+                vec![Citation {
+                    id: not_a_source.summary.id.clone(),
+                    quote: Some("words with no paper owner".into()),
+                    ..Default::default()
+                }],
+            )
+            .unwrap();
+        let before = vault.read_note(&note.summary.id).unwrap().summary.sources[0].clone();
+
+        let error = vault
+            .share_evidence(&note.summary.id, &before.eid)
+            .unwrap_err();
+        assert!(error.to_string().contains("it is not a Source note"));
+        assert!(
+            vault
+                .read_note(&not_a_source.summary.id)
+                .unwrap()
+                .summary
+                .evidence
+                .is_empty()
+        );
+        assert_eq!(
+            vault.read_note(&note.summary.id).unwrap().summary.sources[0],
+            before,
+            "a rejected move changed the inline record"
+        );
+    }
+
+    #[test]
+    fn a_divergent_shared_copy_is_reported_without_picking_a_winner() {
+        let vault = TempVault::new();
+        let (source_id, note_id, eid) = one_piece_of_evidence(&vault);
+        vault
+            .edit(&source_id, |fm| {
+                fm.evidence.push(frontmatter::SharedEvidence {
+                    eid: eid.clone(),
+                    quote: Some("a different transcription".into()),
+                    ..Default::default()
+                });
+            })
+            .unwrap();
+
+        let error = vault.share_evidence(&note_id, &eid).unwrap_err();
+        assert!(error.to_string().contains("different content"));
+        assert_eq!(
+            vault.read_note(&source_id).unwrap().summary.evidence[0]
+                .quote
+                .as_deref(),
+            Some("a different transcription")
+        );
+        let note = vault.read_note(&note_id).unwrap();
+        let inline = &note.summary.sources[0];
+        assert_eq!(inline.at, None);
+        assert_eq!(inline.quote.as_deref(), Some("ribbons align along c"));
+    }
+
+    #[test]
+    fn concurrent_shares_append_every_record_to_the_source() {
+        use std::sync::{Arc, Barrier};
+
+        let vault = TempVault::new();
+        let source = vault
+            .import_source("Zhou 2019", paper("10.1000/x"))
+            .unwrap();
+        let mut jobs = Vec::new();
+        for number in 0..24 {
+            let note = vault
+                .create_note(&format!("Reading {number}"), None)
+                .unwrap();
+            vault
+                .set_citations(
+                    &note.summary.id,
+                    vec![Citation {
+                        id: source.id.clone(),
+                        quote: Some(format!("quotation {number}")),
+                        ..Default::default()
+                    }],
+                )
+                .unwrap();
+            let eid = vault.read_note(&note.summary.id).unwrap().summary.sources[0]
+                .eid
+                .clone();
+            jobs.push((note.summary.id, eid));
+        }
+
+        let vault = Arc::new(vault);
+        let start = Arc::new(Barrier::new(jobs.len()));
+        let workers: Vec<_> = jobs
+            .into_iter()
+            .map(|(note_id, eid)| {
+                let vault = Arc::clone(&vault);
+                let start = Arc::clone(&start);
+                std::thread::spawn(move || {
+                    start.wait();
+                    vault.share_evidence(&note_id, &eid).unwrap();
+                })
+            })
+            .collect();
+        for worker in workers {
+            worker.join().unwrap();
+        }
+
+        let paper = vault.read_note(&source.id).unwrap();
+        assert_eq!(paper.summary.evidence.len(), 24);
+        assert!(paper.summary.evidence.iter().all(|record| {
+            record
+                .quote
+                .as_deref()
+                .is_some_and(|quote| quote.starts_with("quotation "))
+        }));
     }
 
     #[test]
