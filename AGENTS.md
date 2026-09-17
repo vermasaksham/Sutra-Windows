@@ -90,8 +90,8 @@ npm ci                          # install; the lockfile is authoritative
 
 npx tsc --noEmit                # frontend types
 npx prettier --check src        # frontend format (use --write to fix)
-npm test                        # Vitest — 149 passing, 3 expected failures, 18 files
-npm run e2e                     # Playwright — 89 tests, 14 files
+npm test                        # Vitest — 156 tests, 18 files
+npm run e2e                     # Playwright — 91 tests, 15 files
 
 cargo fmt --check --manifest-path src-tauri/Cargo.toml
 cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
@@ -103,8 +103,8 @@ npm run tauri:build -- --bundles nsis   # the installer CI publishes
 
 Counts above include the three Rust tests and one Playwright test added by the
 v0.5 stabilization follow-up, 19 interpretation-codec tests and the experimental
-container tests. The three expected failures are §7 enablement gates, not
-verified functionality; see the interpretation format document.
+container tests. The three former expected failures are now passing regressions;
+the container remains disabled pending app/export and clipboard integration.
 
 **In a sandbox without network**, add `--offline` to cargo commands. Playwright
 needs a browser: this repo's CI installs one; a preinstalled Chromium can be
@@ -201,7 +201,8 @@ referenced throughout as §1–§16.
 v0.5 makes research evidence a first-class, traceable object. Done: §1 (evidence
 fields), §2 (evidence types), §3 (quote/comment split), §5 (Evidence browser),
 §6 (reuse across notes). §7 has a proposed format, tested codec and experimental
-headless container; three safety gates block app registration. Not started: §8 Research Questions, §9 provenance
+container with preservation regressions and isolated browser tests; app
+registration remains pending. Not started: §8 Research Questions, §9 provenance
 completeness checks, §10 citation↔evidence links, §11 export provenance.
 
 **Out of scope for v0.5, explicitly:** OCR, embeddings, vector databases, RAG,
@@ -272,10 +273,10 @@ does not infer or repair provenance. See
 `src/editor/interpretation/format.ts`.
 
 This is not a completed user feature. An experimental TipTap container is tested
-headlessly but deliberately absent from the app extension list. Next: fix the
-three executable gates (CRLF preservation, quoted examples remaining inert, and
-lossless unsupported-version fallback), then browser editor/export tests and
-explicit evidence-selection controls. Do not automatically convert headings.
+headlessly and in an isolated browser, but absent from the app extension list.
+The three preservation/context gates pass. Next: clipboard identity semantics,
+actual app editor/export integration, and explicit evidence-selection controls.
+Do not automatically convert headings.
 
 ### Not started
 

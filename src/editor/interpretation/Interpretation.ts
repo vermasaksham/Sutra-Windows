@@ -1,9 +1,6 @@
 import { Node } from "@tiptap/core";
-import type { JSONContent, MarkdownToken } from "@tiptap/core";
 import { createInterpretationBlock, readInterpretationBlock } from "./format";
-import type { InterpretationBlock, InterpretationMeta } from "./format";
-
-type InterpretationToken = MarkdownToken & { block: InterpretationBlock };
+import type { InterpretationMeta } from "./format";
 
 /**
  * Experimental: deliberately absent from extensions.ts until the compatibility
@@ -34,39 +31,23 @@ export const Interpretation = Node.create({
     return ["section", { "data-interpretation": "" }, 0];
   },
 
+  // Recognize the format's closing whitespace, but emit ordinary code tokens.
+  // Only the document-level adapter may promote them to live identities.
   markdownTokenizer: {
-    name: "interpretation",
+    name: "interpretationFence",
     level: "block",
     start: (source) =>
       source.search(/^(?:~{3,}|`{3,})sutra-interpretation-v1/m),
-    tokenize: (source, _tokens, lexer) => {
+    tokenize: (source) => {
       const block = readInterpretationBlock(source);
       if (!block) return;
       return {
-        type: "interpretation",
+        type: "code",
         raw: block.raw,
-        block,
-        tokens: lexer.blockTokens(block.body),
+        lang: block.opening.replace(/^(?:~+|`+)/, "").trim(),
+        text: block.body.replace(/\r?\n$/, ""),
       };
     },
-  },
-
-  parseMarkdown: (token, helpers) => {
-    const { block } = token as InterpretationToken;
-    const parse = helpers.parseBlockChildren ?? helpers.parseChildren;
-    const children = parse(token.tokens ?? []);
-    const content: JSONContent[] = children.length
-      ? children
-      : [{ type: "paragraph" }];
-    return helpers.createNode(
-      "interpretation",
-      {
-        meta: block.meta,
-        original: block.raw,
-        originalContent: JSON.stringify(content),
-      },
-      content,
-    );
   },
 
   renderMarkdown: (node, helpers) => {

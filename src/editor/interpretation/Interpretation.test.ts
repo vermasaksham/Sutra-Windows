@@ -1,8 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { MarkdownManager } from "@tiptap/markdown";
 import { getSchema } from "@tiptap/core";
 import { extensions } from "../extensions";
 import { Interpretation } from "./Interpretation";
+import {
+  InterpretationLiteral,
+  InterpretationMarkdown,
+} from "./InterpretationMarkdown";
 import { createInterpretationBlock, readInterpretationBlock } from "./format";
 
 const meta = {
@@ -10,8 +13,8 @@ const meta = {
   evidence: ["01HQ3M8K2P00000000000000E7"],
   future: { confidence: "unassigned" },
 };
-const experimental = [...extensions, Interpretation];
-const manager = new MarkdownManager({ extensions: experimental });
+const experimental = [...extensions, Interpretation, InterpretationLiteral];
+const manager = new InterpretationMarkdown({ extensions: experimental });
 const schema = getSchema(experimental);
 
 describe("experimental interpretation container", () => {
@@ -88,7 +91,9 @@ describe("experimental interpretation container", () => {
       createInterpretationBlock(meta, "Prose.").replace("v1", "v2"),
       "~~~sutra-interpretation-v1 {broken}\nProse.\n~~~\n",
     ]) {
-      expect(manager.parse(raw).content?.[0]?.type).toBe("codeBlock");
+      expect(manager.parse(raw).content?.[0]?.type).toBe(
+        "interpretationLiteral",
+      );
     }
   });
 
@@ -101,9 +106,7 @@ describe("experimental interpretation container", () => {
     expect(manager.serialize(json)).toBe(raw);
   });
 
-  // These are enablement gates, not claims that the feature works. `fails`
-  // makes the known failures executable and flags an unexpected fix for review.
-  it.fails("GATE: keeps CRLF through the Markdown lexer", () => {
+  it("keeps CRLF through the Markdown lexer", () => {
     const raw = createInterpretationBlock(meta, "Conclusion.").replaceAll(
       "\n",
       "\r\n",
@@ -111,23 +114,75 @@ describe("experimental interpretation container", () => {
     expect(manager.serialize(manager.parse(raw))).toBe(raw);
   });
 
-  it.fails(
-    "GATE: quoted examples stay inert rather than becoming live identities",
-    () => {
-      const quoted = createInterpretationBlock(meta, "Example.")
-        .trimEnd()
-        .split("\n")
-        .map((line) => `> ${line}`)
-        .join("\n");
-      expect(manager.parse(quoted).content?.[0]?.content?.[0]?.type).toBe(
-        "codeBlock",
-      );
-    },
-  );
+  it("quoted examples stay inert rather than becoming live identities", () => {
+    const quoted = createInterpretationBlock(meta, "Example.")
+      .trimEnd()
+      .split("\n")
+      .map((line) => `> ${line}`)
+      .join("\n");
+    expect(manager.parse(quoted).content?.[0]?.content?.[0]?.type).toBe(
+      "codeBlock",
+    );
+  });
 
-  it.fails("GATE: unsupported syntax keeps its original fence on save", () => {
+  it("unsupported syntax keeps its original fence on save", () => {
     const raw =
       "~~~~sutra-interpretation-v2 {future}\n```js\nexample()\n```\n~~~~\n";
     expect(manager.serialize(manager.parse(raw))).toBe(raw);
+  });
+
+  it("maps repeated blocks to their own raw bytes across mixed line endings", () => {
+    const first = createInterpretationBlock(meta, "First.").replaceAll(
+      "\n",
+      "\r\n",
+    );
+    const second = createInterpretationBlock(
+      { ...meta, iid: "01HQ3M8K2P00000000000000A2" },
+      "Second.",
+    );
+    const raw =
+      "```js\nordinary()\n```\n\n" + first + "\nBetween.\n\n" + second;
+    const saved = manager.serialize(
+      schema.nodeFromJSON(manager.parse(raw)).toJSON(),
+    );
+    expect(saved).toContain(first);
+    expect(saved).toContain(second);
+  });
+
+  it("keeps list examples and nested interpretation examples inert", () => {
+    const inner = createInterpretationBlock(meta, "Example.");
+    const list =
+      "- Example:\n\n" +
+      inner
+        .trimEnd()
+        .split("\n")
+        .map((line) => `  ${line}`)
+        .join("\n");
+    expect(JSON.stringify(manager.parse(list))).not.toContain(
+      '"type":"interpretation"',
+    );
+    const outer = createInterpretationBlock(meta, inner);
+    expect(manager.parse(outer).content?.[0]?.content?.[0]?.type).toBe(
+      "codeBlock",
+    );
+  });
+
+  it("keeps malformed and unclosed root blocks byte-identical through the schema", () => {
+    for (const raw of [
+      "~~~sutra-interpretation-v1 {broken}\r\nExact.\r\n~~~\r\n",
+      "~~~sutra-interpretation-v2 {}\r\nUnclosed.",
+    ]) {
+      const json = schema.nodeFromJSON(manager.parse(raw)).toJSON();
+      expect(manager.serialize(json)).toBe(raw);
+    }
+  });
+
+  it("preserves untouched rich prose after schema defaults are applied", () => {
+    const body =
+      "## Reading\n\n[Link](https://example.org) and $E_g$.\n\n- [ ] Verify\n\n| A | B |\n|---|---|\n| 1 | 2 |\n";
+    const raw = createInterpretationBlock(meta, body);
+    expect(
+      manager.serialize(schema.nodeFromJSON(manager.parse(raw)).toJSON()),
+    ).toBe(raw);
   });
 });

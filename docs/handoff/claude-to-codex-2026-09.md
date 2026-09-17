@@ -8,11 +8,12 @@ true on 2026-09-15 from what has changed since.
 Taken at `main` = `a7501c8`, PR #19 head = `04b33b7`.
 
 > **Update, 2026-09-17:** PR #23 now includes an experimental TipTap
-> interpretation container and headless schema/Markdown tests. It is not in the
-> app extension list. Three executable expected failures block enablement:
-> CRLF preservation, inert quoted examples and lossless unsupported-version
-> fallback. Fix these before browser integration and creation controls. The
-> [format document](../design/v0.5-interpretation-format.md) records the gates;
+> interpretation container, headless schema/Markdown tests and an isolated
+> Chromium editor harness. It is not in the app extension list. The three former
+> expected failures now pass: CRLF preservation, inert quoted examples and
+> lossless unsupported-version fallback. Next: clipboard identity semantics and
+> app/export integration before creation controls. The
+> [format document](../design/v0.5-interpretation-format.md) records the boundaries;
 > no real vault has been exercised.
 
 > **Update, 2026-09-16:** PR #22 is merged as `37c7b08`. §7 begins with a
