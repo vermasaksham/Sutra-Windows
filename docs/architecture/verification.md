@@ -50,6 +50,12 @@ real library:
 | **All v0.5 evidence-object and sharing work**                 | temporary and in-memory vaults                              |
 | **§7 interpretation format codec**                            | strings in unit tests; no editor or real-vault verification |
 
+The experimental §7 TipTap container is also tested through MarkdownManager
+and the ProseMirror schema, but is not registered in the app. Three executable
+expected-failure tests reproduce CRLF normalization, quoted-example activation
+and unsupported-fence rewriting. These are known gaps, not verified behavior.
+See [the enablement gates](../design/v0.5-interpretation-format.md).
+
 Extraction deserves one qualification even though its end-to-end success path
 has moved to real use:
 

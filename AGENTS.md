@@ -90,7 +90,7 @@ npm ci                          # install; the lockfile is authoritative
 
 npx tsc --noEmit                # frontend types
 npx prettier --check src        # frontend format (use --write to fix)
-npm test                        # Vitest — 140 tests, 17 files
+npm test                        # Vitest — 149 passing, 3 expected failures, 18 files
 npm run e2e                     # Playwright — 89 tests, 14 files
 
 cargo fmt --check --manifest-path src-tauri/Cargo.toml
@@ -102,8 +102,9 @@ npm run tauri:build -- --bundles nsis   # the installer CI publishes
 ```
 
 Counts above include the three Rust tests and one Playwright test added by the
-v0.5 stabilization follow-up and 19 interpretation-codec unit tests; treat them
-as a floor, not a target.
+v0.5 stabilization follow-up, 19 interpretation-codec tests and the experimental
+container tests. The three expected failures are §7 enablement gates, not
+verified functionality; see the interpretation format document.
 
 **In a sandbox without network**, add `--offline` to cargo commands. Playwright
 needs a browser: this repo's CI installs one; a preinstalled Chromium can be
@@ -199,8 +200,8 @@ referenced throughout as §1–§16.
 
 v0.5 makes research evidence a first-class, traceable object. Done: §1 (evidence
 fields), §2 (evidence types), §3 (quote/comment split), §5 (Evidence browser),
-§6 (reuse across notes). §7 has a proposed format and tested codec; editor
-integration remains pending. Not started: §8 Research Questions, §9 provenance
+§6 (reuse across notes). §7 has a proposed format, tested codec and experimental
+headless container; three safety gates block app registration. Not started: §8 Research Questions, §9 provenance
 completeness checks, §10 citation↔evidence links, §11 export provenance.
 
 **Out of scope for v0.5, explicitly:** OCR, embeddings, vector databases, RAG,
@@ -270,26 +271,26 @@ does not infer or repair provenance. See
 `docs/design/v0.5-interpretation-format.md` and
 `src/editor/interpretation/format.ts`.
 
-This is a format foundation, not a completed user feature. No app path creates
-or renders interpretation blocks yet. Next: integrate a TipTap container and
-explicit evidence-selection controls, with editor and export round-trip tests
-before enabling creation. Do not automatically convert existing headings.
+This is not a completed user feature. An experimental TipTap container is tested
+headlessly but deliberately absent from the app extension list. Next: fix the
+three executable gates (CRLF preservation, quoted examples remaining inert, and
+lossless unsupported-version fallback), then browser editor/export tests and
+explicit evidence-selection controls. Do not automatically convert headings.
 
 ### Not started
 
 §8 Research Questions, §9 completeness checks, §10 citation↔evidence links,
 §11 export provenance. §7 editor integration is the next implementation slice.
 
-### Stale branches (safe to delete, nothing unique in them)
+### Branch cleanup (2026-09-16)
 
-| Branch                     | Where                | State                                                                        |
-| -------------------------- | -------------------- | ---------------------------------------------------------------------------- |
-| `claude/sutra-cleanup-v03` | local **and** remote | Fully merged into `main`                                                     |
-| `claude/sutra-v04-spec`    | local **and** remote | Fully merged into `main`                                                     |
-| `v05-local`                | local only           | Pre-cherry-pick duplicates of five commits now on PR #19 — content-identical |
-
-Verified with `git log --oneline origin/main..<branch>` (empty for the first
-two) and `git ls-remote --heads origin`. Deleting any of them loses nothing.
+At the owner's request, the fully merged remote branches
+`claude/sutra-cleanup-v03`, `claude/sutra-v04-spec`,
+`claude/sutra-project-setup-hy61uo` and `codex/v05-evidence-stabilization`
+were deleted; the local stabilization branch was also removed. Their commits
+remain in `main`. `v05-local` was not present in this checkout.
+The two handoff branches retain unmerged commits and were preserved, as was
+the active §7 branch. This was branch cleanup, not deletion of application code.
 
 **One gotcha if you audit this yourself:** local remote-tracking refs in this
 working copy can lag behind a force-push, so `git log origin/<b>..<b>` can
