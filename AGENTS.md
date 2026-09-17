@@ -90,8 +90,8 @@ npm ci                          # install; the lockfile is authoritative
 
 npx tsc --noEmit                # frontend types
 npx prettier --check src        # frontend format (use --write to fix)
-npm test                        # Vitest — 121 tests, 16 files
-npm run e2e                     # Playwright — 89 tests, 14 files
+npm test                        # Vitest — 156 tests, 18 files
+npm run e2e                     # Playwright — 91 tests, 15 files
 
 cargo fmt --check --manifest-path src-tauri/Cargo.toml
 cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
@@ -102,7 +102,9 @@ npm run tauri:build -- --bundles nsis   # the installer CI publishes
 ```
 
 Counts above include the three Rust tests and one Playwright test added by the
-v0.5 stabilization follow-up; treat them as a floor, not a target.
+v0.5 stabilization follow-up, 19 interpretation-codec tests and the experimental
+container tests. The three former expected failures are now passing regressions;
+the container remains disabled pending app/export and clipboard integration.
 
 **In a sandbox without network**, add `--offline` to cargo commands. Playwright
 needs a browser: this repo's CI installs one; a preinstalled Chromium can be
@@ -143,7 +145,7 @@ comment thread, unpushed.
 | Version in the five files | `0.4.0-rc.2`                                                                                                                  |
 | Latest release            | [`v0.4.0-rc.2`](https://github.com/vermasaksham/Sutra-Windows/releases/tag/v0.4.0-rc.2), published 2026-09-14, **prerelease** |
 | Latest stable             | `v0.3.1`                                                                                                                      |
-| `main` after PR #19       | `fd36c2b` — "Merge pull request #19 from vermasaksham/claude/sutra-project-setup-hy61uo"                                      |
+| `main` after PR #22       | `37c7b08` — stabilization merged; §7 format work branches from here                                                           |
 
 The installer is unsigned; SmartScreen warns on first run. Code signing needs a
 certificate the owner must buy — see `docs/releasing.md`.
@@ -162,7 +164,8 @@ disposable out-of-vault text cache, Zotero annotation import, selection →
 evidence capture, and a named failure for all seven states a PDF can be in.
 `docs/roadmap/v0.4.md` has the capability table.
 
-**v0.5 — foundation merged, stabilization in review.** See _Unfinished work_.
+**v0.5 — foundation and stabilization merged; §7 format foundation in progress.**
+See _Unfinished work_.
 
 ## Verification levels — read this before claiming anything works
 
@@ -197,9 +200,10 @@ referenced throughout as §1–§16.
 
 v0.5 makes research evidence a first-class, traceable object. Done: §1 (evidence
 fields), §2 (evidence types), §3 (quote/comment split), §5 (Evidence browser),
-§6 (reuse across notes). Not started: §7 interpretation blocks, §8 Research
-Questions, §9 provenance completeness checks, §10 citation↔evidence links,
-§11 export provenance.
+§6 (reuse across notes). §7 has a proposed format, tested codec and experimental
+container with preservation regressions and isolated browser tests; app
+registration remains pending. Not started: §8 Research Questions, §9 provenance
+completeness checks, §10 citation↔evidence links, §11 export provenance.
 
 **Out of scope for v0.5, explicitly:** OCR, embeddings, vector databases, RAG,
 "Ask Sutra", AI paper summarisation, automatic claim extraction, automatic
@@ -240,11 +244,12 @@ judgement calls remain constraints on subsequent work:
 3. Captures **no longer write a page label** the app does not know. This visible
    behaviour landed in PR #19; it was not part of rc.2.
 
-### v0.5 evidence stabilization follow-up
+### v0.5 evidence stabilization follow-up (merged)
 
 - **PR:** [#22](https://github.com/vermasaksham/Sutra-Windows/pull/22)
 - **Branch:** `codex/v05-evidence-stabilization`
-- **CI:** Checks and Installer green; `mergeable_state: clean`
+- **Merged as:** `37c7b08` at the owner's direction
+- **CI at merge:** Checks and Installer green
 
 The focused follow-up after PR #19 covers four issues found by checking the ADR
 against the merged code:
@@ -257,25 +262,36 @@ against the merged code:
   the last write to erase the others.
 
 These changes remain **fixtures only** until exercised against the real vault.
-Review and merge this stabilization before starting §7.
+The stabilization gate for §7 is complete.
+
+### §7 — interpretation format foundation
+
+Branch `codex/v05-interpretation-blocks` defines a versioned fenced body block
+with an `iid` and explicit evidence IDs. Its codec preserves unedited bytes and
+does not infer or repair provenance. See
+`docs/design/v0.5-interpretation-format.md` and
+`src/editor/interpretation/format.ts`.
+
+This is not a completed user feature. An experimental TipTap container is tested
+headlessly and in an isolated browser, but absent from the app extension list.
+The three preservation/context gates pass. Next: clipboard identity semantics,
+actual app editor/export integration, and explicit evidence-selection controls.
+Do not automatically convert headings.
 
 ### Not started
 
-§7 interpretation blocks, §8 Research Questions, §9 completeness checks, §10
-citation↔evidence links, §11 export provenance. §7 introduces new markdown body
-syntax and remains held back until the stabilization follow-up is reviewed and
-merged.
+§8 Research Questions, §9 completeness checks, §10 citation↔evidence links,
+§11 export provenance. §7 editor integration is the next implementation slice.
 
-### Stale branches (safe to delete, nothing unique in them)
+### Branch cleanup (2026-09-16)
 
-| Branch                     | Where                | State                                                                        |
-| -------------------------- | -------------------- | ---------------------------------------------------------------------------- |
-| `claude/sutra-cleanup-v03` | local **and** remote | Fully merged into `main`                                                     |
-| `claude/sutra-v04-spec`    | local **and** remote | Fully merged into `main`                                                     |
-| `v05-local`                | local only           | Pre-cherry-pick duplicates of five commits now on PR #19 — content-identical |
-
-Verified with `git log --oneline origin/main..<branch>` (empty for the first
-two) and `git ls-remote --heads origin`. Deleting any of them loses nothing.
+At the owner's request, the fully merged remote branches
+`claude/sutra-cleanup-v03`, `claude/sutra-v04-spec`,
+`claude/sutra-project-setup-hy61uo` and `codex/v05-evidence-stabilization`
+were deleted; the local stabilization branch was also removed. Their commits
+remain in `main`. `v05-local` was not present in this checkout.
+The two handoff branches retain unmerged commits and were preserved, as was
+the active §7 branch. This was branch cleanup, not deletion of application code.
 
 **One gotcha if you audit this yourself:** local remote-tracking refs in this
 working copy can lag behind a force-push, so `git log origin/<b>..<b>` can

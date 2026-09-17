@@ -7,6 +7,21 @@ true on 2026-09-15 from what has changed since.
 
 Taken at `main` = `a7501c8`, PR #19 head = `04b33b7`.
 
+> **Update, 2026-09-17:** PR #23 now includes an experimental TipTap
+> interpretation container, headless schema/Markdown tests and an isolated
+> Chromium editor harness. It is not in the app extension list. The three former
+> expected failures now pass: CRLF preservation, inert quoted examples and
+> lossless unsupported-version fallback. Next: clipboard identity semantics and
+> app/export integration before creation controls. The
+> [format document](../design/v0.5-interpretation-format.md) records the boundaries;
+> no real vault has been exercised.
+
+> **Update, 2026-09-16:** PR #22 is merged as `37c7b08`. §7 begins with a
+> proposed body format and fixture-tested codec on
+> `codex/v05-interpretation-blocks`; editor integration is the next slice. See
+> [the format contract](../design/v0.5-interpretation-format.md). The following
+> post-handoff note records the earlier review state.
+
 > **Post-handoff update, 2026-09-15:** PR #19 was merged as `fd36c2b` at the
 > owner's direction. [PR #22](https://github.com/vermasaksham/Sutra-Windows/pull/22)
 > is the focused stabilization follow-up: it enforces Source-note ownership,
